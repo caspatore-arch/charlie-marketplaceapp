@@ -1,0 +1,337 @@
+import { TRPCError } from '@trpc/server';
+import { and, desc, eq, gte, inArray, lt, lte, notInArray, or, sql } from 'drizzle-orm';
+import { z } from 'zod';
+
+import type { Db } from '../../db/client';
+import {
+  availabilityWindows,
+  listingPhotos,
+  listingSpots,
+  listings,
+  meetupSpots,
+  savedListings,
+} from '../../db/schema';
+import {
+  applyExpiry,
+  blockedUserIds,
+  localDayBounds,
+  toListingCards,
+  toListingDetail,
+} from '../lib';
+import { protectedProcedure, publicProcedure, router } from '../trpc';
+
+const SELL_TODAY_TTL_MS = 24 * 60 * 60 * 1000;
+
+const categorySchema = z.enum([
+  'clothing',
+  'shoes',
+  'jewelry',
+  'accessories',
+  'dorm',
+  'books',
+  'tech',
+  'other',
+]);
+const conditionSchema = z.enum(['new', 'like_new', 'good', 'fair']);
+
+const windowSchema = z
+  .object({ startsAt: z.coerce.date(), endsAt: z.coerce.date() })
+  .refine((w) => w.endsAt > w.startsAt, 'A pickup window has to end after it starts.');
+
+const listingFields = z.object({
+  title: z.string().min(2).max(120),
+  description: z.string().max(2000).optional(),
+  category: categorySchema,
+  condition: conditionSchema,
+  priceCents: z.number().int().min(0).max(5_000_00),
+  size: z.string().max(40).optional(),
+  brand: z.string().max(60).optional(),
+  isSellToday: z.boolean(),
+  photoUrls: z.array(z.string().min(1).max(500)).min(1).max(8),
+  spotIds: z.array(z.uuid()).min(1),
+  windows: z.array(windowSchema),
+});
+
+const createInput = listingFields.extend({ windows: z.array(windowSchema).default([]) });
+
+// Every field optional on update — and deliberately WITHOUT the `windows`
+// default, so omitting windows leaves the seller's existing ones alone.
+const updateInput = listingFields.partial().extend({ id: z.uuid() });
+
+/** Loads a listing the caller owns, or throws NOT_FOUND / FORBIDDEN. */
+async function loadOwnListing(db: Db, id: string, userId: string) {
+  const [listing] = await db.select().from(listings).where(eq(listings.id, id)).limit(1);
+  if (!listing) throw new TRPCError({ code: 'NOT_FOUND', message: 'That item no longer exists.' });
+  if (listing.sellerId !== userId) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'This listing belongs to someone else.' });
+  }
+  return listing;
+}
+
+/** Validates spot ids belong to the campus, then rewrites the join rows. */
+async function replaceSpots(db: Db, listingId: string, campusId: string, spotIds: string[]) {
+  const spots = await db
+    .select({ id: meetupSpots.id })
+    .from(meetupSpots)
+    .where(and(inArray(meetupSpots.id, spotIds), eq(meetupSpots.campusId, campusId)));
+  if (spots.length !== new Set(spotIds).size) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Pick a meetup spot on your campus.' });
+  }
+  await db.delete(listingSpots).where(eq(listingSpots.listingId, listingId));
+  await db.insert(listingSpots).values(spots.map((s) => ({ listingId, spotId: s.id })));
+}
+
+async function replacePhotos(db: Db, listingId: string, urls: string[]) {
+  await db.delete(listingPhotos).where(eq(listingPhotos.listingId, listingId));
+  await db
+    .insert(listingPhotos)
+    .values(urls.map((url, i) => ({ listingId, url, sortOrder: i })));
+}
+
+async function replaceWindows(
+  db: Db,
+  listingId: string,
+  windows: { startsAt: Date; endsAt: Date }[],
+) {
+  await db.delete(availabilityWindows).where(eq(availabilityWindows.listingId, listingId));
+  if (windows.length > 0) {
+    await db.insert(availabilityWindows).values(windows.map((w) => ({ listingId, ...w })));
+  }
+}
+
+export const listingRouter = router({
+  feed: publicProcedure
+    .input(
+      z.object({
+        campusId: z.uuid(),
+        category: categorySchema.optional(),
+        minCents: z.number().int().min(0).optional(),
+        maxCents: z.number().int().min(0).optional(),
+        size: z.string().max(40).optional(),
+        pickupToday: z.boolean().optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(50).default(20),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      await applyExpiry(ctx.db);
+
+      const conditions = [eq(listings.campusId, input.campusId), eq(listings.status, 'active')];
+      if (input.category) conditions.push(eq(listings.category, input.category));
+      if (input.minCents !== undefined) conditions.push(gte(listings.priceCents, input.minCents));
+      if (input.maxCents !== undefined) conditions.push(lte(listings.priceCents, input.maxCents));
+      if (input.size) conditions.push(eq(listings.size, input.size));
+
+      // Hide listings from anyone in a block relationship with the viewer.
+      if (ctx.user) {
+        const hidden = await blockedUserIds(ctx.db, ctx.user.id);
+        if (hidden.length > 0) conditions.push(notInArray(listings.sellerId, hidden));
+      }
+
+      if (input.pickupToday) {
+        const { end } = localDayBounds('America/Phoenix');
+        conditions.push(
+          sql`exists (select 1 from ${availabilityWindows} w
+                     where w.listing_id = ${listings.id}
+                       and w.starts_at <= ${end.toISOString()}
+                       and w.ends_at >= now())`,
+        );
+      }
+
+      // Keyset pagination on (createdAt, id) so new listings never shift a page.
+      if (input.cursor) {
+        const [createdAtRaw, id] = input.cursor.split('|');
+        const createdAt = new Date(createdAtRaw!);
+        conditions.push(
+          or(
+            lt(listings.createdAt, createdAt),
+            and(eq(listings.createdAt, createdAt), lt(listings.id, id!)),
+          )!,
+        );
+      }
+
+      const rows = await ctx.db
+        .select()
+        .from(listings)
+        .where(and(...conditions))
+        .orderBy(desc(listings.createdAt), desc(listings.id))
+        .limit(input.limit + 1);
+
+      const page = rows.slice(0, input.limit);
+      const next = rows.length > input.limit ? page[page.length - 1] : undefined;
+
+      return {
+        items: await toListingCards(ctx.db, page),
+        nextCursor: next ? `${next.createdAt.toISOString()}|${next.id}` : undefined,
+      };
+    }),
+
+  byId: publicProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
+    await applyExpiry(ctx.db);
+    const [listing] = await ctx.db.select().from(listings).where(eq(listings.id, input.id)).limit(1);
+    if (!listing) throw new TRPCError({ code: 'NOT_FOUND', message: 'That item no longer exists.' });
+    return toListingDetail(ctx.db, listing, ctx.user?.id ?? null);
+  }),
+
+  bySeller: publicProcedure
+    .input(z.object({ sellerId: z.uuid(), includeSold: z.boolean().default(false) }))
+    .query(async ({ ctx, input }) => {
+      await applyExpiry(ctx.db);
+      const statuses = input.includeSold
+        ? (['active', 'reserved', 'sold'] as const)
+        : (['active', 'reserved'] as const);
+      const rows = await ctx.db
+        .select()
+        .from(listings)
+        .where(and(eq(listings.sellerId, input.sellerId), inArray(listings.status, [...statuses])))
+        .orderBy(desc(listings.createdAt));
+      return toListingCards(ctx.db, rows);
+    }),
+
+  mine: protectedProcedure.query(async ({ ctx }) => {
+    await applyExpiry(ctx.db);
+    const rows = await ctx.db
+      .select()
+      .from(listings)
+      .where(eq(listings.sellerId, ctx.user.id))
+      .orderBy(desc(listings.createdAt));
+    return toListingCards(ctx.db, rows);
+  }),
+
+  create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
+    const now = new Date();
+    const [listing] = await ctx.db
+      .insert(listings)
+      .values({
+        sellerId: ctx.user.id,
+        campusId: ctx.user.campusId,
+        title: input.title,
+        description: input.description ?? null,
+        category: input.category,
+        condition: input.condition,
+        priceCents: input.priceCents,
+        size: input.size ?? null,
+        brand: input.brand ?? null,
+        status: 'active',
+        isSellToday: input.isSellToday,
+        expiresAt: input.isSellToday ? new Date(now.getTime() + SELL_TODAY_TTL_MS) : null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    await replacePhotos(ctx.db, listing!.id, input.photoUrls);
+    await replaceSpots(ctx.db, listing!.id, ctx.user.campusId, input.spotIds);
+    await replaceWindows(ctx.db, listing!.id, input.windows);
+
+    return toListingDetail(ctx.db, listing!, ctx.user.id);
+  }),
+
+  update: protectedProcedure
+    .input(updateInput)
+    .mutation(async ({ ctx, input }) => {
+      const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
+
+      const patch: Partial<typeof listings.$inferInsert> = { updatedAt: new Date() };
+      if (input.title !== undefined) patch.title = input.title;
+      if (input.description !== undefined) patch.description = input.description;
+      if (input.category !== undefined) patch.category = input.category;
+      if (input.condition !== undefined) patch.condition = input.condition;
+      if (input.priceCents !== undefined) patch.priceCents = input.priceCents;
+      if (input.size !== undefined) patch.size = input.size;
+      if (input.brand !== undefined) patch.brand = input.brand;
+      if (input.isSellToday !== undefined) {
+        patch.isSellToday = input.isSellToday;
+        patch.expiresAt = input.isSellToday
+          ? new Date(existing.createdAt.getTime() + SELL_TODAY_TTL_MS)
+          : null;
+      }
+
+      const [updated] = await ctx.db
+        .update(listings)
+        .set(patch)
+        .where(eq(listings.id, existing.id))
+        .returning();
+
+      if (input.photoUrls) await replacePhotos(ctx.db, existing.id, input.photoUrls);
+      if (input.spotIds) await replaceSpots(ctx.db, existing.id, existing.campusId, input.spotIds);
+      if (input.windows) await replaceWindows(ctx.db, existing.id, input.windows);
+
+      return toListingDetail(ctx.db, updated!, ctx.user.id);
+    }),
+
+  remove: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
+      await ctx.db
+        .update(listings)
+        .set({ status: 'removed', updatedAt: new Date() })
+        .where(eq(listings.id, existing.id));
+      return { ok: true as const };
+    }),
+
+  relist: protectedProcedure
+    .input(z.object({ id: z.uuid(), isSellToday: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
+      if (existing.status !== 'expired' && existing.status !== 'removed') {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'Only expired or removed items can be relisted.',
+        });
+      }
+      const now = new Date();
+      const [updated] = await ctx.db
+        .update(listings)
+        .set({
+          status: 'active',
+          isSellToday: input.isSellToday,
+          expiresAt: input.isSellToday ? new Date(now.getTime() + SELL_TODAY_TTL_MS) : null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .where(eq(listings.id, existing.id))
+        .returning();
+      return toListingDetail(ctx.db, updated!, ctx.user.id);
+    }),
+
+  toggleSave: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [listing] = await ctx.db
+        .select({ id: listings.id })
+        .from(listings)
+        .where(eq(listings.id, input.id))
+        .limit(1);
+      if (!listing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That item no longer exists.' });
+      }
+
+      const where = and(
+        eq(savedListings.userId, ctx.user.id),
+        eq(savedListings.listingId, input.id),
+      );
+      const existing = await ctx.db.select().from(savedListings).where(where).limit(1);
+      if (existing.length > 0) {
+        await ctx.db.delete(savedListings).where(where);
+        return { saved: false };
+      }
+      await ctx.db.insert(savedListings).values({ userId: ctx.user.id, listingId: input.id });
+      return { saved: true };
+    }),
+
+  saved: protectedProcedure.query(async ({ ctx }) => {
+    await applyExpiry(ctx.db);
+    const rows = await ctx.db
+      .select({ listing: listings })
+      .from(savedListings)
+      .innerJoin(listings, eq(listings.id, savedListings.listingId))
+      .where(eq(savedListings.userId, ctx.user.id))
+      .orderBy(desc(savedListings.createdAt));
+    return toListingCards(
+      ctx.db,
+      rows.map((r) => r.listing),
+    );
+  }),
+});
