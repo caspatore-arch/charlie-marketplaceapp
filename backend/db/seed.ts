@@ -103,7 +103,9 @@ function localWindow(startHour: number, endHour: number, dayOffset = 0) {
 function soonWindow() {
   const now = Date.now();
   const { end } = localDayBounds(TIMEZONE);
-  const startsAt = new Date(now + 30 * 60 * 1000);
+  // Round up to the next :00/:30 so the slot chips read "5:00 PM", not "4:34 PM".
+  const HALF_HOUR = 30 * 60 * 1000;
+  const startsAt = new Date(Math.ceil((now + HALF_HOUR) / HALF_HOUR) * HALF_HOUR);
   const endsAt = new Date(Math.min(startsAt.getTime() + 3 * HOUR, end.getTime() - 60 * 1000));
   return { startsAt, endsAt };
 }

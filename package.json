@@ -28,12 +28,14 @@
     "hono": "^4.13.7",
     "lucide-react-native": "^1.46.0",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.2",
     "superjson": "^2.2.6",
     "zod": "^4.6.5"
   },
@@ -56,7 +58,8 @@
     "db:reset": "rm -rf backend/data/pg && tsx backend/db/seed.ts",
     "test:e2e": "tsx scripts/e2e.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "env:lan": "node -e \"const fs=require('fs');const ip=require('child_process').execSync('ipconfig getifaddr en0').toString().trim();let e=fs.readFileSync('.env','utf8');e=e.replace(/EXPO_PUBLIC_RORK_API_BASE_URL=.*/,'EXPO_PUBLIC_RORK_API_BASE_URL=http://'+ip+':3000');fs.writeFileSync('.env',e);console.log('API base URL set to http://'+ip+':3000')\""
   },
   "private": true,
   "allowScripts": {
