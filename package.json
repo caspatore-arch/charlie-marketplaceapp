@@ -27,6 +27,7 @@
     "expo-web-browser": "~57.0.3",
     "hono": "^4.13.7",
     "lucide-react-native": "^1.46.0",
+    "pg": "^8.23.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
@@ -41,6 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
+    "@types/pg": "^8.23.1",
     "@types/react": "~19.2.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.0.0",
@@ -56,6 +58,7 @@
     "backend:once": "tsx backend/server.ts",
     "db:seed": "tsx backend/db/seed.ts",
     "db:reset": "rm -rf backend/data/pg && tsx backend/db/seed.ts",
+    "db:check": "tsx scripts/check-db-url.ts",
     "test:e2e": "tsx scripts/e2e.ts",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",

@@ -28,6 +28,8 @@ if (!external) {
   process.env.PORT = '0';
 }
 process.env.DEV_LOGIN = '1';
+// Self-contained regardless of what's in a local .env: Maya is the moderator.
+process.env.MODERATOR_USER_IDS = '00000000-0000-4000-8000-000000000001';
 
 /* ------------------------------------------------------------ test harness */
 
@@ -207,6 +209,24 @@ async function main(): Promise<number> {
 
     const thread = await maya.conversation.messages.query({ conversationId });
     assertEqual(thread.items.length, 1, 'the seller should see the message');
+
+    // The seller can also open (or resume) the same thread by naming the buyer.
+    const sellerOpened = await maya.conversation.open.mutate({ listingId, buyerId: JORDAN_ID });
+    assertEqual(sellerOpened.id, conversationId, 'seller-opened conversation is the same thread');
+
+    const sellerSent = await maya.conversation.send.mutate({
+      conversationId: sellerOpened.id,
+      body: 'Yep, still available!',
+    });
+    assertEqual(sellerSent.body, 'Yep, still available!', 'seller message should round-trip');
+
+    const threadAfterSellerReply = await jordan.conversation.messages.query({
+      conversationId: sellerOpened.id,
+    });
+    assert(
+      threadAfterSellerReply.items.some((m) => m.body === 'Yep, still available!'),
+      'the buyer should see the seller-initiated message',
+    );
 
     const reservation = await jordan.reservation.request.mutate({
       listingId,
@@ -428,12 +448,55 @@ async function main(): Promise<number> {
     await expectTrpcError('FORBIDDEN', () =>
       jordan.conversation.open.mutate({ listingId: SEEDED_MAYA_LISTING }),
     );
+    // Maya (the seller) cannot open a conversation with a buyer who blocked her, either.
+    await expectTrpcError('FORBIDDEN', () =>
+      maya.conversation.open.mutate({ listingId, buyerId: JORDAN_ID }),
+    );
     await expectTrpcError('FORBIDDEN', () =>
       jordan.reservation.request.mutate({
         listingId: SEEDED_MAYA_LISTING,
         spotId: spotAId,
         startsAt: slotA,
       }),
+    );
+
+    // Basic moderation access: the report Jordan just filed is visible to a
+    // moderator (Maya, via MODERATOR_USER_IDS), invisible to a non-moderator,
+    // and acting on it removes the listing from the public feed.
+    const mayaIsModerator = await maya.moderation.isModerator.query();
+    assert(mayaIsModerator === true, 'Maya is configured as the demo moderator');
+
+    const samIsModerator = await sam.moderation.isModerator.query();
+    assert(samIsModerator === false, 'Sam is not a moderator');
+
+    const openReports = await maya.moderation.reports.query({ status: 'open' });
+    const filedReport = openReports.find((r) => r.targetListingId === SEEDED_MAYA_LISTING);
+    assert(filedReport != null, "the moderator sees Jordan's open report on Maya's listing");
+    assertEqual(filedReport!.reporter.id, JORDAN_ID, 'the report shows who filed it');
+    assertEqual(filedReport!.targetUser?.id, MAYA_ID, 'the report shows the targeted user');
+    assertEqual(
+      filedReport!.targetListing?.id,
+      SEEDED_MAYA_LISTING,
+      'the report shows the targeted listing',
+    );
+
+    await expectTrpcError('FORBIDDEN', () => sam.moderation.reports.query({ status: 'open' }));
+
+    const reviewed = await maya.moderation.reviewReport.mutate({
+      id: filedReport!.id,
+      action: 'remove_listing',
+      note: 'Removed during the acceptance run.',
+    });
+    assertEqual(reviewed.status, 'reviewed', 'reviewing a report marks it reviewed');
+    assertEqual(reviewed.reviewedById, MAYA_ID, 'the review records the moderator');
+
+    const removedListing = await guest.listing.byId.query({ id: SEEDED_MAYA_LISTING });
+    assertEqual(removedListing.status, 'removed', 'remove_listing removes the listing');
+
+    const feedAfterModeration = await guest.listing.feed.query({ campusId: CAMPUS_ID, limit: 50 });
+    assert(
+      feedAfterModeration.items.every((i) => i.id !== SEEDED_MAYA_LISTING),
+      'the removed listing vanishes from the public feed',
     );
   });
 

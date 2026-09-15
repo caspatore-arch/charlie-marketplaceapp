@@ -12,6 +12,8 @@ Condition  = 'new' | 'like_new' | 'good' | 'fair'
 ListingStatus     = 'active' | 'reserved' | 'sold' | 'expired' | 'removed'
 ReservationStatus = 'requested' | 'countered' | 'accepted' | 'declined' | 'cancelled' | 'expired' | 'completed'
 ReportReason = 'prohibited_item' | 'scam' | 'harassment' | 'no_show' | 'other'
+ReportStatus = 'open' | 'reviewed'
+ModerationAction = 'dismiss' | 'remove_listing' | 'note'
 ```
 
 ## Tables (Drizzle, Postgres)
@@ -31,7 +33,8 @@ ReportReason = 'prohibited_item' | 'scam' | 'harassment' | 'no_show' | 'other'
   - **partial unique index**: `(listingId) WHERE status = 'accepted'` — DB guarantees one accepted hold per item.
 - **handoff_confirmations**: id, reservationId, userId, confirmedAt, method ('code' | 'tap')
 - **blocks**: blockerId, blockedId (PK both), createdAt
-- **reports**: id, reporterId, targetUserId?, targetListingId?, reason, details?, status ('open' | 'reviewed'), createdAt
+- **reports**: id, reporterId, targetUserId?, targetListingId?, reason, details?, status ('open' | 'reviewed'), reviewedById?, reviewedAt?, moderatorNote?, createdAt
+  - `reviewedById`/`reviewedAt`/`moderatorNote` are set by `moderation.reviewReport`; null until a moderator acts.
 - **saved_listings**: userId, listingId (PK both), createdAt
 
 ## Reservation state machine (server-enforced, transactional)
@@ -88,7 +91,7 @@ listing.toggleSave    P    { id }                   → { saved: boolean }
 listing.saved         P    –                        → ListingCard[]
 
 conversation.list     P    –                        → { id, listing: ListingCard, otherUser, lastMessage?, unreadCount }[]
-conversation.open     P    { listingId }            → Conversation  (creates if buyer has none for this listing)
+conversation.open     P    { listingId, buyerId? }  → Conversation  (buyer: creates if none for this listing; seller: buyerId required, opens/creates the thread with that buyer)
 conversation.messages P    { conversationId, cursor? } → { items: Message[], nextCursor? }
 conversation.send     P    { conversationId, body (1–2000) } → Message
 
@@ -110,7 +113,24 @@ user.blocked          P    –                        → PublicProfile[]
 user.report           P    { targetUserId?, targetListingId?, reason, details? } → { ok }
 
 payment.quote         pub  { priceCents }           → { priceCents, platformFeeCents, sellerNetCents, feePercent, simulated: true, label: 'Simulated — no money moves' }
+
+moderation.isModerator P   –                        → boolean  (whether ctx.user.id is in MODERATOR_USER_IDS)
+moderation.reports    M    { status?: 'open'|'reviewed' } → ModerationReport[]  (newest first)
+      ModerationReport = Report + reporter: PublicUser + targetUser: PublicUser|null + targetListing: ListingCard|null
+moderation.reviewReport M  { id, action: ModerationAction, note?: string } → Report
+      (sets status 'reviewed', reviewedById, reviewedAt, moderatorNote. action 'remove_listing' also sets the
+       target listing's status to 'removed' — unless it is already 'removed' — and cancels its accepted
+       reservation, if any, with cancelReason 'listing_removed'. A `completed` reservation is never touched.
+       Requires targetListingId; BAD_REQUEST if the report has none.)
 ```
+
+`M` = `moderatorProcedure` (protected + `ctx.user.id` must be in `MODERATOR_USER_IDS`; FORBIDDEN "Moderator access required." otherwise).
+
+### Moderation env
+
+`MODERATOR_USER_IDS` — comma-separated user ids with moderation access. `.env.example` defaults this to Maya's
+fixed seed id (`00000000-0000-4000-8000-000000000001`) so the pilot always has a responsible operator who can
+review reports. There is no roles table — this is deliberately the simplest thing that gives reports an owner.
 
 Errors: use tRPC codes `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `BAD_REQUEST` with human-readable messages the UI can show verbatim.
 

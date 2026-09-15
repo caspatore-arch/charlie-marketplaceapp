@@ -40,14 +40,16 @@ Prints PASS/FAIL for acceptance criteria 1–8.
 | Acceptance criterion | Backend script (`npm run test:e2e`) | Clicked through in the app (web preview at iPhone width) |
 |---|---|---|
 | 1. Browse sample listings signed‑out | PASS | ✅ feed, filters, Demo badges, "Today" pills |
-| 2. Seller creates/edits a persisted listing with photos + availability | PASS | ✅ form renders; photo picker + upload **not** exercised on a real phone yet |
-| 3. Second user views, messages, requests spot + time | PASS | ✅ request flow incl. fee label "Simulated — no money moves"; chat screen renders, not exercised end‑to‑end in UI |
+| 2. Seller creates/edits a persisted listing with photos + availability | PASS | ✅ published a listing with a real photo upload, edited it, removed it (web picker); validation, size field, availability window sheet, Sell‑today toggle exercised |
+| 3. Second user views, messages, requests spot + time | PASS (+ seller can now start a chat) | ✅ chat both directions with polling; reservation strip in chat; request flow incl. fee label "Simulated — no money moves" |
 | 4. Seller accepts; both see the same meetup card | PASS | ✅ Maya accepted; Jordan and Maya saw identical spot/time/price |
-| 5. Second buyer cannot reserve the accepted item | PASS (incl. race: pending request auto‑declined) | not clicked in UI (server‑enforced) |
-| 6. Cancel / reschedule stay consistent | PASS | not clicked in UI |
+| 5. Second buyer cannot reserve the accepted item | PASS (incl. race: pending request auto‑declined) | ✅ Sam's pending request auto‑declined; Sam sees "Reserved" and cannot request |
+| 6. Cancel / reschedule stay consistent | PASS | ✅ counter‑proposal → accept (both show new time); cancel → listing back to active; decline → buyer sees declined state |
 | 7. Handoff → sold, no payment event | PASS (asserts no payment table exists) | ✅ buyer code 1771 → seller entered → buyer confirmed → "Handed off — item marked sold" |
-| 8. Report / block / access control | PASS (FORBIDDEN / UNAUTHORIZED checks) | Report + Block UI present, not exercised |
-| 9. Works at iPhone sizes incl. keyboard/photo picker | — | Layout verified at 390×844 in web preview; **keyboard + photo picker need a real‑device pass** |
+| 8. Report / block / access control | PASS (FORBIDDEN / UNAUTHORIZED / moderator checks) | ✅ report + block from profile and item page; blocked user's listings vanish from feed; unblock restores; saved items; signed‑out gating; email code sign‑in |
+| 9. Works at iPhone sizes incl. keyboard/photo picker | — | Layout verified at 390×844 in web preview; **keyboard + native photo picker still need a real‑device pass** |
+
+Bugs found and fixed during QA: confirm dialogs silent on web (now `utils/confirm.ts`), web photo upload sending the wrong body, and a stale‑state bug that could erase a just‑added photo (would have affected iPhone too).
 | 10. This document | — | — |
 
 Also verified: `npm run typecheck` clean; `npx expo export --platform ios` bundles (≈3.7k modules); seed is idempotent; data survives backend restart (PGlite on disk).
@@ -64,13 +66,12 @@ Also verified: `npm run typecheck` clean; `npx expo export --platform ios` bundl
 | Map | Placeholder block + "Directions" link (opens Maps). No map SDK. |
 | Reminders / push | Not implemented. Screens poll every 5–10 s while open instead. |
 | Read receipts | None; unread count = messages from the other person. |
-| Seller‑initiated chat | Only the buyer can open a conversation for a listing (contract gap). Seller can reply once one exists. |
 | Listing expiry | Applied lazily when data is read, not by a background job. |
 | Photo reorder | Skipped; first picked photo is the cover. |
 | Demo photos | Generated SVG placeholders with a "DEMO" mark. Real photos come from the picker. |
 | Time zone | Sell form uses the device's time zone (fine on campus). |
-| Hosted database | `DATABASE_URL` is a stub: `npm i pg` + uncomment 6 lines in `backend/db/client.ts` to use Neon/self‑hosted Postgres. Schema needs no change. |
-| Moderation | Reports land in the `reports` table; no admin screen yet. |
+| Hosted database | `DATABASE_URL` is now a one‑variable switch: set it (e.g. to a Neon connection string) and the backend uses `drizzle-orm/node-postgres` automatically — no code changes. Run `npm run db:check` after setting it to connect, apply migrations, and print the table count before pointing the app at it. Schema needs no change. |
+| Moderation | Basic access is built: reports land in the `reports` table and `MODERATOR_USER_IDS` (defaults to Maya's demo id) can list them (`moderation.reports`) and act (`moderation.reviewReport`: dismiss, remove the listing, or leave a note) via the API — no admin screen/UI yet, so this is exercised by `npm run test:e2e` and would need a client screen before a real pilot. |
 | Account deletion, age gating, privacy policy | Not built (required before public launch). |
 
 ## 4. Rork

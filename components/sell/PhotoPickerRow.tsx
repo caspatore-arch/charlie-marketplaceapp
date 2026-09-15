@@ -8,7 +8,7 @@
  * keeps upload orchestration local to the tile so ListingForm only ever sees
  * `{ url, status }` entries it can turn into `photoUrls` for the mutation.
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -46,19 +46,28 @@ function nextKey() {
 export function PhotoPickerRow({ photos, onChange, max = 8, error }: PhotoPickerRowProps) {
   const remaining = Math.max(0, max - photos.length);
 
+  // uploadOne resolves asynchronously (a network round-trip after the tile
+  // was added), so a closure over `photos` from the render that kicked off
+  // the upload would be stale by the time it resolves and could wipe out
+  // the tile it's meant to update (or ones added after it). Read the latest
+  // array from a ref instead of the closed-over prop.
+  const photosRef = useRef(photos);
+  useEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
+
   const uploadOne = useCallback(
     async (key: string, localUri: string) => {
       try {
         const url = await uploadImage(localUri);
         onChange(
-          photos.map((p) => (p.key === key ? { ...p, url, status: 'done' as const } : p)),
+          photosRef.current.map((p) => (p.key === key ? { ...p, url, status: 'done' as const } : p)),
         );
       } catch {
-        onChange(photos.map((p) => (p.key === key ? { ...p, status: 'error' as const } : p)));
+        onChange(photosRef.current.map((p) => (p.key === key ? { ...p, status: 'error' as const } : p)));
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [photos, onChange],
+    [onChange],
   );
 
   const handleAdd = useCallback(async () => {

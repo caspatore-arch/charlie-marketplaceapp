@@ -64,6 +64,13 @@ export const env = {
       .map((d) => d.trim().toLowerCase())
       .filter(Boolean);
   },
+  /** User ids granted basic moderation access (report review). */
+  get moderatorUserIds(): string[] {
+    return (process.env.MODERATOR_USER_IDS ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+  },
   /** Where LocalDiskStorage keeps uploaded files. */
   get uploadsDir(): string {
     return process.env.UPLOADS_DIR ?? 'backend/data/uploads';

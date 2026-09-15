@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
+import { confirmAction } from '@/utils/confirm';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
@@ -67,10 +68,9 @@ export default function EditListingScreen() {
 
   function handleRemove() {
     if (!id) return;
-    Alert.alert('Remove this listing?', 'Buyers will no longer be able to see or request it.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => removeMutation.mutate({ id }) },
-    ]);
+    confirmAction('Remove this listing?', 'Buyers will no longer be able to see or request it.', 'Remove', () =>
+      removeMutation.mutate({ id }),
+    );
   }
 
   if (!id || listingQuery.isPending) {

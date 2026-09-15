@@ -26,6 +26,7 @@ import { SpotPicker } from '@/components/SpotPicker';
 import { TimeSlotPicker } from '@/components/TimeSlotPicker';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/hooks/useAuth';
+import { confirmAction } from '@/utils/confirm';
 import { colors, radius, space, minTouchHeight } from '@/constants/theme';
 import type { ReportReason } from '@/types';
 
@@ -47,7 +48,6 @@ export default function ReservationScreen() {
   const utils = trpc.useUtils();
 
   const query = trpc.reservation.byId.useQuery({ id }, { enabled: !!id, refetchInterval: isFocused ? POLL_MS : false });
-  const conversationsQuery = trpc.conversation.list.useQuery();
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -113,17 +113,13 @@ export default function ReservationScreen() {
     if (!reservation) return;
     if (isBuyer) {
       openConversationMutation.mutate({ listingId: reservation.listingId });
-      return;
-    }
-    const existing = conversationsQuery.data?.find(
-      (c) => c.listing.id === reservation.listingId && c.otherUser.id === reservation.buyerId,
-    );
-    if (existing) {
-      router.push(`/conversation/${existing.id}`);
     } else {
-      Alert.alert('No conversation yet', 'The buyer has not started a conversation for this item yet.');
+      openConversationMutation.mutate({
+        listingId: reservation.listingId,
+        buyerId: reservation.buyerId,
+      });
     }
-  }, [reservation, isBuyer, conversationsQuery.data, openConversationMutation, router]);
+  }, [reservation, isBuyer, openConversationMutation]);
 
   const confirmCancel = useCallback(
     (reason?: string) => {
@@ -329,10 +325,9 @@ function OpenActionsForResponder({
           title="Decline"
           variant="ghost"
           onPress={() =>
-            Alert.alert('Decline this request?', 'The buyer will be notified.', [
-              { text: 'Keep it', style: 'cancel' },
-              { text: 'Decline', style: 'destructive', onPress: onDecline },
-            ])
+            confirmAction('Decline this request?', 'The buyer will be notified.', 'Decline', onDecline, {
+              cancelLabel: 'Keep it',
+            })
           }
           loading={declining}
         />
@@ -341,10 +336,9 @@ function OpenActionsForResponder({
           title="Cancel request"
           variant="ghost"
           onPress={() =>
-            Alert.alert('Cancel this request?', undefined, [
-              { text: 'Keep it', style: 'cancel' },
-              { text: 'Cancel request', style: 'destructive', onPress: onCancel },
-            ])
+            confirmAction('Cancel this request?', undefined, 'Cancel request', onCancel, {
+              cancelLabel: 'Keep it',
+            })
           }
           loading={cancelling}
         />
@@ -375,10 +369,7 @@ function OpenActionsForProposer({
         title="Cancel"
         variant="ghost"
         onPress={() =>
-          Alert.alert('Cancel this request?', undefined, [
-            { text: 'Keep it', style: 'cancel' },
-            { text: 'Cancel', style: 'destructive', onPress: onCancel },
-          ])
+          confirmAction('Cancel this request?', undefined, 'Cancel', onCancel, { cancelLabel: 'Keep it' })
         }
         loading={cancelling}
       />

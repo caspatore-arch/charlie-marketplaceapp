@@ -12,7 +12,7 @@ The founder builds and publishes through **Rork** (rork.com), so this repo mirro
 | Client data | `@tanstack/react-query` + `@trpc/react-query` | Client in `lib/trpc.ts`. |
 | Icons / images | `lucide-react-native`, `expo-image`, `expo-image-picker` | |
 | Backend | Hono (`backend/hono.ts`) + tRPC v11 (`backend/trpc/`) | Served under `/api/trpc/*`, port 3000. `@hono/node-server` for local. |
-| DB | Drizzle ORM, **PostgreSQL SQL**. Local driver = PGlite (Postgres compiled to WASM, persisted in `backend/data/pg/`). | Production: swap to `drizzle-orm/node-postgres` or Neon via `DATABASE_URL`. Schema is identical. |
+| DB | Drizzle ORM, **PostgreSQL SQL**. Local driver = PGlite (Postgres compiled to WASM, persisted in `backend/data/pg/`). | `DATABASE_URL` is a one-variable switch: set it (e.g. to a Neon connection string) and `backend/db/client.ts` uses `drizzle-orm/node-postgres` with a `pg.Pool` instead — same schema, same code elsewhere. Verify a hosted URL with `npm run db:check` (connects, runs migrations, prints the table count) before pointing the app at it. |
 | Images | Multipart upload to `POST /api/uploads`, stored on local disk `backend/data/uploads/`, served at `GET /api/uploads/:file` | `backend/storage.ts` is an adapter interface so S3-compatible storage can replace it. |
 | Auth | Campus-email code (simulated delivery: code printed to server log) + bearer session token in `expo-secure-store` | Dev-only `auth.devSignIn` for switching between the two seeded test identities. |
 
@@ -51,10 +51,12 @@ scripts/                  e2e/acceptance scripts run with tsx
 
 ```
 EXPO_PUBLIC_RORK_API_BASE_URL=http://<your-mac-lan-ip>:3000   # phone must reach the Mac on Wi‑Fi
-DATABASE_URL=                       # empty = PGlite at backend/data/pg
+DATABASE_URL=                       # empty = PGlite at backend/data/pg; set = drizzle-orm/node-postgres (verify with `npm run db:check`)
+PGSSL=                              # set to "require" to force TLS against a non-localhost DATABASE_URL that isn't auto-detected
 DEV_LOGIN=1                         # enables auth.devSignIn; never set in production
 ALLOWED_EMAIL_DOMAINS=arizona.edu,demo.campus.test
 PORT=3000
+MODERATOR_USER_IDS=00000000-0000-4000-8000-000000000001   # comma-separated; who can review reports (defaults to Maya's demo id)
 ```
 
 ## Run

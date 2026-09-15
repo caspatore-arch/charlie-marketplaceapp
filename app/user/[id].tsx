@@ -3,7 +3,7 @@
  * actions (each behind a confirm dialog).
  */
 import React, { useCallback } from 'react';
-import { Alert, FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
@@ -18,6 +18,7 @@ import { DemoBadge } from '@/components/DemoBadge';
 import { trpc } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { space } from '@/constants/theme';
+import { confirmAction } from '@/utils/confirm';
 
 export default function PublicProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -33,26 +34,22 @@ export default function PublicProfileScreen() {
 
   const confirmBlock = useCallback(() => {
     if (!requireAuth(`/user/${id}`)) return;
-    Alert.alert('Block this user?', 'They will no longer be able to message or request meetups with you.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Block',
-        style: 'destructive',
-        onPress: () => blockMutation.mutate({ userId: id }),
-      },
-    ]);
+    confirmAction(
+      'Block this user?',
+      'They will no longer be able to message or request meetups with you.',
+      'Block',
+      () => blockMutation.mutate({ userId: id }),
+    );
   }, [requireAuth, id, blockMutation]);
 
   const confirmReport = useCallback(() => {
     if (!requireAuth(`/user/${id}`)) return;
-    Alert.alert('Report this user?', "We'll review this account for platform violations.", [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Report',
-        style: 'destructive',
-        onPress: () => reportMutation.mutate({ targetUserId: id, reason: 'other' }),
-      },
-    ]);
+    confirmAction(
+      'Report this user?',
+      "We'll review this account for platform violations.",
+      'Report',
+      () => reportMutation.mutate({ targetUserId: id, reason: 'other' }),
+    );
   }, [requireAuth, id, reportMutation]);
 
   if (profileQuery.isPending) {

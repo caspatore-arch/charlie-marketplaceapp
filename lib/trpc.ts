@@ -102,12 +102,22 @@ export async function uploadImage(
   const mimeType = ext === 'png' ? 'image/png' : ext === 'heic' ? 'image/heic' : 'image/jpeg';
 
   const formData = new FormData();
-  // React Native's FormData accepts this shape for file-like values.
-  formData.append('file', {
-    uri: localUri,
-    name: filename,
-    type: mimeType,
-  } as unknown as Blob);
+  if (Platform.OS === 'web') {
+    // The browser's FormData/fetch only accept a real Blob/File — the
+    // {uri, name, type} shape below is a React Native-only convention that
+    // the web fetch polyfill does not understand (it would stringify to
+    // "[object Object]"). `localUri` here is a blob: URL created by
+    // expo-image-picker's web implementation, so re-fetch it into a Blob.
+    const blob = await fetch(localUri).then((r) => r.blob());
+    formData.append('file', blob, filename);
+  } else {
+    // React Native's FormData accepts this shape for file-like values.
+    formData.append('file', {
+      uri: localUri,
+      name: filename,
+      type: mimeType,
+    } as unknown as Blob);
+  }
 
   onProgress?.(0);
 

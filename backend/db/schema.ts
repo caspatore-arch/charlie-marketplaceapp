@@ -317,6 +317,9 @@ export const reports = pgTable('reports', {
   reason: reportReasonEnum('reason').notNull(),
   details: text('details'),
   status: reportStatusEnum('status').notNull().default('open'),
+  reviewedById: uuid('reviewed_by_id').references(() => users.id),
+  reviewedAt: ts('reviewed_at'),
+  moderatorNote: text('moderator_note'),
   createdAt: ts('created_at').notNull().defaultNow(),
 });
 

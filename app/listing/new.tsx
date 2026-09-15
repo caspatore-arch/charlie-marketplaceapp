@@ -5,13 +5,14 @@
  * detail page so back doesn't return to this form.
  */
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable } from 'react-native';
+import { Pressable } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { ListingForm, type ListingFormSubmitValues } from '@/components/sell/ListingForm';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
+import { confirmAction } from '@/utils/confirm';
 
 export default function NewListingScreen() {
   const router = useRouter();
@@ -48,10 +49,9 @@ export default function NewListingScreen() {
 
   function handleCancel() {
     if (dirty) {
-      Alert.alert('Discard this listing?', 'Your photos and details will be lost.', [
-        { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: () => router.back() },
-      ]);
+      confirmAction('Discard this listing?', 'Your photos and details will be lost.', 'Discard', () => router.back(), {
+        cancelLabel: 'Keep editing',
+      });
     } else {
       router.back();
     }

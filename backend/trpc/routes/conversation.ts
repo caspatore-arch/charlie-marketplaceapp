@@ -72,7 +72,7 @@ export const conversationRouter = router({
   }),
 
   open: protectedProcedure
-    .input(z.object({ listingId: z.uuid() }))
+    .input(z.object({ listingId: z.uuid(), buyerId: z.uuid().optional() }))
     .mutation(async ({ ctx, input }) => {
       const [listing] = await ctx.db
         .select()
@@ -82,13 +82,40 @@ export const conversationRouter = router({
       if (!listing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That item no longer exists.' });
       }
-      if (listing.sellerId === ctx.user.id) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'This is your own listing.',
-        });
+
+      const isSeller = listing.sellerId === ctx.user.id;
+      let buyerId: string;
+
+      if (isSeller) {
+        // The seller is opening (or resuming) a thread with a specific requester.
+        if (!input.buyerId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Choose who to message.',
+          });
+        }
+        if (input.buyerId === ctx.user.id) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'This is your own listing.',
+          });
+        }
+        const [buyer] = await ctx.db
+          .select()
+          .from(users)
+          .where(eq(users.id, input.buyerId))
+          .limit(1);
+        if (!buyer) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'That user no longer exists.' });
+        }
+        buyerId = input.buyerId;
+      } else {
+        // Anyone else opening this listing's thread is the buyer, regardless of buyerId.
+        buyerId = ctx.user.id;
       }
-      if (await isBlockedBetween(ctx.db, ctx.user.id, listing.sellerId)) {
+
+      const otherPartyId = isSeller ? buyerId : listing.sellerId;
+      if (await isBlockedBetween(ctx.db, ctx.user.id, otherPartyId)) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'You cannot message this person.',
@@ -98,18 +125,13 @@ export const conversationRouter = router({
       const existing = await ctx.db
         .select()
         .from(conversations)
-        .where(
-          and(
-            eq(conversations.listingId, listing.id),
-            eq(conversations.buyerId, ctx.user.id),
-          ),
-        )
+        .where(and(eq(conversations.listingId, listing.id), eq(conversations.buyerId, buyerId)))
         .limit(1);
       if (existing[0]) return existing[0];
 
       const [created] = await ctx.db
         .insert(conversations)
-        .values({ listingId: listing.id, buyerId: ctx.user.id, sellerId: listing.sellerId })
+        .values({ listingId: listing.id, buyerId, sellerId: listing.sellerId })
         .returning();
       return created!;
     }),
