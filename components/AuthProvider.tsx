@@ -41,7 +41,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (token: string) => {
       await authStorage.setToken(token);
       setHasToken(true);
-      await utils.auth.me.invalidate();
+      // A different user is now signed in: every cached query (my listings,
+      // inbox, moderator flag, ...) belongs to the previous identity.
+      await utils.invalidate();
     },
     [utils],
   );

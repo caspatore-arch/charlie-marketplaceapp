@@ -34,6 +34,10 @@ export type MeetupSpot = RouterOutputs['campus']['spots'][number];
 // ---- payment ----
 export type FeeQuote = RouterOutputs['payment']['quote'];
 
+// ---- moderation ----
+export type ModerationReport = RouterOutputs['moderation']['reports'][number];
+export type ModerationAction = 'dismiss' | 'remove_listing' | 'note';
+
 // ---- enums (mirrored from docs/CONTRACT.md; keep in sync with backend/db/schema.ts) ----
 export type ListingStatus = 'active' | 'reserved' | 'sold' | 'expired' | 'removed';
 export type ReservationStatus =

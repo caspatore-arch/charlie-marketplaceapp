@@ -81,6 +81,7 @@ function SignedInProfile({
   const unblockMutation = trpc.user.unblock.useMutation({
     onSuccess: () => blockedQuery.refetch(),
   });
+  const isModeratorQuery = trpc.moderation.isModerator.useQuery();
 
   const goToListing = useCallback((id: string) => router.push(`/listing/${id}`), [router]);
 
@@ -152,6 +153,17 @@ function SignedInProfile({
           </View>
         )}
       </Section>
+
+      {isModeratorQuery.data ? (
+        <Section title="Moderation">
+          <Button
+            title="Moderation"
+            variant="secondary"
+            onPress={() => router.push('/moderation')}
+            accessibilityLabel="Open moderation"
+          />
+        </Section>
+      ) : null}
 
       <Button title="Sign out" variant="ghost" onPress={onSignOut} style={styles.signOut} />
 
