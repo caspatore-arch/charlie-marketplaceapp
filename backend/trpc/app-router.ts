@@ -5,6 +5,7 @@ import { campusRouter } from './routes/campus';
 import { conversationRouter } from './routes/conversation';
 import { listingRouter } from './routes/listing';
 import { moderationRouter } from './routes/moderation';
+import { notificationRouter } from './routes/notification';
 import { paymentRouter } from './routes/payment';
 import { reservationRouter } from './routes/reservation';
 import { userRouter } from './routes/user';
@@ -19,6 +20,7 @@ export const appRouter = router({
   user: userRouter,
   payment: paymentRouter,
   moderation: moderationRouter,
+  notification: notificationRouter,
 });
 
 export type AppRouter = typeof appRouter;

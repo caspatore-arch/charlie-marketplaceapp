@@ -63,6 +63,9 @@ export const reportStatusEnum = pgEnum('report_status', ['open', 'reviewed']);
 
 export const handoffMethodEnum = pgEnum('handoff_method', ['code', 'tap']);
 
+/** Which kind of device registered a push token. */
+export const devicePlatformEnum = pgEnum('device_platform', ['ios', 'android', 'web', 'unknown']);
+
 /**
  * How a listing is sold. 'fixed' is the original (and default) behaviour —
  * every pre-auction row keeps working untouched. See docs/AUCTIONS.md §1.
@@ -449,6 +452,43 @@ export const geocodeCache = pgTable('geocode_cache', {
   fetchedAt: ts('fetched_at').notNull().defaultNow(),
 });
 
+/* -------------------------------------------------------- push notifications */
+
+/**
+ * One row per registered device. A user may have several (phone + tablet,
+ * reinstalled the app, etc). `expoPushToken` is globally unique — re-registering
+ * the same physical device for a different signed-in user moves the row to
+ * that user rather than creating a duplicate (see backend/trpc/routes/notification.ts).
+ */
+export const deviceTokens = pgTable(
+  'device_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expoPushToken: text('expo_push_token').notNull().unique(),
+    platform: devicePlatformEnum('platform').notNull().default('unknown'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  },
+  (t) => [index('device_tokens_user_idx').on(t.userId)],
+);
+
+/**
+ * One row per user, created lazily on first write. A missing row means every
+ * category defaults to on — see backend/trpc/routes/notification.ts.
+ */
+export const notificationPreferences = pgTable('notification_preferences', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  messages: boolean('messages').notNull().default(true),
+  meetups: boolean('meetups').notNull().default(true),
+  auctions: boolean('auctions').notNull().default(true),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
 /* ------------------------------------------------------- payments (§3) */
 
 /**
@@ -540,3 +580,5 @@ export type GeocodeCacheRow = typeof geocodeCache.$inferSelect;
 export type StripeAccount = typeof stripeAccounts.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type PaymentStatus = Payment['status'];
+export type DeviceToken = typeof deviceTokens.$inferSelect;
+export type NotificationPreferences = typeof notificationPreferences.$inferSelect;

@@ -13,7 +13,7 @@ The founder builds and publishes through **Rork** (rork.com), so this repo mirro
 | Icons / images | `lucide-react-native`, `expo-image`, `expo-image-picker` | |
 | Backend | Hono (`backend/hono.ts`) + tRPC v11 (`backend/trpc/`) | Served under `/api/trpc/*`, port 3000. `@hono/node-server` for local. |
 | DB | Drizzle ORM, **PostgreSQL SQL**. Local driver = PGlite (Postgres compiled to WASM, persisted in `backend/data/pg/`). | `DATABASE_URL` is a one-variable switch: set it (e.g. to a Neon connection string) and `backend/db/client.ts` uses `drizzle-orm/node-postgres` with a `pg.Pool` instead — same schema, same code elsewhere. Verify a hosted URL with `npm run db:check` (connects, runs migrations, prints the table count) before pointing the app at it. |
-| Images | Multipart upload to `POST /api/uploads`, stored on local disk `backend/data/uploads/`, served at `GET /api/uploads/:file` | `backend/storage.ts` is an adapter interface so S3-compatible storage can replace it. |
+| Images | Multipart upload to `POST /api/uploads`, stored locally by default | `backend/storage.ts` is an adapter interface: `LocalDiskStorage` (default, `backend/data/uploads/`, served at `GET /api/uploads/:file`) or `S3Storage` (any S3-compatible provider — AWS S3, Cloudflare R2, Backblaze B2, Wasabi — selected by setting `S3_BUCKET`). See `docs/DEPLOY.md`. |
 | Auth | Campus-email code (simulated delivery: code printed to server log) + bearer session token in `expo-secure-store` | Dev-only `auth.devSignIn` for switching between the two seeded test identities. |
 
 ## Folder layout
@@ -58,6 +58,8 @@ ALLOWED_EMAIL_DOMAINS=arizona.edu,demo.campus.test
 PORT=3000
 MODERATOR_USER_IDS=00000000-0000-4000-8000-000000000001   # comma-separated; who can review reports (defaults to Maya's demo id)
 ```
+
+Deployment-only variables (object storage, CORS, rate limits) are documented in full in **`docs/DEPLOY.md`**, with `.env.example` as the source of truth for every variable name. None of them need to be set for local dev.
 
 ## Run
 

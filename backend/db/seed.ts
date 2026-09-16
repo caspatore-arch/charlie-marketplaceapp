@@ -101,15 +101,26 @@ function localWindow(startHour: number, endHour: number, dayOffset = 0) {
   return { startsAt: new Date(dayStart + startHour * HOUR), endsAt: new Date(dayStart + endHour * HOUR) };
 }
 
-/** Always-today, always-in-the-future window so the demo has a bookable slot. */
-function soonWindow() {
-  const now = Date.now();
+/**
+ * The next bookable window, so the demo always has a slot someone could pick.
+ *
+ * Usually that is later today. Late at night it is not: clamping the end to
+ * midnight used to produce a window ending BEFORE it started (seed at 11:45 PM
+ * and the slot ran 12:15 AM -> 11:59 PM), which emptied the feed's "Today"
+ * availability and failed acceptance criterion 1. When too little of the day is
+ * left to meet in, roll to tomorrow morning rather than inventing a slot nobody
+ * could actually make.
+ */
+export function soonWindow(nowMs: number = Date.now()) {
+  const now = nowMs;
   const { end } = localDayBounds(TIMEZONE);
   // Round up to the next :00/:30 so the slot chips read "5:00 PM", not "4:34 PM".
   const HALF_HOUR = 30 * 60 * 1000;
   const startsAt = new Date(Math.ceil((now + HALF_HOUR) / HALF_HOUR) * HALF_HOUR);
-  const endsAt = new Date(Math.min(startsAt.getTime() + 3 * HOUR, end.getTime() - 60 * 1000));
-  return { startsAt, endsAt };
+  const latestEnd = end.getTime() - 60 * 1000;
+  const MIN_WINDOW = HOUR;
+  if (latestEnd - startsAt.getTime() < MIN_WINDOW) return localWindow(9, 12, 1);
+  return { startsAt, endsAt: new Date(Math.min(startsAt.getTime() + 3 * HOUR, latestEnd)) };
 }
 
 /* ------------------------------------------------------------------ data */

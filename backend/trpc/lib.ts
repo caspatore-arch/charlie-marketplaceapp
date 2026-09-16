@@ -23,6 +23,7 @@ import {
   type Reservation,
   type User,
 } from '../db/schema';
+import { notifyAuctionEndedNoBids, notifyAuctionWon } from '../notifications/events';
 
 /* --------------------------------------------------------------- timezone */
 
@@ -171,8 +172,25 @@ export async function openingProposalFor(
  * locked FOR UPDATE, every precondition is re-checked inside the lock, and a
  * winner who already has a reservation on this listing never gets a second one.
  */
+/** What `settleAuction` should notify about once its transaction has committed. */
+type SettlementNotice =
+  | { kind: 'no_bids'; sellerId: string; listingId: string; listingTitle: string }
+  | {
+      kind: 'won';
+      winnerId: string;
+      listingId: string;
+      listingTitle: string;
+      priceCents: number;
+      reservationId: string | null;
+    }
+  | null;
+
 async function settleAuction(db: Db, listingId: string): Promise<void> {
-  await db.transaction(async (tx) => {
+  // Notifications must fire only once the transaction has actually committed
+  // (and never break settlement if sending fails), so the transaction body
+  // only returns what happened; this function fires the notification after
+  // `db.transaction` resolves.
+  const notice: SettlementNotice = await db.transaction(async (tx): Promise<SettlementNotice> => {
     const [listing] = await tx
       .select()
       .from(listings)
@@ -187,7 +205,7 @@ async function settleAuction(db: Db, listingId: string): Promise<void> {
       !listing.expiresAt ||
       listing.expiresAt > now
     ) {
-      return;
+      return null;
     }
 
     const [winner] = await tx
@@ -202,7 +220,7 @@ async function settleAuction(db: Db, listingId: string): Promise<void> {
         .update(listings)
         .set({ status: 'expired', updatedAt: now })
         .where(eq(listings.id, listing.id));
-      return;
+      return { kind: 'no_bids', sellerId: listing.sellerId, listingId: listing.id, listingTitle: listing.title };
     }
 
     // Idempotency guard: never create a second reservation for the same winner.
@@ -214,6 +232,8 @@ async function settleAuction(db: Db, listingId: string): Promise<void> {
       )
       .limit(1);
 
+    let notice: SettlementNotice = null;
+
     if (already.length === 0) {
       const opening = await openingProposalFor(tx as unknown as Db, listing);
       if (!opening) {
@@ -223,27 +243,63 @@ async function settleAuction(db: Db, listingId: string): Promise<void> {
           .update(listings)
           .set({ status: 'reserved', updatedAt: now })
           .where(eq(listings.id, listing.id));
-        return;
+        return {
+          kind: 'won',
+          winnerId: winner.bidderId,
+          listingId: listing.id,
+          listingTitle: listing.title,
+          priceCents: winner.amountCents,
+          reservationId: null,
+        };
       }
-      await tx.insert(reservations).values({
+      const [createdReservation] = await tx
+        .insert(reservations)
+        .values({
+          listingId: listing.id,
+          buyerId: winner.bidderId,
+          sellerId: listing.sellerId,
+          status: 'requested',
+          spotId: opening.spotId,
+          startsAt: opening.startsAt,
+          proposedById: listing.sellerId,
+          priceCents: winner.amountCents,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: reservations.id });
+      notice = {
+        kind: 'won',
+        winnerId: winner.bidderId,
         listingId: listing.id,
-        buyerId: winner.bidderId,
-        sellerId: listing.sellerId,
-        status: 'requested',
-        spotId: opening.spotId,
-        startsAt: opening.startsAt,
-        proposedById: listing.sellerId,
+        listingTitle: listing.title,
         priceCents: winner.amountCents,
-        createdAt: now,
-        updatedAt: now,
-      });
+        reservationId: createdReservation!.id,
+      };
     }
 
     await tx
       .update(listings)
       .set({ status: 'reserved', updatedAt: now })
       .where(eq(listings.id, listing.id));
+
+    return notice;
   });
+
+  if (notice?.kind === 'no_bids') {
+    void notifyAuctionEndedNoBids(db, {
+      sellerId: notice.sellerId,
+      listingId: notice.listingId,
+      listingTitle: notice.listingTitle,
+    });
+  } else if (notice?.kind === 'won') {
+    void notifyAuctionWon(db, {
+      winnerId: notice.winnerId,
+      listingId: notice.listingId,
+      listingTitle: notice.listingTitle,
+      priceCents: notice.priceCents,
+      reservationId: notice.reservationId,
+    });
+  }
 }
 
 /* ----------------------------------------------------------- lazy expiry */

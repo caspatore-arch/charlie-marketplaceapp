@@ -31,7 +31,8 @@
       "expo-image",
       "expo-secure-store",
       "expo-web-browser",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "expo-notifications"
     ],
     "scheme": "campusswap",
     "newArchEnabled": true,

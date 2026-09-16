@@ -1,13 +1,23 @@
 /**
  * Upload storage adapter. LocalDiskStorage writes under backend/data/uploads
  * and the Hono app serves those bytes back at GET /api/uploads/:name.
- * Swapping in S3-compatible storage means implementing StorageAdapter only.
+ *
+ * S3Storage is the deployable alternative: any S3-compatible provider (AWS
+ * S3, Cloudflare R2, Backblaze B2, Wasabi, ...) via an optional endpoint
+ * override. The adapter is chosen once at module load by `storage`, below,
+ * based purely on whether S3_BUCKET is set — see `pickStorage()`.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { env } from './env';
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+
+import { env, validateS3Env } from './env';
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // 8 MB
 
@@ -116,4 +126,99 @@ export class LocalDiskStorage implements StorageAdapter {
   }
 }
 
-export const storage: StorageAdapter = new LocalDiskStorage();
+/**
+ * S3-compatible storage. Works against AWS S3 and any S3-compatible provider
+ * (Cloudflare R2, Backblaze B2, Wasabi, ...) by setting `S3_ENDPOINT`.
+ *
+ * Serving strategy for `GET /api/uploads/:name`: when `S3_PUBLIC_BASE_URL`
+ * is set, `put()` returns a URL pointing straight at it (a CDN/public bucket
+ * URL or custom domain) and the app never proxies bytes through the backend
+ * — cheaper and faster, the provider serves the image directly. When it is
+ * NOT set, `get()` streams the object through the backend so uploads work
+ * out of the box on a private bucket with zero extra configuration; this
+ * costs the backend's own bandwidth so set S3_PUBLIC_BASE_URL once you have
+ * a public bucket/CDN in front of the bucket.
+ */
+export class S3Storage implements StorageAdapter {
+  private readonly client: S3Client;
+  private readonly bucket: string;
+  private readonly publicBaseUrl: string | undefined;
+
+  constructor() {
+    if (!env.s3Bucket || !env.s3Region || !env.s3AccessKeyId || !env.s3SecretAccessKey) {
+      // validateS3Env() should have already thrown at startup with a precise
+      // message; this is a defense-in-depth guard against constructing the
+      // adapter directly (e.g. from a test) without validation having run.
+      throw new Error('S3Storage requires S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY.');
+    }
+    this.bucket = env.s3Bucket;
+    this.publicBaseUrl = env.s3PublicBaseUrl;
+    this.client = new S3Client({
+      region: env.s3Region,
+      endpoint: env.s3Endpoint, // undefined = real AWS S3
+      // Path-style addressing is required by most non-AWS S3-compatible
+      // providers (R2, B2, MinIO); AWS S3 also accepts it, so it is safe to
+      // always set it when a custom endpoint is in play.
+      forcePathStyle: Boolean(env.s3Endpoint),
+      credentials: {
+        accessKeyId: env.s3AccessKeyId,
+        secretAccessKey: env.s3SecretAccessKey,
+      },
+    });
+  }
+
+  async put(name: string, bytes: Buffer, contentType: string): Promise<{ url: string }> {
+    if (bytes.byteLength > MAX_UPLOAD_BYTES) {
+      throw new UploadError('That image is larger than 8 MB. Try a smaller one.', 413);
+    }
+    if (!(ALLOWED_CONTENT_TYPES as readonly string[]).includes(contentType)) {
+      throw new UploadError('That file type is not supported. Use a JPEG, PNG, WebP or HEIC.', 415);
+    }
+
+    const hinted = sanitizeFileName(name);
+    const ext = EXTENSION_BY_TYPE[contentType] ?? path.extname(hinted) ?? '';
+    const key =
+      hinted && hinted.endsWith(ext) && hinted.startsWith('demo-')
+        ? hinted // seed writes stable demo-*.svg names so re-seeding is idempotent
+        : `${crypto.randomUUID()}${ext}`;
+
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: bytes,
+        ContentType: contentType,
+      }),
+    );
+
+    const url = this.publicBaseUrl ? `${this.publicBaseUrl}/${key}` : `/api/uploads/${key}`;
+    return { url };
+  }
+
+  async get(name: string): Promise<StoredFile | null> {
+    const key = sanitizeFileName(name);
+    if (!key) return null;
+    try {
+      const result = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      if (!result.Body) return null;
+      const bytes = Buffer.from(await result.Body.transformToByteArray());
+      return { bytes, contentType: result.ContentType ?? contentTypeForName(key) };
+    } catch {
+      // Covers NoSuchKey and any other SDK error — proxy consumers only care
+      // whether the object exists, not why the fetch failed.
+      return null;
+    }
+  }
+}
+
+function pickStorage(): StorageAdapter {
+  // Validated here (module load, i.e. process startup via the hono.ts import
+  // chain) rather than in backend/server.ts, which this task does not own:
+  // fail fast and loudly before the server starts accepting traffic.
+  validateS3Env();
+  return env.s3Bucket ? new S3Storage() : new LocalDiskStorage();
+}
+
+export const storage: StorageAdapter = pickStorage();

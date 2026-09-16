@@ -11,6 +11,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { bids, listings, reservations, users, type Listing } from '../../db/schema';
+import { notifyOutbid } from '../../notifications/events';
 import {
   ANTI_SNIPE_MS,
   applyExpiry,
@@ -205,7 +206,22 @@ export const bidRouter = router({
           bidCount: Number(counted?.n ?? 1),
           endsAt,
           extended,
+          // Carried through to the fire-and-forget notification below —
+          // never part of the client-facing response shape.
+          _previousTopBidderId: top && top.bidderId !== ctx.user.id ? top.bidderId : null,
+          _listingTitle: listing.title,
         };
+      }).then((result) => {
+        const { _previousTopBidderId, _listingTitle, ...response } = result;
+        if (_previousTopBidderId) {
+          void notifyOutbid(ctx.db, {
+            previousTopBidderId: _previousTopBidderId,
+            listingId: input.listingId,
+            listingTitle: _listingTitle,
+            currentPriceCents: response.currentPriceCents,
+          });
+        }
+        return response;
       });
     }),
 
@@ -228,6 +244,7 @@ export const bidRouter = router({
           .for('update')
           .limit(1);
         assertBiddable(listing, ctx.user.id, now);
+        const listingTitle = listing.title;
 
         if (listing.buyoutPriceCents == null) {
           throw new TRPCError({
@@ -297,7 +314,22 @@ export const bidRouter = router({
           listingId: listing.id,
           pricePaidCents: listing.buyoutPriceCents,
           reservationId,
+          _outbidPreviousTopBidderId: top && top.bidderId !== ctx.user.id ? top.bidderId : null,
+          _listingTitle: listingTitle,
         };
+      }).then((result) => {
+        const { _outbidPreviousTopBidderId, _listingTitle, ...response } = result;
+        // Buying it out ends bidding immediately — the previous top bidder,
+        // if any, is effectively outbid by the buy-it-now price.
+        if (_outbidPreviousTopBidderId) {
+          void notifyOutbid(ctx.db, {
+            previousTopBidderId: _outbidPreviousTopBidderId,
+            listingId: response.listingId,
+            listingTitle: _listingTitle,
+            currentPriceCents: response.pricePaidCents,
+          });
+        }
+        return response;
       });
     }),
 });

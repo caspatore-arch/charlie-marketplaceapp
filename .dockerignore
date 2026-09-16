@@ -1,0 +1,34 @@
+node_modules
+.expo
+.git
+.gitignore
+android
+ios
+dist
+web-build
+
+# App/UI source — this image serves the backend API only.
+app
+components
+hooks
+constants
+assets
+types
+utils
+
+# Local data, env, logs
+backend/data
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+
+# Editor/OS cruft
+.vscode
+.idea
+.DS_Store
+
+# Docs are not needed inside the image
+docs
+README.md

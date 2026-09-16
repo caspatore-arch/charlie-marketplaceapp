@@ -24,9 +24,11 @@ import {
   listingSpots,
   listings,
   reservations,
+  users,
   type Reservation,
 } from '../../db/schema';
 import { directionsUrlForCoords, geocodeAddress, haversineMeters, GeocodeError } from '../../geocode';
+import { notifyMeetupEvent, type MeetupEventKind } from '../../notifications/events';
 import {
   applyExpiry,
   isBlockedBetween,
@@ -35,6 +37,31 @@ import {
   type ReservationDetail,
 } from '../lib';
 import { protectedProcedure, router } from '../trpc';
+
+/**
+ * Fires a "meetup" category push to `recipientId`, looking up the listing
+ * title and the acting user's display name. Fire-and-forget: never awaited by
+ * callers, and `notifyUsers` underneath never throws — a push failure must
+ * never fail a reservation transition.
+ */
+function notifyReservationEvent(
+  db: Db,
+  args: { reservationId: string; listingId: string; recipientId: string; actingUserId: string; kind: MeetupEventKind },
+): void {
+  void (async () => {
+    const [[listing], [actor]] = await Promise.all([
+      db.select({ title: listings.title }).from(listings).where(eq(listings.id, args.listingId)).limit(1),
+      db.select({ displayName: users.displayName }).from(users).where(eq(users.id, args.actingUserId)).limit(1),
+    ]);
+    await notifyMeetupEvent(db, {
+      recipientId: args.recipientId,
+      otherName: actor?.displayName ?? 'Someone',
+      reservationId: args.reservationId,
+      listingTitle: listing?.title ?? 'the item',
+      kind: args.kind,
+    });
+  })();
+}
 
 /**
  * `lib.ts`'s `toReservationDetails` already handles a null `spotId` safely
@@ -257,6 +284,14 @@ export const reservationRouter = router({
         })
         .returning();
 
+      notifyReservationEvent(ctx.db, {
+        reservationId: created!.id,
+        listingId: listing.id,
+        recipientId: listing.sellerId,
+        actingUserId: ctx.user.id,
+        kind: 'requested',
+      });
+
       return created!;
     }),
 
@@ -359,6 +394,14 @@ export const reservationRouter = router({
         .where(eq(reservations.id, res.id))
         .returning();
 
+      notifyReservationEvent(ctx.db, {
+        reservationId: updated!.id,
+        listingId: updated!.listingId,
+        recipientId: res.buyerId === ctx.user.id ? res.sellerId : res.buyerId,
+        actingUserId: ctx.user.id,
+        kind: 'countered',
+      });
+
       return updated!;
     }),
 
@@ -368,8 +411,9 @@ export const reservationRouter = router({
       await applyExpiry(ctx.db);
       const preview = await loadParticipantReservation(ctx.db, input.id, ctx.user.id);
 
+      let result: Reservation;
       try {
-        return await ctx.db.transaction(async (tx) => {
+        result = await ctx.db.transaction(async (tx) => {
           // Lock the listing row first: concurrent accepts on the same item
           // serialize here, and the partial unique index is the backstop.
           const [listing] = await tx
@@ -469,6 +513,19 @@ export const reservationRouter = router({
         }
         throw err;
       }
+
+      // Notify after the transaction commits. The acceptor is always the side
+      // that did NOT make the last proposal (checked above), so proposedById
+      // is guaranteed to be the *other* party.
+      notifyReservationEvent(ctx.db, {
+        reservationId: result.id,
+        listingId: result.listingId,
+        recipientId: result.proposedById,
+        actingUserId: ctx.user.id,
+        kind: 'accepted',
+      });
+
+      return result;
     }),
 
   decline: protectedProcedure
@@ -491,6 +548,15 @@ export const reservationRouter = router({
         .returning();
 
       await releaseListing(ctx.db, res.listingId);
+
+      notifyReservationEvent(ctx.db, {
+        reservationId: updated!.id,
+        listingId: updated!.listingId,
+        recipientId: res.buyerId,
+        actingUserId: ctx.user.id,
+        kind: 'declined',
+      });
+
       return updated!;
     }),
 
@@ -517,6 +583,15 @@ export const reservationRouter = router({
         .returning();
 
       await releaseListing(ctx.db, res.listingId);
+
+      notifyReservationEvent(ctx.db, {
+        reservationId: updated!.id,
+        listingId: updated!.listingId,
+        recipientId: res.buyerId === ctx.user.id ? res.sellerId : res.buyerId,
+        actingUserId: ctx.user.id,
+        kind: 'cancelled',
+      });
+
       return updated!;
     }),
 

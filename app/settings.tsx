@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { AccountSection } from '@/components/settings/AccountSection';
 import { SafetySection } from '@/components/settings/SafetySection';
+import { NotificationsSection } from '@/components/settings/NotificationsSection';
 import { PayoutsSection } from '@/components/settings/PayoutsSection';
 import { AboutPrototypeSection } from '@/components/settings/AboutPrototypeSection';
 import { LegalSection } from '@/components/settings/LegalSection';
@@ -66,6 +67,10 @@ export default function SettingsScreen() {
 
         <SettingsSection title="Payouts">
           <PayoutsSection />
+        </SettingsSection>
+
+        <SettingsSection title="Notifications">
+          <NotificationsSection />
         </SettingsSection>
 
         <SettingsSection title="Safety">

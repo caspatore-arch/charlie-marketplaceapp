@@ -183,6 +183,46 @@ Otherwise, in one transaction:
 
 Errors: use tRPC codes `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `BAD_REQUEST` with human-readable messages the UI can show verbatim.
 
+## Push notifications (added after the sections above; nothing earlier was rewritten)
+
+### Tables
+
+- **device_tokens**: id, userId → users, expoPushToken (unique — re-registering the same token for a
+  different user moves it, never duplicates it), platform ('ios' | 'android' | 'web' | 'unknown'),
+  createdAt, lastSeenAt. A user may have several rows (several devices).
+- **notification_preferences**: userId (PK, → users), messages bool (default true), meetups bool
+  (default true), auctions bool (default true), updatedAt. Row is created lazily on first write; a
+  missing row means every category is on.
+
+### Router (`backend/trpc/routes/notification.ts`)
+
+```
+notification.register           P { expoPushToken, platform? } → { ok: true }
+      Upserts on the unique expoPushToken — moves the token to the caller if it belonged to someone else.
+notification.unregister         P { expoPushToken }             → { ok: true }
+      No-op if the token isn't the caller's.
+notification.preferences        P –                              → { userId, messages, meetups, auctions, updatedAt }
+      Defaults every category to true when no row has ever been written.
+notification.updatePreferences  P { messages?, meetups?, auctions? } → same shape
+      Partial update; omitted categories keep their current (or default) value.
+```
+
+### Sending (`backend/notifications/`)
+
+Sent via Expo's push service (`https://exp.host/--/api/v2/push/send`) over plain `fetch`, batched at
+Expo's 100-message limit. `notifyUsers()` (`backend/notifications/send.ts`) is the single entry point:
+it drops any recipient who has turned the relevant category off, loads their device tokens, sends, and
+deletes any token Expo reports as `DeviceNotRegistered`. It never throws — every call site fires it
+without `await` (`void notifyUsers(...)`) so a push failure can never fail the bid/message/reservation
+mutation that triggered it. Per-event copy and recipient-building live in `backend/notifications/events.ts`.
+
+Events wired: new message (recipient only, never the sender, never a blocked party — the send path
+already refuses to send between blocked users, so this is inherited rather than re-checked), meetup
+requested/accepted/declined/countered/cancelled (the other participant), outbid (the previous top
+bidder only, from `bid.place` and `bid.buyout`), auction won (the winning bidder, from
+`settleAuction()`/buyout), auction ended with no bids (the seller, from `settleAuction()`). Every
+payload carries `data.path`, an expo-router path for the client to deep-link to on tap.
+
 ## Seed (`backend/db/seed.ts`, idempotent)
 
 - Campus: University of Arizona (`slug: arizona`, domains `arizona.edu`, tz `America/Phoenix`, `isDemo: true` because location data is unverified).

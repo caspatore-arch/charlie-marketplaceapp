@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
 import { db, dbKind } from './db/client';
+import { env } from './env';
+import { rateLimit } from './ratelimit';
 import { paymentsMode } from './stripe/client';
 import {
   processSimulatedEvent,
@@ -11,21 +13,38 @@ import {
   type SimulatedEventKind,
 } from './stripe/webhook';
 import {
-  LocalDiskStorage,
   MAX_UPLOAD_BYTES,
   UploadError,
   USER_CONTENT_TYPES,
   sanitizeFileName,
+  storage,
 } from './storage';
 import { appRouter } from './trpc/app-router';
 import { createContext, userFromAuthHeader } from './trpc/create-context';
 
-const storage = new LocalDiskStorage();
-
 export const app = new Hono();
 
-// Dev-permissive CORS: the Expo app is served from an arbitrary LAN origin.
-app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'] }));
+/**
+ * CORS. Local dev keeps today's fully permissive behaviour (origin: '*') so
+ * the Expo Go / LAN workflow in docs/HANDOFF.md never breaks — a phone on
+ * the Mac's Wi-Fi hits an arbitrary `http://<lan-ip>:3000` origin that can't
+ * be known in advance. In production (NODE_ENV=production) only origins
+ * listed in ALLOWED_ORIGINS (comma-separated) are accepted; anything else is
+ * refused by the cors() middleware (no Access-Control-Allow-Origin header,
+ * so the browser blocks the response).
+ */
+app.use(
+  '*',
+  cors(
+    env.isProduction
+      ? {
+          origin: (origin) =>
+            origin && env.allowedOrigins.includes(origin) ? origin : null,
+          allowHeaders: ['Authorization', 'Content-Type'],
+        }
+      : { origin: '*', allowHeaders: ['Authorization', 'Content-Type'] },
+  ),
+);
 
 app.get('/api/health', (c) => {
   const { mode, reason, requested } = paymentsMode();
@@ -88,6 +107,33 @@ app.post('/api/stripe/simulated-test-event', async (c) => {
   });
   return c.json(result.body, result.status as 200);
 });
+
+/**
+ * Rate limiting — small in-memory, per-IP limiter (backend/ratelimit.ts).
+ * Applied to the paths that can be abused: sign-in code requests and code
+ * verification (guessing/spamming codes), reservation.checkAddress (calls a
+ * free third-party geocoder — Nominatim — whose usage policy forbids heavy
+ * use, see backend/geocode.ts and docs/HANDOFF.md), and photo uploads.
+ * tRPC calls go through this app's httpLink (no batching), so each procedure
+ * call is its own HTTP request at a predictable, stable path — see
+ * lib/trpc.ts. Limits are env-tunable (see .env.example); this does NOT
+ * scale to multiple instances — see the docstring in backend/ratelimit.ts
+ * and docs/DEPLOY.md.
+ */
+app.use(
+  '/api/trpc/auth.requestCode',
+  rateLimit('auth.requestCode', env.rateLimitAuthRequestCodePerMinute, 60_000),
+);
+app.use(
+  '/api/trpc/auth.verifyCode',
+  rateLimit('auth.verifyCode', env.rateLimitAuthVerifyCodePerMinute, 60_000),
+);
+app.use(
+  '/api/trpc/reservation.checkAddress',
+  rateLimit('reservation.checkAddress', env.rateLimitCheckAddressPerMinute, 60_000),
+);
+app.use('/api/uploads', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000));
+app.use('/api/uploads/*', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000));
 
 /** Multipart upload, field name `file`. Same bearer auth as tRPC. */
 app.post('/api/uploads', async (c) => {

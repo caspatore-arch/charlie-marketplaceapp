@@ -132,4 +132,85 @@ export const env = {
   get uploadsDir(): string {
     return process.env.UPLOADS_DIR ?? 'backend/data/uploads';
   },
+
+  /* --------------------------------------------------------------- s3 */
+
+  /** Bucket name. Setting this is the switch that selects S3Storage over LocalDiskStorage. */
+  get s3Bucket(): string | undefined {
+    const v = process.env.S3_BUCKET?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  get s3Region(): string | undefined {
+    const v = process.env.S3_REGION?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  /** Optional; required for R2/B2/Wasabi/any non-AWS S3-compatible endpoint. */
+  get s3Endpoint(): string | undefined {
+    const v = process.env.S3_ENDPOINT?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  get s3AccessKeyId(): string | undefined {
+    const v = process.env.S3_ACCESS_KEY_ID?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  get s3SecretAccessKey(): string | undefined {
+    const v = process.env.S3_SECRET_ACCESS_KEY?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  /** Optional. When set, uploaded object URLs are served from it directly instead of proxied. */
+  get s3PublicBaseUrl(): string | undefined {
+    const v = process.env.S3_PUBLIC_BASE_URL?.trim();
+    return v && v.length > 0 ? v.replace(/\/$/, '') : undefined;
+  },
+
+  /* ---------------------------------------------------------- http/prod */
+
+  get nodeEnv(): string {
+    return (process.env.NODE_ENV ?? 'development').trim().toLowerCase();
+  },
+  get isProduction(): boolean {
+    return this.nodeEnv === 'production';
+  },
+  /** Comma-separated allowlist of origins accepted in production. Ignored in development. */
+  get allowedOrigins(): string[] {
+    return (process.env.ALLOWED_ORIGINS ?? '')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean);
+  },
+
+  /* --------------------------------------------------------- rate limits */
+
+  get rateLimitAuthRequestCodePerMinute(): number {
+    return Number(process.env.RATE_LIMIT_AUTH_REQUEST_CODE_PER_MIN ?? 5);
+  },
+  get rateLimitAuthVerifyCodePerMinute(): number {
+    return Number(process.env.RATE_LIMIT_AUTH_VERIFY_CODE_PER_MIN ?? 10);
+  },
+  get rateLimitCheckAddressPerMinute(): number {
+    return Number(process.env.RATE_LIMIT_CHECK_ADDRESS_PER_MIN ?? 12);
+  },
+  get rateLimitUploadsPerMinute(): number {
+    return Number(process.env.RATE_LIMIT_UPLOADS_PER_MIN ?? 20);
+  },
 };
+
+/**
+ * Validate the S3 env vars as a group. Call once at startup (backend/server.ts).
+ * If S3_BUCKET is set, the companion vars it needs must be present too — fail
+ * loudly and early rather than falling back to local disk silently or hitting
+ * a confusing SDK error on the first upload. Never logs secret values.
+ */
+export function validateS3Env(): void {
+  if (!env.s3Bucket) return; // local disk mode — nothing to validate
+  const missing: string[] = [];
+  if (!env.s3Region) missing.push('S3_REGION');
+  if (!env.s3AccessKeyId) missing.push('S3_ACCESS_KEY_ID');
+  if (!env.s3SecretAccessKey) missing.push('S3_SECRET_ACCESS_KEY');
+  if (missing.length > 0) {
+    throw new Error(
+      `S3_BUCKET is set but missing required env var(s): ${missing.join(', ')}. ` +
+        'Set every S3_* variable listed in .env.example, or unset S3_BUCKET to use local disk storage.',
+    );
+  }
+}

@@ -13,6 +13,7 @@ import { trpc, trpcClient } from '@/lib/trpc';
 import { AuthProvider } from '@/components/AuthProvider';
 import { colors } from '@/constants/theme';
 import { ConnectionBanner } from '@/components/ui/ConnectionBanner';
+import { NotificationPermissionGate } from '@/components/notifications/NotificationPermissionGate';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -38,6 +39,7 @@ export default function RootLayout() {
             <AuthProvider>
               <StatusBar style="dark" />
               <ConnectionBanner />
+              <NotificationPermissionGate />
               <Stack
                 screenOptions={{
                   headerStyle: { backgroundColor: colors.bg },

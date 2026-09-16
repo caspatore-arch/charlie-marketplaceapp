@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import type { Db } from '../../db/client';
 import { conversationReads, conversations, listings, messages, reservations, users } from '../../db/schema';
+import { notifyNewMessage } from '../../notifications/events';
 import { applyExpiry, isBlockedBetween, toListingCards, toPublicUser } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
@@ -283,6 +284,23 @@ export const conversationRouter = router({
         .update(conversations)
         .set({ lastMessageAt: now })
         .where(eq(conversations.id, convo.id));
+
+      // Fire-and-forget: a push failure must never fail sending the message.
+      // `notifyUsers` never throws, but this call is not awaited on purpose.
+      void (async () => {
+        const [[sender], [listing]] = await Promise.all([
+          ctx.db.select({ displayName: users.displayName }).from(users).where(eq(users.id, ctx.user.id)).limit(1),
+          ctx.db.select({ title: listings.title }).from(listings).where(eq(listings.id, convo.listingId)).limit(1),
+        ]);
+        await notifyNewMessage(ctx.db, {
+          recipientId: other,
+          senderId: ctx.user.id,
+          senderName: sender?.displayName ?? 'Someone',
+          conversationId: convo.id,
+          listingTitle: listing?.title ?? 'your item',
+          body: input.body,
+        });
+      })();
 
       return message!;
     }),
