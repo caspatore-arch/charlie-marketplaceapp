@@ -26,7 +26,7 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { colors, radius, space } from '@/constants/theme';
-import { MINIMUM_AGE } from '@/app/legal/content';
+import { MINIMUM_AGE } from '@/constants/legal';
 
 function CheckboxRow({
   checked,

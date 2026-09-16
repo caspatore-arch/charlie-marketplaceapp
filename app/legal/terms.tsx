@@ -11,7 +11,7 @@ import { Stack } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { colors, radius, space } from '@/constants/theme';
-import { DRAFT_BANNER, TERMS_SECTIONS, TERMS_TITLE } from './content';
+import { DRAFT_BANNER, TERMS_SECTIONS, TERMS_TITLE } from '@/constants/legal';
 
 export default function TermsScreen() {
   return (
