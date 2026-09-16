@@ -62,6 +62,7 @@ export default function RootLayout() {
                 <Stack.Screen name="user/[id]" options={{ title: 'Profile' }} />
                 <Stack.Screen name="moderation" options={{ title: 'Moderation' }} />
                 <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+                <Stack.Screen name="payments/[reservationId]" options={{ title: 'Payment' }} />
                 <Stack.Screen name="legal/terms" options={{ title: 'Terms of Service' }} />
                 <Stack.Screen name="legal/privacy" options={{ title: 'Privacy Policy' }} />
                 <Stack.Screen

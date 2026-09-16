@@ -9,6 +9,7 @@ All ids are `uuid` strings. All timestamps are ISO strings over the wire (`times
 ```ts
 Category   = 'clothing' | 'shoes' | 'jewelry' | 'accessories' | 'dorm' | 'books' | 'tech' | 'other'
 Condition  = 'new' | 'like_new' | 'good' | 'fair'
+SaleType   = 'fixed' | 'auction'
 ListingStatus     = 'active' | 'reserved' | 'sold' | 'expired' | 'removed'
 ReservationStatus = 'requested' | 'countered' | 'accepted' | 'declined' | 'cancelled' | 'expired' | 'completed'
 ReportReason = 'prohibited_item' | 'scam' | 'harassment' | 'no_show' | 'other'
@@ -23,14 +24,15 @@ ModerationAction = 'dismiss' | 'remove_listing' | 'note'
 - **sessions**: id, userId, tokenHash (unique), expiresAt, createdAt
 - **email_codes**: id, email, code, expiresAt, consumedAt?
 - **meetup_spots**: id, campusId, name, description (precise meeting description, e.g. "north entrance, by the bike racks"), lat, lng, hoursNote?, isDemo, isActive
-- **listings**: id, sellerId, campusId, title, description?, category, condition, priceCents, size?, brand?, status, isSellToday bool, expiresAt?, createdAt, updatedAt, soldAt?
+- **listings**: id, sellerId, campusId, title, description?, category, condition, priceCents, **saleType** ('fixed' | 'auction', default 'fixed'), **startPriceCents?**, **buyoutPriceCents?**, size?, brand?, status, isSellToday bool, expiresAt? (also the auction end time), createdAt, updatedAt, soldAt?
+- **bids**: id, listingId, bidderId, amountCents, createdAt; index `(listingId, amountCents desc)`. See `docs/AUCTIONS.md` §1 — that file is the source of truth for auctions.
 - **listing_photos**: id, listingId, url, sortOrder, width?, height?
 - **listing_spots**: listingId, spotId (PK both) — seller's acceptable spots
 - **availability_windows**: id, listingId, startsAt, endsAt
 - **conversations**: id, listingId, buyerId, sellerId, createdAt, lastMessageAt; unique(listingId, buyerId)
 - **messages**: id, conversationId, senderId, body, createdAt
 - **conversation_reads**: conversationId, userId (PK both), lastReadAt? — one row per participant per conversation; `null`/missing row means "never read". Kept as its own table (rather than two columns on `conversations`) so "who read what" stays answerable and group threads wouldn't need a second migration.
-- **reservations**: id, listingId, buyerId, sellerId, status, spotId, startsAt (agreed/proposed time), proposedById (who made the current proposal), priceCents (agreed price snapshot), handoffCode? (4 digits, set on accept), buyerConfirmedAt?, sellerConfirmedAt?, cancelledById?, cancelReason?, createdAt, updatedAt
+- **reservations**: id, listingId, buyerId, sellerId, status, spotId?, startsAt (agreed/proposed time), proposedById (who made the current proposal), priceCents (agreed price snapshot), handoffCode? (4 digits, set on accept), buyerConfirmedAt?, sellerConfirmedAt?, cancelledById?, cancelReason?, createdAt, updatedAt
   - **partial unique index**: `(listingId) WHERE status = 'accepted'` — DB guarantees one accepted hold per item.
 - **handoff_confirmations**: id, reservationId, userId, confirmedAt, method ('code' | 'tap')
 - **blocks**: blockerId, blockedId (PK both), createdAt
@@ -82,13 +84,31 @@ listing.feed          pub  { campusId, q?, category?, minCents?, maxCents?, size
       q = free-text search (trimmed, 1–80 chars); case-insensitive match over title, brand and description
                                                     → { items: ListingCard[], nextCursor? }
       ListingCard = listing + coverPhotoUrl + seller{ id, displayName, avatarUrl, isDemo, campusEmailVerified } + hasAvailabilityToday
+                    + currentPriceCents (highest bid, else the fixed/start price) + bidCount
 listing.byId          pub  { id }                   → ListingDetail = listing + photos[] + seller + spots[] + availabilityWindows[] + activeReservationId? + viewerRole ('seller'|'buyer'|'guest') + isSaved
 listing.bySeller      pub  { sellerId, includeSold? } → ListingCard[]
 listing.mine          P    –                        → ListingCard[] (all statuses)
-listing.create        P    { title, description?, category, condition, priceCents, size?, brand?, isSellToday, photoUrls: string[] (1–8), spotIds: string[] (1+), windows: {startsAt,endsAt}[] (0+) } → ListingDetail
+listing.create        P    { title, description?, category, condition, priceCents, saleType?, startPriceCents?, buyoutPriceCents?, size?, brand?, isSellToday, photoUrls: string[] (1–8), spotIds: string[] (1+), windows: {startsAt,endsAt}[] (0+) } → ListingDetail
+      saleType 'auction' requires startPriceCents >= 100 and, if given, buyoutPriceCents > startPriceCents.
+      An auction ignores priceCents/isSellToday: priceCents mirrors startPriceCents and expiresAt = now + 24h.
 listing.update        P    { id, ...same fields optional }             → ListingDetail
-listing.remove        P    { id }                   → { ok }
-listing.relist        P    { id, isSellToday }      → ListingDetail  (expired/removed → active)
+      CONFLICT "This auction already has bids, so its prices can't change." when bids exist and a
+      price field or saleType changes.
+listing.remove        P    { id }                   → { ok }   (CONFLICT when an auction already has bids)
+listing.relist        P    { id, isSellToday, saleType?, startPriceCents?, buyoutPriceCents? } → ListingDetail
+      (expired/removed → active; for an auction, clears every previous bid and sets expiresAt = now + 24h)
+
+bid.place             P    { listingId, amountCents } → { bid, currentPriceCents, minNextBidCents, bidCount, endsAt, extended }
+      BAD_REQUEST on a fixed-price listing, below the minimum increment, or at/above the buyout price.
+      FORBIDDEN when the caller is the seller or either party has blocked the other.
+      CONFLICT when the listing is not active or the auction has ended.
+      `extended: true` means anti-snipe pushed `endsAt` out to now + 2 minutes.
+bid.buyout            P    { listingId }           → { listingId, pricePaidCents, reservationId }
+      Ends the auction (listing 'reserved', expiresAt = now) and creates the winner's reservation.
+      BAD_REQUEST when there is no buyout price. CONFLICT when bidding already reached it.
+bid.forListing        pub  { listingId, limit? }   → { id, listingId, amountCents, createdAt, bidder: PublicUser }[]
+      Newest first. Bidders are display names only — never an email.
+bid.mine              P    –                       → { id, amountCents, createdAt, listing: ListingCard, isTopBid }[]
 listing.toggleSave    P    { id }                   → { saved: boolean }
 listing.saved         P    –                        → ListingCard[]
 

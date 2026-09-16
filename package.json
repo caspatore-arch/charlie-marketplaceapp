@@ -37,6 +37,7 @@
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.2",
+    "stripe": "^22.6.2",
     "superjson": "^2.2.6",
     "zod": "^4.6.5"
   },
@@ -60,6 +61,7 @@
     "db:reset": "tsx backend/db/guard.ts && rm -rf backend/data/pg && tsx backend/db/seed.ts",
     "db:check": "tsx scripts/check-db-url.ts",
     "test:e2e": "tsx scripts/e2e.ts",
+    "test:geo": "tsx scripts/geo-check.ts",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "env:lan": "node -e \"const fs=require('fs');const ip=require('child_process').execSync('ipconfig getifaddr en0').toString().trim();let e=fs.readFileSync('.env','utf8');e=e.replace(/EXPO_PUBLIC_RORK_API_BASE_URL=.*/,'EXPO_PUBLIC_RORK_API_BASE_URL=http://'+ip+':3000');fs.writeFileSync('.env',e);console.log('API base URL set to http://'+ip+':3000')\""

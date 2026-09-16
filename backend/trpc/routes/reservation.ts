@@ -19,19 +19,101 @@ import { z } from 'zod';
 import type { Db } from '../../db/client';
 import {
   availabilityWindows,
+  campuses,
   handoffConfirmations,
   listingSpots,
   listings,
   reservations,
   type Reservation,
 } from '../../db/schema';
+import { directionsUrlForCoords, geocodeAddress, haversineMeters, GeocodeError } from '../../geocode';
 import {
   applyExpiry,
   isBlockedBetween,
   isUniqueViolation,
   toReservationDetails,
+  type ReservationDetail,
 } from '../lib';
 import { protectedProcedure, router } from '../trpc';
+
+/**
+ * `lib.ts`'s `toReservationDetails` already handles a null `spotId` safely
+ * (it returns `spot: null`, `directionsUrl: null`) — that's the auctions
+ * agent's own "reserved with no spot yet" case. It has no notion of a custom
+ * address though, so this wrapper fixes `directionsUrl` back up from
+ * `customLat`/`customLng` for the rows this feature owns.
+ */
+async function toReservationDetailsWithCustom(
+  db: Db,
+  rows: Reservation[],
+  viewerId: string,
+): Promise<ReservationDetail[]> {
+  const details = await toReservationDetails(db, rows, viewerId);
+  return details.map((d) =>
+    d.customLat != null && d.customLng != null
+      ? { ...d, directionsUrl: directionsUrlForCoords(d.customLat, d.customLng) }
+      : d,
+  );
+}
+
+/** The resolved meetup location for a `request`/`counter` write — exactly one branch is non-null. */
+type ResolvedLocation = {
+  spotId: string | null;
+  customAddress: string | null;
+  customLat: number | null;
+  customLng: number | null;
+};
+
+/**
+ * Turns `{ spotId }` or `{ customAddress }` input into a `ResolvedLocation`,
+ * geocoding and radius-checking a custom address against the listing's
+ * campus. Throws `BAD_REQUEST` with the exact spec copy on failure
+ * (docs/AUCTIONS.md §2).
+ */
+async function resolveLocation(
+  db: Db,
+  campusId: string,
+  input: { spotId?: string; customAddress?: string },
+): Promise<ResolvedLocation> {
+  if (input.spotId) {
+    return { spotId: input.spotId, customAddress: null, customLat: null, customLng: null };
+  }
+
+  const [campus] = await db.select().from(campuses).where(eq(campuses.id, campusId)).limit(1);
+  if (!campus) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'That campus no longer exists.' });
+  }
+
+  let geo;
+  try {
+    geo = await geocodeAddress(db, input.customAddress!);
+  } catch (err) {
+    if (err instanceof GeocodeError) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: err.message });
+    }
+    throw err;
+  }
+
+  const distanceMeters = haversineMeters(campus.centerLat, campus.centerLng, geo.lat, geo.lng);
+  if (distanceMeters > campus.meetupRadiusMeters) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'That address is outside the 2-mile campus area.',
+    });
+  }
+
+  return { spotId: null, customAddress: geo.displayName, customLat: geo.lat, customLng: geo.lng };
+}
+
+/** `{ spotId }` xor `{ customAddress }` — shared by `request` and `counter` input. */
+const locationInput = z
+  .object({
+    spotId: z.uuid().optional(),
+    customAddress: z.string().trim().min(3).max(300).optional(),
+  })
+  .refine((v) => (v.spotId != null) !== (v.customAddress != null), {
+    message: 'Choose a meetup spot or enter an address, not both.',
+  });
 
 const OPEN_STATUSES = ['requested', 'countered', 'accepted'] as const;
 
@@ -48,7 +130,7 @@ async function loadParticipantReservation(db: Db, id: string, userId: string) {
 }
 
 async function detailFor(db: Db, res: Reservation, viewerId: string) {
-  const [detail] = await toReservationDetails(db, [res], viewerId);
+  const [detail] = await toReservationDetailsWithCustom(db, [res], viewerId);
   return detail!;
 }
 
@@ -76,7 +158,12 @@ async function releaseListing(db: Db, listingId: string) {
 
 export const reservationRouter = router({
   request: protectedProcedure
-    .input(z.object({ listingId: z.uuid(), spotId: z.uuid(), startsAt: z.coerce.date() }))
+    .input(
+      z.intersection(
+        z.object({ listingId: z.uuid(), startsAt: z.coerce.date() }),
+        locationInput,
+      ),
+    )
     .mutation(async ({ ctx, input }) => {
       await applyExpiry(ctx.db);
 
@@ -107,17 +194,20 @@ export const reservationRouter = router({
         });
       }
 
-      const allowedSpot = await ctx.db
-        .select({ spotId: listingSpots.spotId })
-        .from(listingSpots)
-        .where(and(eq(listingSpots.listingId, listing.id), eq(listingSpots.spotId, input.spotId)))
-        .limit(1);
-      if (allowedSpot.length === 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'The seller does not meet at that spot.',
-        });
+      if (input.spotId) {
+        const allowedSpot = await ctx.db
+          .select({ spotId: listingSpots.spotId })
+          .from(listingSpots)
+          .where(and(eq(listingSpots.listingId, listing.id), eq(listingSpots.spotId, input.spotId)))
+          .limit(1);
+        if (allowedSpot.length === 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'The seller does not meet at that spot.',
+          });
+        }
       }
+      const location = await resolveLocation(ctx.db, listing.campusId, input);
 
       // The requested time must fall inside a window the seller published.
       // (A seller who wants another time counters instead.)
@@ -160,7 +250,7 @@ export const reservationRouter = router({
           buyerId: ctx.user.id,
           sellerId: listing.sellerId,
           status: 'requested',
-          spotId: input.spotId,
+          ...location,
           startsAt: input.startsAt,
           proposedById: ctx.user.id,
           priceCents: listing.priceCents,
@@ -170,14 +260,56 @@ export const reservationRouter = router({
       return created!;
     }),
 
+  /** Validates a custom address without creating anything — powers the "Check address" step in the UI. */
+  checkAddress: protectedProcedure
+    .input(z.object({ campusId: z.uuid(), address: z.string().trim().min(3).max(300) }))
+    .mutation(async ({ ctx, input }) => {
+      const [campus] = await ctx.db
+        .select()
+        .from(campuses)
+        .where(eq(campuses.id, input.campusId))
+        .limit(1);
+      if (!campus) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That campus no longer exists.' });
+      }
+
+      let geo;
+      try {
+        geo = await geocodeAddress(ctx.db, input.address);
+      } catch (err) {
+        if (err instanceof GeocodeError) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: err.message });
+        }
+        throw err;
+      }
+
+      const distanceMeters = haversineMeters(campus.centerLat, campus.centerLng, geo.lat, geo.lng);
+      if (distanceMeters > campus.meetupRadiusMeters) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That address is outside the 2-mile campus area.',
+        });
+      }
+
+      return {
+        address: geo.displayName,
+        lat: geo.lat,
+        lng: geo.lng,
+        distanceMeters,
+        meetupRadiusMeters: campus.meetupRadiusMeters,
+      };
+    }),
+
   counter: protectedProcedure
     .input(
-      z.object({
-        id: z.uuid(),
-        spotId: z.uuid(),
-        startsAt: z.coerce.date(),
-        note: z.string().max(500).optional(),
-      }),
+      z.intersection(
+        z.object({
+          id: z.uuid(),
+          startsAt: z.coerce.date(),
+          note: z.string().max(500).optional(),
+        }),
+        locationInput,
+      ),
     )
     .mutation(async ({ ctx, input }) => {
       await applyExpiry(ctx.db);
@@ -190,17 +322,26 @@ export const reservationRouter = router({
         });
       }
 
-      const allowedSpot = await ctx.db
-        .select({ spotId: listingSpots.spotId })
-        .from(listingSpots)
-        .where(and(eq(listingSpots.listingId, res.listingId), eq(listingSpots.spotId, input.spotId)))
-        .limit(1);
-      if (allowedSpot.length === 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'The seller does not meet at that spot.',
-        });
+      if (input.spotId) {
+        const allowedSpot = await ctx.db
+          .select({ spotId: listingSpots.spotId })
+          .from(listingSpots)
+          .where(and(eq(listingSpots.listingId, res.listingId), eq(listingSpots.spotId, input.spotId)))
+          .limit(1);
+        if (allowedSpot.length === 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'The seller does not meet at that spot.',
+          });
+        }
       }
+
+      const [listingForCampus] = await ctx.db
+        .select({ campusId: listings.campusId })
+        .from(listings)
+        .where(eq(listings.id, res.listingId))
+        .limit(1);
+      const location = await resolveLocation(ctx.db, listingForCampus!.campusId, input);
 
       // Rescheduling an accepted meetup drops the accepted hold but keeps the
       // item off the market ('reserved') until the two sides agree again.
@@ -208,7 +349,7 @@ export const reservationRouter = router({
         .update(reservations)
         .set({
           status: 'countered',
-          spotId: input.spotId,
+          ...location,
           startsAt: input.startsAt,
           proposedById: ctx.user.id,
           handoffCode: null,
@@ -402,7 +543,7 @@ export const reservationRouter = router({
         .from(reservations)
         .where(who)
         .orderBy(desc(reservations.updatedAt));
-      return toReservationDetails(ctx.db, rows, ctx.user.id);
+      return toReservationDetailsWithCustom(ctx.db, rows, ctx.user.id);
     }),
 
   forListing: protectedProcedure

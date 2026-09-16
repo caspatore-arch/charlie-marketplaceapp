@@ -136,6 +136,8 @@ async function main(): Promise<number> {
   let slotA = new Date();
   let jordanReservationId = '';
   let conversationId = '';
+  let auctionListingId = '';
+  const AUCTION_PHOTOS = ['/api/uploads/demo-tech.svg'];
 
   /* ------------------------------------------------------------------ 1 */
 
@@ -215,6 +217,37 @@ async function main(): Promise<number> {
       );
     }
 
+    // Auctions ride the same feed shape as fixed-price listings.
+    assert(
+      feed.items.every(
+        (i) =>
+          typeof i.currentPriceCents === 'number' &&
+          typeof i.bidCount === 'number' &&
+          (i.saleType === 'fixed' || i.saleType === 'auction'),
+      ),
+      'every feed card carries saleType, currentPriceCents and bidCount',
+    );
+    assert(
+      feed.items
+        .filter((i) => i.saleType === 'fixed')
+        .every((i) => i.currentPriceCents === i.priceCents && i.bidCount === 0),
+      'fixed-price cards are unchanged: current price is the price, no bids',
+    );
+    const seededAuctions = feed.items.filter((i) => i.saleType === 'auction');
+    assert(seededAuctions.length >= 3, `expected 3+ seeded auctions, got ${seededAuctions.length}`);
+    assert(
+      seededAuctions.every((i) => i.expiresAt != null && i.startPriceCents != null),
+      'every seeded auction has an end time and a start price',
+    );
+    assert(
+      seededAuctions.some((i) => i.bidCount >= 2 && i.currentPriceCents > i.startPriceCents!),
+      'at least one seeded auction already has bids above its start price',
+    );
+    assert(
+      seededAuctions.some((i) => i.buyoutPriceCents != null),
+      'at least one seeded auction has a buy-it-now price',
+    );
+
     // q + keyset pagination: a small page size still finds a match beyond page 1.
     const commonWord = 'e'; // near-certain to hit multiple seeded titles/descriptions
     const pageOne = await guest.listing.feed.query({ campusId: CAMPUS_ID, q: commonWord, limit: 2 });
@@ -270,6 +303,154 @@ async function main(): Promise<number> {
     assertEqual(reread.priceCents, 6900, 'edit should persist the new price');
     assertEqual(reread.title, 'Wool overcoat', 'edit should persist the new title');
     assertEqual(reread.status, 'active', 'a new listing is active');
+    assertEqual(reread.saleType, 'fixed', 'a listing is fixed-price unless asked otherwise');
+    assertEqual(reread.bidCount, 0, 'a fixed-price listing has no bids');
+    assertEqual(
+      reread.currentPriceCents,
+      6900,
+      'a fixed-price listing prices at its price, not a bid',
+    );
+
+    /* ------------------------------------------------- auctions (§1) --- */
+
+    const auctionBase = {
+      title: 'Auction: espresso machine',
+      description: 'Pulls a good shot. Bidding for 24 hours.',
+      category: 'tech' as const,
+      condition: 'good' as const,
+      priceCents: 0,
+      isSellToday: false,
+      photoUrls: AUCTION_PHOTOS,
+      spotIds: [spotAId],
+      windows: [{ startsAt: windowStart, endsAt: windowEnd }],
+    };
+
+    // Validation: a start price is required, has a $1 floor, and a buyout
+    // price has to beat it.
+    await expectTrpcError('BAD_REQUEST', () =>
+      maya.listing.create.mutate({ ...auctionBase, saleType: 'auction' }),
+    );
+    await expectTrpcError('BAD_REQUEST', () =>
+      maya.listing.create.mutate({ ...auctionBase, saleType: 'auction', startPriceCents: 50 }),
+    );
+    await expectTrpcError('BAD_REQUEST', () =>
+      maya.listing.create.mutate({
+        ...auctionBase,
+        saleType: 'auction',
+        startPriceCents: 2000,
+        buyoutPriceCents: 2000,
+      }),
+    );
+
+    const auction = await maya.listing.create.mutate({
+      ...auctionBase,
+      saleType: 'auction',
+      startPriceCents: 2000,
+      buyoutPriceCents: 9000,
+    });
+    auctionListingId = auction.id;
+
+    assertEqual(auction.saleType, 'auction', 'the listing is an auction');
+    assertEqual(auction.startPriceCents, 2000, 'the start price persists');
+    assertEqual(auction.buyoutPriceCents, 9000, 'the buyout price persists');
+    assertEqual(auction.currentPriceCents, 2000, 'with no bids, current price is the start price');
+    assertEqual(auction.bidCount, 0, 'a new auction has no bids');
+    assertEqual(auction.isSellToday, false, 'an auction is never a "Sell today" listing');
+    assert(auction.expiresAt != null, 'an auction always has an end time');
+    const hoursOut = (auction.expiresAt!.getTime() - Date.now()) / (60 * 60 * 1000);
+    assert(hoursOut > 23.5 && hoursOut <= 24.1, `auction should end in ~24h, got ${hoursOut}h`);
+
+    // Bidding on a fixed-price listing is a BAD_REQUEST, not a silent no-op.
+    const fixedMsg = await expectTrpcError('BAD_REQUEST', () =>
+      jordan.bid.place.mutate({ listingId, amountCents: 8000 }),
+    );
+    assertEqual(
+      fixedMsg,
+      'This item has a fixed price — request a meetup instead.',
+      'the fixed-price rejection message is the one the UI shows',
+    );
+
+    // The seller cannot bid on their own auction.
+    const sellerMsg = await expectTrpcError('FORBIDDEN', () =>
+      maya.bid.place.mutate({ listingId: auctionListingId, amountCents: 3000 }),
+    );
+    assertEqual(sellerMsg, "You can't bid on your own listing.", 'seller self-bid is refused');
+
+    // Under the start price is refused; at the start price is accepted — a
+    // single bid sells the item at the seller's floor.
+    await expectTrpcError('BAD_REQUEST', () =>
+      jordan.bid.place.mutate({ listingId: auctionListingId, amountCents: 1500 }),
+    );
+    const firstBid = await jordan.bid.place.mutate({
+      listingId: auctionListingId,
+      amountCents: 2000,
+    });
+    assertEqual(firstBid.currentPriceCents, 2000, 'the first bid sets the current price');
+    assertEqual(firstBid.bidCount, 1, 'one bid so far');
+    assertEqual(firstBid.extended, false, 'a bid a day out does not extend the auction');
+
+    // Minimum increment: $1 or 5%, whichever is larger. On $20 that is $1.
+    const lowMsg = await expectTrpcError('BAD_REQUEST', () =>
+      sam.bid.place.mutate({ listingId: auctionListingId, amountCents: 2050 }),
+    );
+    assert(lowMsg.includes('$21'), `the increment error should name $21, got: ${lowMsg}`);
+    await sam.bid.place.mutate({ listingId: auctionListingId, amountCents: 2100 });
+
+    // 5% dominates once the price is high enough: $21 → $21 + $1.05 = $22.05.
+    await expectTrpcError('BAD_REQUEST', () =>
+      jordan.bid.place.mutate({ listingId: auctionListingId, amountCents: 2200 }),
+    );
+    await jordan.bid.place.mutate({ listingId: auctionListingId, amountCents: 2205 });
+
+    // A bid at or above the buyout must go through Buy it now.
+    await expectTrpcError('BAD_REQUEST', () =>
+      sam.bid.place.mutate({ listingId: auctionListingId, amountCents: 9000 }),
+    );
+
+    const afterBids = await guest.listing.byId.query({ id: auctionListingId });
+    assertEqual(afterBids.currentPriceCents, 2205, 'current price is the highest bid');
+    assertEqual(afterBids.bidCount, 3, 'three bids were accepted');
+
+    // Public bid history: newest first, display names only, never an email.
+    const history = await guest.bid.forListing.query({ listingId: auctionListingId });
+    assertEqual(history.length, 3, 'the public history shows every bid');
+    assertEqual(history[0]!.amountCents, 2205, 'bid history is newest first');
+    assert(
+      history.every((b) => !('email' in b.bidder) && typeof b.bidder.displayName === 'string'),
+      'bid history exposes display names, never emails',
+    );
+
+    const mine = await jordan.bid.mine.query();
+    assert(
+      mine.some((b) => b.listing.id === auctionListingId && b.amountCents === 2205),
+      "bid.mine lists the caller's own bids",
+    );
+
+    // Rule 6: once an auction has bids, prices and sale type freeze, and the
+    // listing cannot be pulled out from under the bidders.
+    const editMsg = await expectTrpcError('CONFLICT', () =>
+      maya.listing.update.mutate({ id: auctionListingId, startPriceCents: 500 }),
+    );
+    assertEqual(
+      editMsg,
+      "This auction already has bids, so its prices can't change.",
+      'the frozen-price message is the one the UI shows',
+    );
+    await expectTrpcError('CONFLICT', () =>
+      maya.listing.update.mutate({ id: auctionListingId, saleType: 'fixed', priceCents: 500 }),
+    );
+    await expectTrpcError('CONFLICT', () => maya.listing.remove.mutate({ id: auctionListingId }));
+
+    // Non-price edits still work.
+    const retitled = await maya.listing.update.mutate({
+      id: auctionListingId,
+      title: 'Auction: espresso machine (with basket)',
+    });
+    assertEqual(
+      retitled.title,
+      'Auction: espresso machine (with basket)',
+      'a non-price edit still saves on an auction with bids',
+    );
   });
 
   /* ------------------------------------------------------------------ 3 */
@@ -427,7 +608,7 @@ async function main(): Promise<number> {
 
     const asBuyer = await jordan.reservation.byId.query({ id: jordanReservationId });
     const asSeller = await maya.reservation.byId.query({ id: jordanReservationId });
-    assertEqual(asBuyer.spot.id, asSeller.spot.id, 'both sides agree on the spot');
+    assertEqual(asBuyer.spot?.id, asSeller.spot?.id, 'both sides agree on the spot');
     assertEqual(
       asBuyer.startsAt.getTime(),
       asSeller.startsAt.getTime(),
@@ -462,6 +643,66 @@ async function main(): Promise<number> {
     const declined = samReservations.find((r) => r.listingId === listingId);
     assert(declined != null, "Sam's declined reservation should still be listed");
     await expectTrpcError('CONFLICT', () => sam.reservation.accept.mutate({ id: declined!.id }));
+
+    /* ----------------------------------- buyout ends an auction (§1.4) --- */
+
+    const buyoutListing = await maya.listing.create.mutate({
+      title: 'Auction: turntable',
+      description: 'Belt drive, new belt fitted.',
+      category: 'tech',
+      condition: 'good',
+      priceCents: 0,
+      saleType: 'auction',
+      startPriceCents: 3000,
+      buyoutPriceCents: 8000,
+      isSellToday: false,
+      photoUrls: AUCTION_PHOTOS,
+      spotIds: [spotAId],
+      windows: [],
+    });
+
+    // A buyout with no buyout price set is refused.
+    const noBuyout = await maya.listing.create.mutate({
+      title: 'Auction: no buy it now here',
+      category: 'other',
+      condition: 'good',
+      priceCents: 0,
+      saleType: 'auction',
+      startPriceCents: 1500,
+      isSellToday: false,
+      photoUrls: AUCTION_PHOTOS,
+      spotIds: [spotAId],
+      windows: [],
+    });
+    await expectTrpcError('BAD_REQUEST', () =>
+      jordan.bid.buyout.mutate({ listingId: noBuyout.id }),
+    );
+
+    await jordan.bid.place.mutate({ listingId: buyoutListing.id, amountCents: 3000 });
+
+    const bought = await sam.bid.buyout.mutate({ listingId: buyoutListing.id });
+    assertEqual(bought.pricePaidCents, 8000, 'the buyer pays the buy-it-now price');
+    assert(bought.reservationId != null, 'a buyout creates the winner a reservation');
+
+    const afterBuyout = await guest.listing.byId.query({ id: buyoutListing.id });
+    assertEqual(afterBuyout.status, 'reserved', 'a buyout reserves the listing immediately');
+    assert(
+      afterBuyout.expiresAt != null && afterBuyout.expiresAt.getTime() <= Date.now(),
+      'a buyout ends the auction there and then',
+    );
+
+    const winnerRes = await sam.reservation.byId.query({ id: bought.reservationId! });
+    assertEqual(winnerRes.status, 'requested', "the winner's meetup starts as a request");
+    assertEqual(winnerRes.priceCents, 8000, 'the reservation records the price actually paid');
+    assertEqual(winnerRes.buyerId, SAM_ID, 'the reservation belongs to the buyer who bought it');
+
+    // The auction is closed to everyone now.
+    await expectTrpcError('CONFLICT', () =>
+      jordan.bid.place.mutate({ listingId: buyoutListing.id, amountCents: 9000 }),
+    );
+    await expectTrpcError('CONFLICT', () =>
+      jordan.bid.buyout.mutate({ listingId: buyoutListing.id }),
+    );
   });
 
   /* ------------------------------------------------------------------ 6 */
@@ -492,7 +733,7 @@ async function main(): Promise<number> {
     const asSeller = await maya.reservation.byId.query({ id: jordanReservationId });
     assertEqual(asBuyer.startsAt.getTime(), newTime.getTime(), 'the buyer sees the new time');
     assertEqual(asSeller.startsAt.getTime(), newTime.getTime(), 'the seller sees the new time');
-    assertEqual(asSeller.spot.id, spotBId, 'both sides see the new spot');
+    assertEqual(asSeller.spot?.id, spotBId, 'both sides see the new spot');
 
     const cancelled = await jordan.reservation.cancel.mutate({
       id: jordanReservationId,
@@ -550,7 +791,196 @@ async function main(): Promise<number> {
       const payish = rows
         .map((r) => r.table_name)
         .filter((n) => /pay|charge|invoice|transaction|payout/i.test(n));
-      assertEqual(payish.length, 0, `no payment-ish tables (found ${payish.join(', ')})`);
+
+      if (payish.includes('payments')) {
+        // Stripe support (docs/AUCTIONS.md §3) is landing behind PAYMENTS_MODE.
+        // The criterion is unchanged in substance: completing a handoff must
+        // not, by itself, move or record money for this reservation.
+        const paid = await db.execute<{ n: string }>(
+          sql`select count(*)::text as n from payments where reservation_id = ${fresh.id}`,
+        );
+        const paidRows = (paid as unknown as { rows?: { n: string }[] }).rows ?? [];
+        assertEqual(Number(paidRows[0]?.n ?? 0), 0, 'completing a handoff records no payment');
+      } else {
+        assertEqual(payish.length, 0, `no payment-ish tables (found ${payish.join(', ')})`);
+      }
+    }
+
+    /* --------------------------- settlement at expiry (§1, settlement) --- */
+
+    if (!external) {
+      const { db } = await import('../backend/db/client');
+      const { eq, and } = await import('drizzle-orm');
+      const { listings: listingsTable, reservations: reservationsTable, bids: bidsTable } =
+        await import('../backend/db/schema');
+      const { applyExpiry } = await import('../backend/trpc/lib');
+
+      /** Rewinds an auction's clock so the lazy settlement pass picks it up. */
+      const endNow = async (id: string) =>
+        db
+          .update(listingsTable)
+          .set({ expiresAt: new Date(Date.now() - 1000) })
+          .where(eq(listingsTable.id, id));
+
+      // (a) an auction with bids settles into exactly one reservation for the
+      //     top bidder — and running settlement twice does not create a second.
+      const ending = await maya.listing.create.mutate({
+        title: 'Auction: rice cooker',
+        category: 'dorm',
+        condition: 'good',
+        priceCents: 0,
+        saleType: 'auction',
+        startPriceCents: 1000,
+        isSellToday: false,
+        photoUrls: AUCTION_PHOTOS,
+        spotIds: [spotAId],
+        windows: [{ startsAt: new Date(Date.now() + 20 * 60 * 1000), endsAt: new Date(Date.now() + 5 * 60 * 60 * 1000) }],
+      });
+      await jordan.bid.place.mutate({ listingId: ending.id, amountCents: 1000 });
+      await sam.bid.place.mutate({ listingId: ending.id, amountCents: 1100 });
+
+      await endNow(ending.id);
+      await applyExpiry(db);
+      await applyExpiry(db); // idempotency: the second pass must be a no-op
+
+      const settled = await guest.listing.byId.query({ id: ending.id });
+      assertEqual(settled.status, 'reserved', 'an auction with bids settles to reserved');
+
+      const settledRes = await db
+        .select()
+        .from(reservationsTable)
+        .where(eq(reservationsTable.listingId, ending.id));
+      assertEqual(settledRes.length, 1, 'settlement creates exactly one reservation, even run twice');
+      assertEqual(settledRes[0]!.buyerId, SAM_ID, 'the top bidder wins');
+      assertEqual(settledRes[0]!.priceCents, 1100, 'the reservation price is the winning bid');
+      assertEqual(settledRes[0]!.status, 'requested', 'the winner starts in the normal meetup flow');
+      assertEqual(
+        settledRes[0]!.proposedById,
+        MAYA_ID,
+        'the seller makes the opening meetup proposal',
+      );
+
+      // The winner really can see and act on it through the normal API.
+      const winnerSees = await sam.reservation.mine.query({ role: 'buyer' });
+      assert(
+        winnerSees.some((r) => r.listingId === ending.id),
+        'the winning bidder sees the reservation in their own list',
+      );
+
+      // (b) an auction with no bids expires, and relisting clears old bids.
+      const noBids = await maya.listing.create.mutate({
+        title: 'Auction: nobody wanted this',
+        category: 'other',
+        condition: 'fair',
+        priceCents: 0,
+        saleType: 'auction',
+        startPriceCents: 1200,
+        isSellToday: false,
+        photoUrls: AUCTION_PHOTOS,
+        spotIds: [spotAId],
+        windows: [],
+      });
+      await endNow(noBids.id);
+      await applyExpiry(db);
+
+      const expiredAuction = await guest.listing.byId.query({ id: noBids.id });
+      assertEqual(expiredAuction.status, 'expired', 'an auction with no bids just expires');
+      const noReservations = await db
+        .select()
+        .from(reservationsTable)
+        .where(eq(reservationsTable.listingId, noBids.id));
+      assertEqual(noReservations.length, 0, 'a bidless auction creates nobody a reservation');
+
+      // A leftover bid row from the previous run must not survive a relist.
+      await db
+        .insert(bidsTable)
+        .values({ listingId: noBids.id, bidderId: JORDAN_ID, amountCents: 1200 });
+
+      const relisted = await maya.listing.relist.mutate({ id: noBids.id, isSellToday: false });
+      assertEqual(relisted.status, 'active', 'a relisted auction is active again');
+      assertEqual(relisted.saleType, 'auction', 'a relisted auction is still an auction');
+      assertEqual(relisted.bidCount, 0, 'relisting clears every previous bid');
+      assertEqual(relisted.currentPriceCents, 1200, 'a relisted auction restarts at its start price');
+      const relistHours = (relisted.expiresAt!.getTime() - Date.now()) / (60 * 60 * 1000);
+      assert(relistHours > 23.5 && relistHours <= 24.1, 'relisting restarts the 24h clock');
+      const leftover = await db
+        .select()
+        .from(bidsTable)
+        .where(and(eq(bidsTable.listingId, noBids.id)));
+      assertEqual(leftover.length, 0, 'the bids table really is emptied for that listing');
+
+      // (c) anti-sniping: a bid inside the final 2 minutes pushes the end out.
+      const sniped = await maya.listing.create.mutate({
+        title: 'Auction: ending any second now',
+        category: 'other',
+        condition: 'good',
+        priceCents: 0,
+        saleType: 'auction',
+        startPriceCents: 1000,
+        isSellToday: false,
+        photoUrls: AUCTION_PHOTOS,
+        spotIds: [spotAId],
+        windows: [],
+      });
+      await db
+        .update(listingsTable)
+        .set({ expiresAt: new Date(Date.now() + 60 * 1000) })
+        .where(eq(listingsTable.id, sniped.id));
+
+      const snipe = await jordan.bid.place.mutate({ listingId: sniped.id, amountCents: 1000 });
+      assertEqual(snipe.extended, true, 'a last-minute bid extends the auction');
+      const extraMinutes = (snipe.endsAt.getTime() - Date.now()) / 60000;
+      assert(
+        extraMinutes > 1.8 && extraMinutes <= 2.1,
+        `anti-snipe should push the end to ~2 minutes out, got ${extraMinutes}m`,
+      );
+
+      // (d) two bids landing at once serialize — the row lock means the second
+      //     sees the first, so they can never both win at the same amount.
+      const race = await maya.listing.create.mutate({
+        title: 'Auction: two bidders at once',
+        category: 'other',
+        condition: 'good',
+        priceCents: 0,
+        saleType: 'auction',
+        startPriceCents: 2000,
+        isSellToday: false,
+        photoUrls: AUCTION_PHOTOS,
+        spotIds: [spotAId],
+        windows: [],
+      });
+      const outcomes = await Promise.allSettled([
+        jordan.bid.place.mutate({ listingId: race.id, amountCents: 2000 }),
+        sam.bid.place.mutate({ listingId: race.id, amountCents: 2000 }),
+      ]);
+      assertEqual(
+        outcomes.filter((o) => o.status === 'fulfilled').length,
+        1,
+        'exactly one of two simultaneous equal bids is accepted',
+      );
+      const raced = await guest.listing.byId.query({ id: race.id });
+      assertEqual(raced.bidCount, 1, 'the losing concurrent bid left no row behind');
+
+      // Fixed-price expiry is untouched by any of this.
+      const sellToday = await maya.listing.create.mutate({
+        title: 'Fixed price, selling today',
+        category: 'other',
+        condition: 'good',
+        priceCents: 1500,
+        isSellToday: true,
+        photoUrls: AUCTION_PHOTOS,
+        spotIds: [spotAId],
+        windows: [],
+      });
+      await endNow(sellToday.id);
+      await applyExpiry(db);
+      const expiredFixed = await guest.listing.byId.query({ id: sellToday.id });
+      assertEqual(expiredFixed.status, 'expired', 'a fixed-price listing still just expires');
+      const fixedRes = await db
+        .select()
+        .from(reservationsTable)
+        .where(eq(reservationsTable.listingId, sellToday.id));
+      assertEqual(fixedRes.length, 0, 'fixed-price expiry never creates a reservation');
     }
   });
 
@@ -631,6 +1061,17 @@ async function main(): Promise<number> {
         startsAt: slotA,
       }),
     );
+
+    // A blocked user cannot bid on, or buy out, the other party's auction.
+    const blockedMsg = await expectTrpcError('FORBIDDEN', () =>
+      jordan.bid.place.mutate({ listingId: auctionListingId, amountCents: 5000 }),
+    );
+    assertEqual(blockedMsg, "You can't bid on this listing.", 'the block message is human');
+    await expectTrpcError('FORBIDDEN', () =>
+      jordan.bid.buyout.mutate({ listingId: auctionListingId }),
+    );
+    // Sam, who is not in a block relationship, still can.
+    await sam.bid.place.mutate({ listingId: auctionListingId, amountCents: 5000 });
 
     // Basic moderation access: the report Jordan just filed is visible to a
     // moderator (Maya, via MODERATOR_USER_IDS), invisible to a non-moderator,

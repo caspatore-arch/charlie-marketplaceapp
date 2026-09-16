@@ -1,5 +1,5 @@
 /**
- * Simulated fee breakdown shown on the request-meetup sheet. Usage:
+ * Fee breakdown shown on the request-meetup sheet. Usage:
  * <FeeBreakdown quote={feeQuoteQuery.data} />
  * Always labeled "Simulated — no money moves" per DESIGN.md copy rules — never
  * imply real payment happens.
@@ -31,11 +31,20 @@ export function FeeBreakdown({ quote }: FeeBreakdownProps) {
         </Text>
         <Text variant="body">{formatPrice(quote.platformFeeCents)}</Text>
       </View>
+      <View style={styles.row}>
+        <Text variant="body" color="inkMuted">
+          Card processing (estimated)
+        </Text>
+        <Text variant="body">{formatPrice(quote.stripeFeeEstimateCents)}</Text>
+      </View>
       <Divider style={styles.divider} />
       <View style={styles.row}>
-        <Text variant="heading">Seller receives</Text>
-        <Text variant="heading">{formatPrice(quote.sellerNetCents)}</Text>
+        <Text variant="heading">Seller receives (estimated)</Text>
+        <Text variant="heading">{formatPrice(quote.sellerNetEstimateCents)}</Text>
       </View>
+      <Text variant="caption" color="inkMuted">
+        {quote.estimateNote}
+      </Text>
       <View style={styles.badge}>
         <Text variant="caption" weight="600" color="demo">
           {quote.label}

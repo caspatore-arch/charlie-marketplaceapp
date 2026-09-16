@@ -43,6 +43,13 @@
       "when": 1789526490115,
       "tag": "0005_blushing_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789526613372,
+      "tag": "0006_sour_starbolt",
+      "breakpoints": true
     }
   ]
 }

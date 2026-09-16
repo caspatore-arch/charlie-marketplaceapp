@@ -69,6 +69,18 @@ export const handoffMethodEnum = pgEnum('handoff_method', ['code', 'tap']);
  */
 export const saleTypeEnum = pgEnum('sale_type', ['fixed', 'auction']);
 
+/**
+ * Lifecycle of one buyer payment (docs/AUCTIONS.md §3). Only the Stripe
+ * webhook may move a row into a terminal state — never the client, never a
+ * tRPC mutation.
+ */
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'requires_payment',
+  'paid',
+  'failed',
+  'refunded',
+]);
+
 /* ----------------------------------------------------------------- tables */
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -437,6 +449,78 @@ export const geocodeCache = pgTable('geocode_cache', {
   fetchedAt: ts('fetched_at').notNull().defaultNow(),
 });
 
+/* ------------------------------------------------------- payments (§3) */
+
+/**
+ * One Stripe Connect **Express** account per seller. Mirrors the flags Stripe
+ * reports so the app can say "payouts not set up" without a round trip; the
+ * source of truth is always Stripe, refreshed by `payment.sellerStatus` and
+ * the `account.updated` webhook.
+ */
+export const stripeAccounts = pgTable('stripe_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  stripeAccountId: text('stripe_account_id').notNull().unique(),
+  chargesEnabled: boolean('charges_enabled').notNull().default(false),
+  payoutsEnabled: boolean('payouts_enabled').notNull().default(false),
+  detailsSubmitted: boolean('details_submitted').notNull().default(false),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * One payment per reservation (unique), created when the winning buyer starts
+ * checkout. `amountCents` is the whole charge; `feeCents` is the platform's
+ * `application_fee_amount`. The remainder is transferred to the seller's
+ * connected account — a **destination charge**, so the seller is paid out on
+ * their normal Stripe schedule and the money is NOT held by this app.
+ */
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reservationId: uuid('reservation_id')
+      .notNull()
+      .unique()
+      .references(() => reservations.id, { onDelete: 'cascade' }),
+    buyerId: uuid('buyer_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sellerId: uuid('seller_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    amountCents: integer('amount_cents').notNull(),
+    feeCents: integer('fee_cents').notNull(),
+    stripePaymentIntentId: text('stripe_payment_intent_id').notNull(),
+    stripeChargeId: text('stripe_charge_id'),
+    status: paymentStatusEnum('status').notNull().default('requires_payment'),
+    /** Which mode produced this row: simulated | test | live. Never rewritten. */
+    mode: text('mode').notNull().default('simulated'),
+    paidAt: ts('paid_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('payments_buyer_idx').on(t.buyerId),
+    index('payments_seller_idx').on(t.sellerId),
+    uniqueIndex('payments_intent_uq').on(t.stripePaymentIntentId),
+  ],
+);
+
+/**
+ * Webhook idempotency. Stripe retries deliveries and can send the same event
+ * twice; the event id is the primary key, so a second delivery of the same
+ * event is a no-op insert conflict rather than a double state change.
+ */
+export const stripeEvents = pgTable('stripe_events', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull(),
+  receivedAt: ts('received_at').notNull().defaultNow(),
+});
+
 /* ------------------------------------------------------------ row types */
 
 export type Campus = typeof campuses.$inferSelect;
@@ -453,3 +537,6 @@ export type Reservation = typeof reservations.$inferSelect;
 export type Bid = typeof bids.$inferSelect;
 export type Report = typeof reports.$inferSelect;
 export type GeocodeCacheRow = typeof geocodeCache.$inferSelect;
+export type StripeAccount = typeof stripeAccounts.$inferSelect;
+export type Payment = typeof payments.$inferSelect;
+export type PaymentStatus = Payment['status'];

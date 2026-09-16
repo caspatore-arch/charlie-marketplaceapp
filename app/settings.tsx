@@ -2,7 +2,7 @@
  * Settings screen: Account (editable display name/bio, read-only campus +
  * verification), Safety (blocked users + what reporting does), About this
  * prototype (honest disclosures), Close account (destructive, typed
- * confirmation), and Sign out. Signed-in only — signed-out shows a sign-in
+ * confirmation), Payouts (Stripe Connect seller onboarding), and Sign out. Signed-in only — signed-out shows a sign-in
  * CTA, matching the Profile screen's convention.
  */
 import React from 'react';
@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { AccountSection } from '@/components/settings/AccountSection';
 import { SafetySection } from '@/components/settings/SafetySection';
+import { PayoutsSection } from '@/components/settings/PayoutsSection';
 import { AboutPrototypeSection } from '@/components/settings/AboutPrototypeSection';
 import { LegalSection } from '@/components/settings/LegalSection';
 import { CloseAccountSection } from '@/components/settings/CloseAccountSection';
@@ -61,6 +62,10 @@ export default function SettingsScreen() {
       >
         <SettingsSection title="Account">
           <AccountSection />
+        </SettingsSection>
+
+        <SettingsSection title="Payouts">
+          <PayoutsSection />
         </SettingsSection>
 
         <SettingsSection title="Safety">

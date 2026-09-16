@@ -12,6 +12,7 @@ import { PriceText } from './ui/PriceText';
 import { Avatar } from './ui/Avatar';
 import { resolveMediaUrl } from '@/lib/trpc';
 import { conditionLabel } from '@/utils/format';
+import { useCountdown } from './auction/useCountdown';
 import type { ListingCard as ListingCardType } from '@/types';
 
 export interface ListingCardProps {
@@ -20,10 +21,21 @@ export interface ListingCardProps {
 }
 
 export function ListingCard({ listing, onPress }: ListingCardProps) {
+  const isAuction = listing.saleType === 'auction';
+  const { shortLabel, ended } = useCountdown(isAuction ? listing.expiresAt : null);
+  const price = isAuction ? listing.currentPriceCents : listing.priceCents;
+  const auctionNote = isAuction
+    ? ended
+      ? 'Auction · Ended'
+      : `Auction · ${shortLabel} left`
+    : null;
+
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${listing.title}, ${conditionLabel(listing.condition)}, price $${(listing.priceCents / 100).toFixed(0)}`}
+      accessibilityLabel={`${listing.title}, ${conditionLabel(listing.condition)}, ${
+        isAuction ? `auction, current bid` : 'price'
+      } $${(price / 100).toFixed(0)}${auctionNote ? `, ${auctionNote}` : ''}`}
       onPress={onPress}
       style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
     >
@@ -49,7 +61,12 @@ export function ListingCard({ listing, onPress }: ListingCardProps) {
       </View>
 
       <View style={styles.info}>
-        <PriceText cents={listing.priceCents} />
+        <PriceText cents={price} />
+        {auctionNote ? (
+          <Text variant="caption" color={ended ? 'inkFaint' : 'inkMuted'} numberOfLines={1}>
+            {auctionNote}
+          </Text>
+        ) : null}
         <Text variant="label" numberOfLines={1} style={styles.title}>
           {listing.title}
         </Text>

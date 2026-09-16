@@ -63,9 +63,10 @@ Also verified: `npm run typecheck` clean; `npx expo export --platform ios` bundl
 
 | Area | State |
 |---|---|
-| Payments | **Simulated.** `payment.quote` does arithmetic (10% default fee, `PLATFORM_FEE_PERCENT`) and always returns `simulated: true`. No processor, no payment records, no protection implied. |
+| Payments | **Built, and switched off.** Stripe Connect Express with destination charges is implemented end to end — seller onboarding, buyer payment intent, webhook, refund, the 24-hour unpaid timeout. The seller is paid **immediately**, not at handoff; the app never holds the money. But there is **no Stripe account and no API key**, so the server forces `PAYMENTS_MODE=simulated` and **it cannot charge anyone**. Every payment screen shows "Simulated — no money moves." Proof against the built-in fake gateway: `npx tsx scripts/payments-check.ts`. See "Turning payments on" below. |
 | Email verification | **Simulated delivery.** Codes are real and expire in 10 min, but they print to the backend console instead of being emailed. Badge copy says "Campus email verified", never identity. |
 | Campus + meetup spots | University of Arizona with 4 **demo** spots (approximate coordinates). All labeled "verify hours and permission before pilot". |
+| Custom meetup addresses | Either party can propose an address within 2 miles of the campus center (approximate coordinates, `[FOUNDER TO CONFIRM]`) instead of a campus spot. Geocoded via OpenStreetMap **Nominatim**, a free public service whose usage policy forbids heavy/commercial use — fine for pilot volume, but **production needs a paid geocoder** (e.g. Google, Mapbox, Radar) before real traffic. See `backend/geocode.ts`. |
 | Map | Placeholder block + "Directions" link (opens Maps). No map SDK. |
 | Reminders / push | Not implemented. Screens poll every 5–10 s while open instead. |
 | Read receipts | None; unread count = messages from the other person. |
@@ -78,6 +79,26 @@ Also verified: `npm run typecheck` clean; `npx expo export --platform ios` bundl
 | Account closure | **Built, and it is anonymization — not erasure.** Closing an account removes your listings, cancels pending requests, signs you out everywhere and renames you "Deleted user"; message history, reports and completed sales are kept. It refuses while you have an accepted meetup. Hard erasure, data export and a retention policy are **not** built. |
 | Terms + Privacy | **Placeholder drafts only**, shown in-app (Settings → Legal) with a visible "DRAFT — not reviewed by a lawyer" banner. Every unknown fact is marked `[FOUNDER TO CONFIRM]` in the text itself. See **docs/LEGAL-TODO.md** for the decision list and the four items that specifically block an App Store submission. |
 | Age eligibility | A self-declaration checkbox on **new** sign-ups only ("I am at least 18"), plus agreement to Terms/Privacy. The threshold lives in one constant (`constants/legal.ts`) and is **your decision** — 13/16/18 have real legal consequences. This is a declaration, not verification, and the UI says so. Existing sign-in and the dev test-user switch are unaffected. |
+
+## 3a. Turning payments on — your steps, not the code's
+
+Nothing below can be done for you; it all needs your name, your bank details and your legal decisions.
+
+1. **Create a Stripe account** at stripe.com and complete the business details.
+2. **Enable Connect** in the Stripe dashboard and choose **Express** accounts. Accept Stripe's Connect / marketplace terms.
+3. **Copy your test secret key** (`sk_test_…`) into `.env` as `STRIPE_SECRET_KEY`, and set `PAYMENTS_MODE=test`. `.env` is gitignored — never put a key in `.env.example` or in a commit.
+4. **Add the webhook endpoint** in the Stripe dashboard: `POST https://<your server>/api/stripe/webhook`, subscribed to `payment_intent.succeeded`, `payment_intent.payment_failed`, `account.updated`, `charge.refunded`. Copy the signing secret (`whsec_…`) into `.env` as `STRIPE_WEBHOOK_SECRET`. The webhook is the only thing allowed to mark a payment paid, so payments will sit unpaid without it.
+5. Set `PUBLIC_APP_URL` to the address Stripe should send sellers back to after onboarding.
+6. **Test with Stripe's test cards** before going anywhere near `live`. Going live additionally requires `PAYMENTS_MODE=live` **and** `STRIPE_LIVE_ACK=1` — two switches on purpose.
+
+### Before real money — read this, it is not softened
+
+- **The buyer pays before they receive the item.** Payout is immediate, so the app cannot claw the money back automatically. A refund happens only if the seller agrees or a moderator intervenes. The buyer's real recourse is a card chargeback.
+- **Chargeback liability sits with you.** On destination charges the platform is liable by default. A disputed sale can leave you out of pocket *after* the seller has already been paid.
+- **The UI must never say "protected", "guaranteed", "safe" or "escrow".** The permitted framing is: "You pay now; the seller is paid right away. Arrange the handoff in the app."
+- **A short hold — pay at settlement, release at handoff — removes most of this.** Worth revisiting before real money; it is a different Stripe flow (separate charge and transfer), not a config change.
+- Also outstanding and none of it code: Stripe marketplace/Connect terms, seller KYC decisions (Connect handles the mechanics, not who you accept), a written refund and dispute policy, 1099-K reporting thresholds, sales-tax posture, a support contact, and everything in `docs/LEGAL-TODO.md`.
+- The real Stripe code path has **never been executed** — there has been no key to execute it with. Expect to debug it the first time a test key is present. That is normal.
 
 ## 4. Rork
 
@@ -104,3 +125,25 @@ The repo already matches Rork's generated layout (`app/`, `components/`, `backen
 ## 6. Open founder decisions (unchanged from the brief)
 
 Brand name · final pilot campus · commission rate · payment provider + timing · hosting account · launch eligibility/legal review · production distribution.
+
+## 7. Payments update (2026‑09‑15, second pass): direct charges
+
+Added after the section above; nothing earlier in this document was rewritten. Where this contradicts §3's "chargeback liability sits with you", **this section is the current one.**
+
+| What | Where it now stands |
+|---|---|
+| Charge model | **Direct charges.** The card payment is taken on the *seller's* Stripe account, not the platform's. Previously destination charges. |
+| Merchant of record | The seller. |
+| Who pays Stripe's processing fee (~2.9% + 30¢) | The seller, out of the sale. Previously the platform. |
+| Who a dispute is charged to | The seller's Stripe balance first. Previously the platform. |
+| How the platform earns | Purely `application_fee_amount` — exactly 10% of the sale, swept by Stripe. |
+| Refunds | Must be issued on the seller's connected account; they come out of the seller's balance. Seller or moderator only, still confirmed by webhook only. |
+| New env var | `PAYOUT_DELAY_DAYS` (0–30, **default 0**). `0` = pay the seller as fast as Stripe allows. **`7` is recommended for the pilot.** |
+| Webhooks | Same endpoint, same signing secret, verification unchanged and still mandatory. Connected‑account events carry `event.account`; an event without a recognised account is never applied. |
+| Still true | No Stripe account, no key, nothing executed against Stripe. Mode is still forced to `simulated` and every screen still says "Simulated — no money moves." |
+
+**The part not to gloss over.** Moving dispute liability to the seller does not make the platform safe, and it does nothing at all for the buyer. With `PAYOUT_DELAY_DAYS=0` the seller has normally been paid out before a dispute lands, so there is no seller balance to debit; Stripe takes that account negative and, if the seller never makes it good, Stripe's negative‑balance rules bring the loss back to the platform. Setting `PAYOUT_DELAY_DAYS=7` keeps a buffer in the seller's balance for exactly this. It also means sellers wait a week — that is the trade, and sellers should be told plainly (the Payouts screen does say it).
+
+**Seller‑facing numbers are now estimates.** Because the seller pays Stripe's fee, "price minus 10%" is no longer what they keep, and Stripe's exact fee is unknown until settlement. The app shows the platform fee exactly, the card fee as an estimate, and the seller's take‑home as an estimate with that word attached. Do not let any future copy state an exact seller net.
+
+**One change still needed that this pass was not allowed to make:** `components/FeeBreakdown.tsx` (the fee panel on the request‑meetup sheet) still labels its bottom row "Seller receives" over a figure that is the price minus the platform fee only — i.e. before Stripe's fee. It should read "Seller receives (before card fee)", or show `sellerNetEstimateCents` with the estimate wording. The data it needs is already on `payment.quote`.

@@ -2,7 +2,14 @@ import { trpcServer } from '@hono/trpc-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import { dbKind } from './db/client';
+import { db, dbKind } from './db/client';
+import { paymentsMode } from './stripe/client';
+import {
+  processSimulatedEvent,
+  processWebhook,
+  simulateHookAllowed,
+  type SimulatedEventKind,
+} from './stripe/webhook';
 import {
   LocalDiskStorage,
   MAX_UPLOAD_BYTES,
@@ -20,9 +27,67 @@ export const app = new Hono();
 // Dev-permissive CORS: the Expo app is served from an arbitrary LAN origin.
 app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'] }));
 
-app.get('/api/health', (c) =>
-  c.json({ ok: true, db: dbKind, demo: true }),
-);
+app.get('/api/health', (c) => {
+  const { mode, reason, requested } = paymentsMode();
+  return c.json({
+    ok: true,
+    db: dbKind,
+    demo: true,
+    // The app derives every payment label from this — never hard-code a mode
+    // in the client (docs/AUCTIONS.md §3).
+    payments: {
+      mode,
+      requested,
+      reason,
+      simulated: mode === 'simulated',
+      banner: mode === 'simulated' ? 'Simulated — no money moves.' : '',
+    },
+  });
+});
+
+/**
+ * Stripe webhooks. The signature is verified over the RAW body, so this route
+ * must read `c.req.text()` and never a parsed/re-serialized object. It is the
+ * only thing in this codebase allowed to move a payment to a terminal state.
+ */
+app.post('/api/stripe/webhook', async (c) => {
+  const rawBody = await c.req.text();
+  const result = await processWebhook(db, rawBody, c.req.header('stripe-signature') ?? null);
+  return c.json(result.body, result.status as 200);
+});
+
+/**
+ * LOCAL TEST HOOK — not Stripe, not reachable in test/live mode.
+ *
+ * With no Stripe account there is no way for a simulated payment to reach
+ * `paid`, so this drives the same webhook handler with a synthesized event.
+ * Guarded by DEV_LOGIN=1 AND PAYMENTS_MODE resolving to `simulated`.
+ */
+app.post('/api/stripe/simulated-test-event', async (c) => {
+  if (!simulateHookAllowed()) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+  let body: {
+    type?: SimulatedEventKind;
+    paymentIntentId?: string;
+    accountId?: string;
+    eventId?: string;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Send a JSON body with a "type".' }, 400);
+  }
+  if (!body.type) return c.json({ error: 'Send a JSON body with a "type".' }, 400);
+
+  const result = await processSimulatedEvent(db, {
+    type: body.type,
+    paymentIntentId: body.paymentIntentId,
+    accountId: body.accountId,
+    eventId: body.eventId,
+  });
+  return c.json(result.body, result.status as 200);
+});
 
 /** Multipart upload, field name `file`. Same bearer auth as tRPC. */
 app.post('/api/uploads', async (c) => {

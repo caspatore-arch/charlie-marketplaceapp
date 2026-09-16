@@ -18,7 +18,7 @@ import { TextArea } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Avatar } from '@/components/ui/Avatar';
-import { SpotPicker } from '@/components/SpotPicker';
+import { SpotPicker, type ResolvedCustomAddress } from '@/components/SpotPicker';
 import { TimeSlotPicker } from '@/components/TimeSlotPicker';
 import { FeeBreakdown } from '@/components/FeeBreakdown';
 import { trpc, resolveMediaUrl } from '@/lib/trpc';
@@ -34,6 +34,7 @@ export default function RequestMeetupScreen() {
   const utils = trpc.useUtils();
 
   const [spotId, setSpotId] = useState<string | undefined>();
+  const [customAddress, setCustomAddress] = useState<ResolvedCustomAddress | null>(null);
   const [startsAt, setStartsAt] = useState<string | undefined>();
   const [note, setNote] = useState('');
   const [formError, setFormError] = useState<string | undefined>();
@@ -83,13 +84,17 @@ export default function RequestMeetupScreen() {
     },
   });
 
-  const canSubmit = !!spotId && !!startsAt && !requestMutation.isPending;
+  const canSubmit = (!!spotId || !!customAddress) && !!startsAt && !requestMutation.isPending;
 
   const onSubmit = useCallback(() => {
-    if (!listingId || !spotId || !startsAt) return;
+    if (!listingId || !startsAt || (!spotId && !customAddress)) return;
     setFormError(undefined);
-    requestMutation.mutate({ listingId, spotId, startsAt });
-  }, [listingId, spotId, startsAt, requestMutation]);
+    requestMutation.mutate({
+      listingId,
+      startsAt,
+      ...(spotId ? { spotId } : { customAddress: customAddress!.address }),
+    });
+  }, [listingId, spotId, customAddress, startsAt, requestMutation]);
 
   const coverPhoto = useMemo(() => resolveMediaUrl(listing?.coverPhotoUrl ?? undefined), [listing?.coverPhotoUrl]);
 
@@ -153,12 +158,22 @@ export default function RequestMeetupScreen() {
           Where
         </Text>
         {listing.spots.length === 0 ? (
-          <Text variant="body" color="inkMuted">
-            The seller hasn&apos;t listed any pickup spots for this item.
+          <Text variant="body" color="inkMuted" style={styles.noSpotsHint}>
+            The seller hasn&apos;t listed any pickup spots for this item — you can still propose an
+            address below.
           </Text>
-        ) : (
-          <SpotPicker spots={listing.spots} selectedId={spotId} onSelect={setSpotId} />
-        )}
+        ) : null}
+        <SpotPicker
+          spots={listing.spots}
+          selectedId={spotId}
+          onSelect={setSpotId}
+          campusId={listing.campusId}
+          customAddress={customAddress}
+          onCustomAddressChange={(resolved) => {
+            setCustomAddress(resolved);
+            if (resolved) setSpotId(undefined);
+          }}
+        />
 
         <Divider style={styles.divider} />
 
@@ -203,7 +218,7 @@ export default function RequestMeetupScreen() {
           size="lg"
           style={styles.submit}
         />
-        {!spotId || !startsAt ? (
+        {(!spotId && !customAddress) || !startsAt ? (
           <Text variant="caption" color="inkFaint" style={styles.hint}>
             Pick a spot and a time to continue.
           </Text>
@@ -223,6 +238,7 @@ const styles = StyleSheet.create({
   summaryPrice: { marginTop: 2 },
   divider: { marginVertical: space.xl },
   sectionTitle: { marginBottom: space.md },
+  noSpotsHint: { marginBottom: space.md },
   formError: { marginTop: space.lg },
   submit: { marginTop: space.xl },
   hint: { textAlign: 'center', marginTop: space.sm },

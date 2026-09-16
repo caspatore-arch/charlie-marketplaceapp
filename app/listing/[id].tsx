@@ -23,11 +23,15 @@ import { SellerRow } from '@/components/SellerRow';
 import { SpotPicker } from '@/components/SpotPicker';
 import { ListingCard } from '@/components/ListingCard';
 import { StatusBanner } from '@/components/browse/StatusBanner';
+import { AuctionPanel } from '@/components/auction/AuctionPanel';
+import { BidSheet } from '@/components/auction/BidSheet';
+import { useCountdown } from '@/components/auction/useCountdown';
 import { ReportSheet } from '@/components/browse/ReportSheet';
 import { trpc } from '@/lib/trpc';
 import { useRequireAuth } from '@/hooks/useAuth';
+import { confirmAction } from '@/utils/confirm';
 import { colors, space } from '@/constants/theme';
-import { conditionLabel, categoryLabel, formatMeetupTime } from '@/utils/format';
+import { conditionLabel, categoryLabel, formatMeetupTime, formatPrice } from '@/utils/format';
 import type { ReportReason } from '@/types';
 
 function formatWindowEnd(iso: string, timeZone?: string): string {
@@ -42,6 +46,8 @@ export default function ListingDetailScreen() {
   const utils = trpc.useUtils();
 
   const [reportOpen, setReportOpen] = useState(false);
+  const [bidOpen, setBidOpen] = useState(false);
+  const [bidError, setBidError] = useState<string | null>(null);
 
   const listingQuery = trpc.listing.byId.useQuery({ id }, { enabled: !!id });
   const listing = listingQuery.data;
@@ -51,6 +57,49 @@ export default function ListingDetailScreen() {
     () => campusesQuery.data?.find((c) => c.id === listing?.campusId)?.timezone,
     [campusesQuery.data, listing?.campusId],
   );
+
+  const isAuction = listing?.saleType === 'auction';
+
+  const bidsQuery = trpc.bid.forListing.useQuery(
+    { listingId: id! },
+    { enabled: !!id && isAuction },
+  );
+
+  const auctionClock = useCountdown(isAuction ? (listing?.expiresAt ?? null) : null);
+
+  const refreshAuction = useCallback(async () => {
+    if (!id) return;
+    await Promise.all([
+      utils.listing.byId.invalidate({ id }),
+      utils.bid.forListing.invalidate({ listingId: id }),
+      utils.listing.feed.invalidate(),
+    ]);
+  }, [id, utils]);
+
+  const placeBidMutation = trpc.bid.place.useMutation({
+    onSuccess: async (res) => {
+      setBidOpen(false);
+      setBidError(null);
+      await refreshAuction();
+      Alert.alert(
+        res.extended ? 'Bid placed — auction extended' : 'Bid placed',
+        res.extended
+          ? 'Your bid landed in the final 2 minutes, so the auction was extended by 2 minutes. This is a prototype — no money moves.'
+          : 'You are the top bidder. A bid is a commitment to buy. This is a prototype — no money moves.',
+      );
+    },
+    onError: (err) => setBidError(err.message),
+  });
+
+  const buyoutMutation = trpc.bid.buyout.useMutation({
+    onSuccess: async (res) => {
+      await refreshAuction();
+      await utils.reservation.mine.invalidate();
+      if (res.reservationId) router.push(`/reservation/${res.reservationId}`);
+      else Alert.alert('Bought', 'The seller will be in touch to arrange the handoff.');
+    },
+    onError: (err) => Alert.alert('Could not buy it now', err.message),
+  });
 
   const bySellerQuery = trpc.listing.bySeller.useQuery(
     { sellerId: listing?.seller.id ?? '' },
@@ -119,6 +168,24 @@ export default function ListingDetailScreen() {
     router.push({ pathname: '/reservation/request', params: { listingId: id } });
   }, [id, requireAuth, router]);
 
+  const onPlaceBid = useCallback(() => {
+    if (!id) return;
+    if (!requireAuth(`/listing/${id}`)) return;
+    setBidError(null);
+    setBidOpen(true);
+  }, [id, requireAuth]);
+
+  const onBuyItNow = useCallback(() => {
+    if (!id || !listing?.buyoutPriceCents) return;
+    if (!requireAuth(`/listing/${id}`)) return;
+    confirmAction(
+      `Buy it now for ${formatPrice(listing.buyoutPriceCents)}?`,
+      'This ends the auction and commits you to meeting the seller. No money moves in this prototype.',
+      'Buy it now',
+      () => buyoutMutation.mutate({ listingId: id }),
+    );
+  }, [id, listing?.buyoutPriceCents, requireAuth, buyoutMutation]);
+
   const onReport = useCallback(() => {
     if (!id) return;
     if (!requireAuth(`/listing/${id}`)) return;
@@ -171,7 +238,9 @@ export default function ListingDetailScreen() {
       : listing.status === 'sold'
         ? 'This item has already been sold.'
         : listing.status === 'expired'
-          ? 'This listing has expired.'
+          ? listing.saleType === 'auction'
+            ? 'This auction ended with no bids.'
+            : 'This listing has expired.'
           : undefined;
 
   return (
@@ -184,7 +253,7 @@ export default function ListingDetailScreen() {
           <StatusBanner status={listing.status} />
 
           <View style={styles.priceRow}>
-            <PriceText cents={listing.priceCents} />
+            <PriceText cents={isAuction ? listing.currentPriceCents : listing.priceCents} />
             <View style={styles.iconRow}>
               <Pressable
                 accessibilityRole="button"
@@ -220,6 +289,19 @@ export default function ListingDetailScreen() {
             {listing.brand ? <Badge kind="status" label={listing.brand} tone="neutral" /> : null}
             <Badge kind="status" label={categoryLabel(listing.category)} tone="neutral" />
           </View>
+
+          {listing.saleType === 'auction' ? (
+            <View style={styles.auctionWrap}>
+              <AuctionPanel
+                currentPriceCents={listing.currentPriceCents}
+                startPriceCents={listing.startPriceCents}
+                buyoutPriceCents={listing.buyoutPriceCents}
+                bidCount={listing.bidCount}
+                expiresAt={listing.expiresAt}
+                bids={bidsQuery.data ?? []}
+              />
+            </View>
+          ) : null}
 
           {listing.description ? (
             <Text variant="body" color="inkMuted" style={styles.description}>
@@ -327,27 +409,77 @@ export default function ListingDetailScreen() {
                 {unavailableCopy}
               </Text>
             ) : null}
-            <View style={styles.footerRow}>
-              <Button
-                title="Message"
-                variant="secondary"
-                onPress={onMessage}
-                loading={openConversationMutation.isPending}
-                style={styles.footerBtnFlex}
-              />
-              <Button
-                title="Request meetup"
-                onPress={onRequestMeetup}
-                disabled={listing.status !== 'active'}
-                accessibilityLabel={
-                  listing.status !== 'active' ? `Request meetup, unavailable: ${unavailableCopy}` : 'Request meetup'
-                }
-                style={styles.footerBtnPrimary}
-              />
-            </View>
+            {isAuction && listing.status === 'active' && !auctionClock.ended ? (
+              <>
+                <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
+                  A bid is a commitment to buy, not a reservation.
+                </Text>
+                <View style={styles.footerRow}>
+                  <Button
+                    title="Message"
+                    variant="ghost"
+                    onPress={onMessage}
+                    loading={openConversationMutation.isPending}
+                    style={styles.footerBtnFlex}
+                  />
+                  {listing.buyoutPriceCents != null ? (
+                    <Button
+                      title={`Buy now ${formatPrice(listing.buyoutPriceCents)}`}
+                      variant="secondary"
+                      onPress={onBuyItNow}
+                      loading={buyoutMutation.isPending}
+                      style={styles.footerBtnFlex}
+                    />
+                  ) : null}
+                  <Button
+                    title="Place bid"
+                    onPress={onPlaceBid}
+                    style={styles.footerBtnPrimary}
+                    accessibilityLabel={`Place bid, current price ${formatPrice(listing.currentPriceCents)}`}
+                  />
+                </View>
+              </>
+            ) : (
+              <View style={styles.footerRow}>
+                <Button
+                  title="Message"
+                  variant="secondary"
+                  onPress={onMessage}
+                  loading={openConversationMutation.isPending}
+                  style={styles.footerBtnFlex}
+                />
+                <Button
+                  title={isAuction ? 'Auction ended' : 'Request meetup'}
+                  onPress={onRequestMeetup}
+                  disabled={isAuction || listing.status !== 'active'}
+                  accessibilityLabel={
+                    listing.status !== 'active' ? `Request meetup, unavailable: ${unavailableCopy}` : 'Request meetup'
+                  }
+                  style={styles.footerBtnPrimary}
+                />
+              </View>
+            )}
           </>
         )}
       </View>
+
+      <BidSheet
+        visible={bidOpen}
+        onClose={() => setBidOpen(false)}
+        minimumCents={
+          listing.bidCount > 0
+            ? listing.currentPriceCents + Math.max(100, Math.ceil(listing.currentPriceCents * 0.05))
+            : listing.currentPriceCents
+        }
+        buyoutPriceCents={listing.buyoutPriceCents}
+        submitting={placeBidMutation.isPending}
+        serverError={bidError}
+        onSubmit={(amountCents) => {
+          if (!id) return;
+          setBidError(null);
+          placeBidMutation.mutate({ listingId: id, amountCents });
+        }}
+      />
 
       <ReportSheet
         visible={reportOpen}
@@ -396,4 +528,5 @@ const styles = StyleSheet.create({
   footerBtnFlex: { flex: 1 },
   footerBtnPrimary: { flex: 2 },
   unavailableNote: { marginBottom: space.sm },
+  auctionWrap: { marginTop: space.lg },
 });

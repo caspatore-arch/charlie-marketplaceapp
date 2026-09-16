@@ -13,6 +13,7 @@ import { db } from './client';
 import { runMigrations } from './migrate';
 import {
   availabilityWindows,
+  bids,
   campuses,
   listingPhotos,
   listingSpots,
@@ -124,6 +125,14 @@ type SeedListing = {
   size?: string;
   brand?: string;
   isSellToday?: boolean;
+  /** Auction demo rows (docs/AUCTIONS.md §1). Omitted = ordinary fixed price. */
+  saleType?: 'fixed' | 'auction';
+  startPriceCents?: number;
+  buyoutPriceCents?: number;
+  /** Hours from now the auction ends. Refreshed on every seed run. */
+  endsInHours?: number;
+  /** Seeded bids: [bidder id, amount in cents], oldest first. */
+  seedBids?: [string, number][];
   photos: string[];
   spots: string[];
   /** 'today' adds the guaranteed-bookable slot plus a later one today. */
@@ -287,6 +296,80 @@ const SEED_LISTINGS: SeedListing[] = [
     spots: [SPOT_UNION, SPOT_LIBRARY],
     windows: 'none',
   },
+  /* ---------------------------------------------------------- auctions */
+  {
+    id: L(13),
+    sellerId: JORDAN_ID,
+    title: 'Film camera, fully working',
+    description: 'Shoots beautifully. Battery and strap included. Auction — highest bid at the end wins.',
+    category: 'tech',
+    condition: 'good',
+    priceCents: 6000,
+    brand: 'Canon',
+    saleType: 'auction',
+    startPriceCents: 6000,
+    endsInHours: 1,
+    seedBids: [
+      [MAYA_ID, 6000],
+      [SAM_ID, 6500],
+    ],
+    photos: ['demo-tech'],
+    spots: [SPOT_UNION, SPOT_LIBRARY],
+    windows: 'today',
+  },
+  {
+    id: L(14),
+    sellerId: MAYA_ID,
+    title: 'Leather weekender bag',
+    description: 'Full-grain leather, soft from use. Auction runs 24 hours.',
+    category: 'accessories',
+    condition: 'good',
+    priceCents: 4000,
+    saleType: 'auction',
+    startPriceCents: 4000,
+    endsInHours: 20,
+    seedBids: [
+      [JORDAN_ID, 4000],
+      [SAM_ID, 4500],
+      [JORDAN_ID, 5200],
+      [SAM_ID, 6000],
+    ],
+    photos: ['demo-bag', 'demo-jacket'],
+    spots: [SPOT_LIBRARY],
+    windows: 'tomorrow',
+  },
+  {
+    id: L(15),
+    sellerId: JORDAN_ID,
+    title: 'Mechanical keyboard, hot-swap',
+    description: 'Tactile switches, extra keycaps in the box. Bid, or take it now at the buy-it-now price.',
+    category: 'tech',
+    condition: 'like_new',
+    priceCents: 5000,
+    saleType: 'auction',
+    startPriceCents: 5000,
+    buyoutPriceCents: 9000,
+    endsInHours: 12,
+    photos: ['demo-tech', 'demo-books'],
+    spots: [SPOT_UNION, SPOT_REC],
+    windows: 'today',
+  },
+  {
+    id: L(16),
+    sellerId: MAYA_ID,
+    title: 'Desk chair, barely used',
+    description: 'Adjustable, no squeaks. Starting low — a single bid wins it at the start price.',
+    category: 'dorm',
+    condition: 'like_new',
+    priceCents: 2500,
+    saleType: 'auction',
+    startPriceCents: 2500,
+    buyoutPriceCents: 6000,
+    endsInHours: 23,
+    photos: ['demo-dorm'],
+    spots: [SPOT_REC, SPOT_OLD_MAIN],
+    windows: 'today',
+  },
 ];
 
 /* ------------------------------------------------------------------ main */
@@ -400,11 +483,19 @@ export async function seed(): Promise<void> {
         category: l.category,
         condition: l.condition,
         priceCents: l.priceCents,
+        saleType: l.saleType ?? ('fixed' as const),
+        startPriceCents: l.startPriceCents ?? null,
+        buyoutPriceCents: l.buyoutPriceCents ?? null,
         size: l.size ?? null,
         brand: l.brand ?? null,
         status: 'active' as const,
         isSellToday: l.isSellToday ?? false,
-        expiresAt: l.isSellToday ? new Date(Date.now() + 24 * HOUR) : null,
+        expiresAt:
+          l.saleType === 'auction'
+            ? new Date(Date.now() + (l.endsInHours ?? 24) * HOUR)
+            : l.isSellToday
+              ? new Date(Date.now() + 24 * HOUR)
+              : null,
       })),
     )
     .onConflictDoNothing();
@@ -447,10 +538,42 @@ export async function seed(): Promise<void> {
       .where(eq(listings.id, l.id));
   }
 
+  // Auction clocks and bids are relative to "now", so rebuild them every run.
+  // Deleting this seed's own bids first is what keeps re-seeding idempotent.
+  const auctionSeeds = SEED_LISTINGS.filter((l) => l.saleType === 'auction');
+  if (auctionSeeds.length > 0) {
+    await db.delete(bids).where(
+      inArray(
+        bids.listingId,
+        auctionSeeds.map((l) => l.id),
+      ),
+    );
+    for (const l of auctionSeeds) {
+      await db
+        .update(listings)
+        .set({
+          status: 'active',
+          expiresAt: new Date(Date.now() + (l.endsInHours ?? 24) * HOUR),
+        })
+        .where(eq(listings.id, l.id));
+    }
+    const bidRows = auctionSeeds.flatMap((l) =>
+      (l.seedBids ?? []).map(([bidderId, amountCents], i) => ({
+        listingId: l.id,
+        bidderId,
+        amountCents,
+        // Spread the history backwards so "newest first" reads sensibly.
+        createdAt: new Date(Date.now() - ((l.seedBids?.length ?? 0) - i) * 11 * 60 * 1000),
+      })),
+    );
+    if (bidRows.length > 0) await db.insert(bids).values(bidRows);
+  }
+
   const total = await db.select({ id: listings.id }).from(listings);
   console.log(
     `seeded: 1 campus, 4 demo spots, 3 test users, ${SEED_LISTINGS.length} demo listings ` +
-      `(${total.length} listings in db), ${DEMO_ART.length} demo photos written`,
+      `(${SEED_LISTINGS.filter((l) => l.saleType === 'auction').length} auctions, ` +
+      `${total.length} listings in db), ${DEMO_ART.length} demo photos written`,
   );
 }
 

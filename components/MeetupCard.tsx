@@ -6,8 +6,9 @@
  *   photoUrl={reservation.listing.coverPhotoUrl}
  *   title={reservation.listing.title}
  *   priceCents={reservation.priceCents}
- *   spotName={reservation.spot.name}
- *   spotDescription={reservation.spot.description}
+ *   spotName={reservation.spot?.name}
+ *   spotDescription={reservation.spot?.description}
+ *   customAddress={reservation.customAddress}
  *   startsAt={reservation.startsAt}
  *   timeZone={campus.timezone}
  *   status={reservation.status}
@@ -15,6 +16,9 @@
  *   onPressDirections={() => Linking.openURL(reservation.directionsUrl)}
  *   onReschedule={...} onCancel={...}
  * />
+ *
+ * Exactly one of `spotName` or `customAddress` is expected to be set — a
+ * custom address renders in the spot's place (docs/AUCTIONS.md §2).
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -34,8 +38,11 @@ export interface MeetupCardProps {
   photoUrl?: string | null;
   title: string;
   priceCents: number;
-  spotName: string;
-  spotDescription: string;
+  /** A curated campus spot's name. Omit when this meetup uses a custom address. */
+  spotName?: string | null;
+  spotDescription?: string | null;
+  /** A party-proposed address, resolved server-side. Renders in place of the spot. */
+  customAddress?: string | null;
   startsAt: string;
   timeZone?: string;
   status: ReservationStatus;
@@ -50,6 +57,7 @@ export function MeetupCard({
   priceCents,
   spotName,
   spotDescription,
+  customAddress,
   startsAt,
   timeZone,
   status,
@@ -85,12 +93,25 @@ export function MeetupCard({
       </View>
 
       <View style={styles.spotInfo}>
-        <Text variant="label" weight="600">
-          {spotName}
-        </Text>
-        <Text variant="caption" color="inkMuted">
-          {spotDescription}
-        </Text>
+        {customAddress ? (
+          <>
+            <Text variant="caption" color="inkFaint">
+              Custom address
+            </Text>
+            <Text variant="label" weight="600">
+              {customAddress}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text variant="label" weight="600">
+              {spotName}
+            </Text>
+            <Text variant="caption" color="inkMuted">
+              {spotDescription}
+            </Text>
+          </>
+        )}
         <Text variant="body" style={styles.time}>
           {formatMeetupTime(startsAt, timeZone)}
         </Text>

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Db } from '../../db/client';
 import {
   availabilityWindows,
+  bids,
   listingPhotos,
   listingSpots,
   listings,
@@ -12,6 +13,7 @@ import {
   savedListings,
 } from '../../db/schema';
 import {
+  AUCTION_TTL_MS,
   applyExpiry,
   blockedUserIds,
   localDayBounds,
@@ -21,6 +23,11 @@ import {
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
 const SELL_TODAY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** docs/AUCTIONS.md §1: below $1 a platform fee cannot round sensibly. */
+const MIN_START_PRICE_CENTS = 100;
+
+const saleTypeSchema = z.enum(['fixed', 'auction']);
 
 const categorySchema = z.enum([
   'clothing',
@@ -43,7 +50,11 @@ const listingFields = z.object({
   description: z.string().max(2000).optional(),
   category: categorySchema,
   condition: conditionSchema,
+  /** Required for a fixed-price listing; ignored for an auction. */
   priceCents: z.number().int().min(0).max(5_000_00),
+  saleType: saleTypeSchema,
+  startPriceCents: z.number().int().min(0).max(5_000_00).nullish(),
+  buyoutPriceCents: z.number().int().min(0).max(5_000_00).nullish(),
   size: z.string().max(40).optional(),
   brand: z.string().max(60).optional(),
   isSellToday: z.boolean(),
@@ -52,11 +63,69 @@ const listingFields = z.object({
   windows: z.array(windowSchema),
 });
 
-const createInput = listingFields.extend({ windows: z.array(windowSchema).default([]) });
+/**
+ * Cross-field auction rules from docs/AUCTIONS.md §1. Shared by create and
+ * relist; `update` runs the same checks against the merged row in the handler,
+ * because a partial update may only send one of the three fields.
+ */
+function checkAuctionFields(
+  v: {
+    saleType?: 'fixed' | 'auction';
+    priceCents?: number | null;
+    startPriceCents?: number | null;
+    buyoutPriceCents?: number | null;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (v.saleType !== 'auction') {
+    if (v.priceCents == null || v.priceCents <= 0) {
+      ctx.addIssue({ code: 'custom', path: ['priceCents'], message: 'Enter a price above $0.' });
+    }
+    return;
+  }
+  if (v.startPriceCents == null) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['startPriceCents'],
+      message: 'Set a start price for your auction.',
+    });
+  } else if (v.startPriceCents < MIN_START_PRICE_CENTS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['startPriceCents'],
+      message: 'The start price has to be at least $1.',
+    });
+  }
+  if (
+    v.buyoutPriceCents != null &&
+    v.startPriceCents != null &&
+    v.buyoutPriceCents <= v.startPriceCents
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['buyoutPriceCents'],
+      message: 'Buy it now has to be more than the start price.',
+    });
+  }
+}
+
+const createInput = listingFields
+  .extend({
+    windows: z.array(windowSchema).default([]),
+    saleType: saleTypeSchema.default('fixed'),
+  })
+  .superRefine(checkAuctionFields);
 
 // Every field optional on update — and deliberately WITHOUT the `windows`
 // default, so omitting windows leaves the seller's existing ones alone.
+// Auction cross-field rules are checked in the handler against the merged row.
 const updateInput = listingFields.partial().extend({ id: z.uuid() });
+
+/** Count of bids already placed on a listing. */
+async function bidCountFor(db: Db, listingId: string): Promise<number> {
+  const rows = await db.select({ id: bids.id }).from(bids).where(eq(bids.listingId, listingId));
+  return rows.length;
+}
 
 /** Loads a listing the caller owns, or throws NOT_FOUND / FORBIDDEN. */
 async function loadOwnListing(db: Db, id: string, userId: string) {
@@ -213,6 +282,11 @@ export const listingRouter = router({
 
   create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
     const now = new Date();
+    const isAuction = input.saleType === 'auction';
+    // An auction's `priceCents` mirrors its start price so every existing
+    // price filter, sort and card keeps working without special-casing.
+    const priceCents = isAuction ? input.startPriceCents! : input.priceCents;
+
     const [listing] = await ctx.db
       .insert(listings)
       .values({
@@ -222,12 +296,20 @@ export const listingRouter = router({
         description: input.description ?? null,
         category: input.category,
         condition: input.condition,
-        priceCents: input.priceCents,
+        priceCents,
+        saleType: input.saleType,
+        startPriceCents: isAuction ? input.startPriceCents! : null,
+        buyoutPriceCents: isAuction ? (input.buyoutPriceCents ?? null) : null,
         size: input.size ?? null,
         brand: input.brand ?? null,
         status: 'active',
-        isSellToday: input.isSellToday,
-        expiresAt: input.isSellToday ? new Date(now.getTime() + SELL_TODAY_TTL_MS) : null,
+        // An auction always runs 24h; "Sell today" is a fixed-price idea.
+        isSellToday: isAuction ? false : input.isSellToday,
+        expiresAt: isAuction
+          ? new Date(now.getTime() + AUCTION_TTL_MS)
+          : input.isSellToday
+            ? new Date(now.getTime() + SELL_TODAY_TTL_MS)
+            : null,
         createdAt: now,
         updatedAt: now,
       })
@@ -245,19 +327,73 @@ export const listingRouter = router({
     .mutation(async ({ ctx, input }) => {
       const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
 
+      // docs/AUCTIONS.md §1 rule 6: once an auction has a bid the price is a
+      // commitment to the bidders, so price fields and the sale type freeze.
+      const placedBids = existing.saleType === 'auction' ? await bidCountFor(ctx.db, existing.id) : 0;
+      const touchesPrice =
+        (input.priceCents !== undefined && input.priceCents !== existing.priceCents) ||
+        (input.startPriceCents !== undefined && input.startPriceCents !== existing.startPriceCents) ||
+        (input.buyoutPriceCents !== undefined &&
+          input.buyoutPriceCents !== existing.buyoutPriceCents) ||
+        (input.saleType !== undefined && input.saleType !== existing.saleType);
+      if (placedBids > 0 && touchesPrice) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: "This auction already has bids, so its prices can't change.",
+        });
+      }
+
+      const merged = {
+        saleType: input.saleType ?? existing.saleType,
+        priceCents: input.priceCents ?? existing.priceCents,
+        startPriceCents:
+          input.startPriceCents !== undefined ? input.startPriceCents : existing.startPriceCents,
+        buyoutPriceCents:
+          input.buyoutPriceCents !== undefined ? input.buyoutPriceCents : existing.buyoutPriceCents,
+      };
+      const parsed = z
+        .object({})
+        .passthrough()
+        .superRefine((_v, c) => checkAuctionFields(merged, c))
+        .safeParse({});
+      if (!parsed.success) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: parsed.error.issues[0]?.message ?? 'Check the price fields.',
+        });
+      }
+
       const patch: Partial<typeof listings.$inferInsert> = { updatedAt: new Date() };
       if (input.title !== undefined) patch.title = input.title;
       if (input.description !== undefined) patch.description = input.description;
       if (input.category !== undefined) patch.category = input.category;
       if (input.condition !== undefined) patch.condition = input.condition;
-      if (input.priceCents !== undefined) patch.priceCents = input.priceCents;
       if (input.size !== undefined) patch.size = input.size;
       if (input.brand !== undefined) patch.brand = input.brand;
-      if (input.isSellToday !== undefined) {
-        patch.isSellToday = input.isSellToday;
-        patch.expiresAt = input.isSellToday
-          ? new Date(existing.createdAt.getTime() + SELL_TODAY_TTL_MS)
-          : null;
+
+      if (merged.saleType === 'auction') {
+        patch.saleType = 'auction';
+        patch.startPriceCents = merged.startPriceCents!;
+        patch.buyoutPriceCents = merged.buyoutPriceCents ?? null;
+        patch.priceCents = merged.startPriceCents!;
+        patch.isSellToday = false;
+        // Switching a fixed-price listing to an auction starts the 24h clock.
+        if (existing.saleType !== 'auction') {
+          patch.expiresAt = new Date(Date.now() + AUCTION_TTL_MS);
+        }
+      } else {
+        patch.saleType = 'fixed';
+        patch.startPriceCents = null;
+        patch.buyoutPriceCents = null;
+        if (input.priceCents !== undefined) patch.priceCents = input.priceCents;
+        if (input.isSellToday !== undefined) {
+          patch.isSellToday = input.isSellToday;
+          patch.expiresAt = input.isSellToday
+            ? new Date(existing.createdAt.getTime() + SELL_TODAY_TTL_MS)
+            : null;
+        } else if (existing.saleType === 'auction') {
+          patch.expiresAt = null;
+        }
       }
 
       const [updated] = await ctx.db
@@ -277,6 +413,12 @@ export const listingRouter = router({
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
+      if (existing.saleType === 'auction' && (await bidCountFor(ctx.db, existing.id)) > 0) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: "This auction already has bids, so it can't be removed.",
+        });
+      }
       await ctx.db
         .update(listings)
         .set({ status: 'removed', updatedAt: new Date() })
@@ -285,7 +427,15 @@ export const listingRouter = router({
     }),
 
   relist: protectedProcedure
-    .input(z.object({ id: z.uuid(), isSellToday: z.boolean() }))
+    .input(
+      z.object({
+        id: z.uuid(),
+        isSellToday: z.boolean(),
+        saleType: saleTypeSchema.optional(),
+        startPriceCents: z.number().int().min(0).max(5_000_00).nullish(),
+        buyoutPriceCents: z.number().int().min(0).max(5_000_00).nullish(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
       if (existing.status !== 'expired' && existing.status !== 'removed') {
@@ -294,13 +444,47 @@ export const listingRouter = router({
           message: 'Only expired or removed items can be relisted.',
         });
       }
+
+      const saleType = input.saleType ?? existing.saleType;
+      const startPriceCents =
+        input.startPriceCents !== undefined ? input.startPriceCents : existing.startPriceCents;
+      const buyoutPriceCents =
+        input.buyoutPriceCents !== undefined ? input.buyoutPriceCents : existing.buyoutPriceCents;
+
+      if (saleType === 'auction') {
+        const check = z
+          .object({})
+          .passthrough()
+          .superRefine((_v, c) =>
+            checkAuctionFields({ saleType, startPriceCents, buyoutPriceCents }, c),
+          )
+          .safeParse({});
+        if (!check.success) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: check.error.issues[0]?.message ?? 'Check the auction prices.',
+          });
+        }
+        // A new auction is a new auction: the old bids do not carry over.
+        await ctx.db.delete(bids).where(eq(bids.listingId, existing.id));
+      }
+
       const now = new Date();
       const [updated] = await ctx.db
         .update(listings)
         .set({
           status: 'active',
-          isSellToday: input.isSellToday,
-          expiresAt: input.isSellToday ? new Date(now.getTime() + SELL_TODAY_TTL_MS) : null,
+          saleType,
+          startPriceCents: saleType === 'auction' ? startPriceCents! : null,
+          buyoutPriceCents: saleType === 'auction' ? (buyoutPriceCents ?? null) : null,
+          priceCents: saleType === 'auction' ? startPriceCents! : existing.priceCents,
+          isSellToday: saleType === 'auction' ? false : input.isSellToday,
+          expiresAt:
+            saleType === 'auction'
+              ? new Date(now.getTime() + AUCTION_TTL_MS)
+              : input.isSellToday
+                ? new Date(now.getTime() + SELL_TODAY_TTL_MS)
+                : null,
           createdAt: now,
           updatedAt: now,
         })

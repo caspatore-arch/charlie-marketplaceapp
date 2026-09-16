@@ -22,7 +22,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Divider } from '@/components/ui/Divider';
 import { MeetupCard } from '@/components/MeetupCard';
 import { DemoBadge } from '@/components/DemoBadge';
-import { SpotPicker } from '@/components/SpotPicker';
+import { SpotPicker, type ResolvedCustomAddress } from '@/components/SpotPicker';
 import { TimeSlotPicker } from '@/components/TimeSlotPicker';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/hooks/useAuth';
@@ -161,12 +161,15 @@ export default function ReservationScreen() {
         photoUrl={reservation.listing.coverPhotoUrl}
         title={reservation.listing.title}
         priceCents={reservation.priceCents}
-        spotName={reservation.spot.name}
-        spotDescription={reservation.spot.description}
+        spotName={reservation.spot?.name}
+        spotDescription={reservation.spot?.description}
+        customAddress={reservation.customAddress}
         startsAt={reservation.startsAt.toISOString()}
         timeZone={timeZone}
         status={reservation.status}
-        onPressDirections={() => Linking.openURL(reservation.directionsUrl)}
+        onPressDirections={
+          reservation.directionsUrl ? () => Linking.openURL(reservation.directionsUrl!) : undefined
+        }
       />
 
       <Text variant="caption" color="inkMuted" style={styles.paymentNote}>
@@ -177,17 +180,31 @@ export default function ReservationScreen() {
         <View style={styles.infoRow}>
           <MapPin size={16} color={colors.inkFaint} />
           <View style={styles.infoRowText}>
-            <View style={styles.spotNameRow}>
-              <Text variant="label" weight="600">
-                {reservation.spot.name}
-              </Text>
-              <DemoBadge visible={reservation.spot.isDemo} />
-            </View>
-            {reservation.spot.hoursNote ? (
-              <Text variant="caption" color="inkMuted">
-                {reservation.spot.hoursNote}
-              </Text>
-            ) : null}
+            {reservation.spot ? (
+              <>
+                <View style={styles.spotNameRow}>
+                  <Text variant="label" weight="600">
+                    {reservation.spot.name}
+                  </Text>
+                  <DemoBadge visible={reservation.spot.isDemo} />
+                </View>
+                {reservation.spot.hoursNote ? (
+                  <Text variant="caption" color="inkMuted">
+                    {reservation.spot.hoursNote}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text variant="label" weight="600">
+                  {reservation.customAddress}
+                </Text>
+                <Text variant="caption" color="inkMuted">
+                  Public places are safer for meeting someone new. Only share an address you&apos;re
+                  comfortable with.
+                </Text>
+              </>
+            )}
           </View>
         </View>
         <Divider style={styles.infoDivider} />
@@ -268,10 +285,11 @@ export default function ReservationScreen() {
         onClose={() => setProposeOpen(false)}
         listingId={reservation.listingId}
         currentSpotId={reservation.spotId}
+        currentCustomAddress={reservation.customAddress}
         currentStartsAt={reservation.startsAt}
         timeZone={timeZone}
-        onSubmit={(spotId, startsAt, note) => {
-          counterMutation.mutate({ id: reservation.id, spotId, startsAt, note });
+        onSubmit={(location, startsAt, note) => {
+          counterMutation.mutate({ id: reservation.id, ...location, startsAt, note });
         }}
       />
 
@@ -531,6 +549,7 @@ function ProposeSheet({
   onClose,
   listingId,
   currentSpotId,
+  currentCustomAddress,
   currentStartsAt,
   timeZone,
   onSubmit,
@@ -538,15 +557,21 @@ function ProposeSheet({
   visible: boolean;
   onClose: () => void;
   listingId: string;
-  currentSpotId: string;
+  currentSpotId: string | null;
+  currentCustomAddress: string | null;
   currentStartsAt: Date;
   timeZone?: string;
-  onSubmit: (spotId: string, startsAt: Date, note?: string) => void;
+  onSubmit: (location: { spotId: string } | { customAddress: string }, startsAt: Date, note?: string) => void;
 }) {
   const listingQuery = trpc.listing.byId.useQuery({ id: listingId }, { enabled: visible });
-  const [spotId, setSpotId] = useState(currentSpotId);
+  const [spotId, setSpotId] = useState<string | undefined>(currentSpotId ?? undefined);
+  const [customAddress, setCustomAddress] = useState<ResolvedCustomAddress | null>(
+    currentCustomAddress ? { address: currentCustomAddress, lat: 0, lng: 0, distanceMeters: 0 } : null,
+  );
   const [startsIso, setStartsIso] = useState<string | undefined>(currentStartsAt.toISOString());
   const [note, setNote] = useState('');
+
+  const canSubmit = (!!spotId || !!customAddress) && !!startsIso;
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Propose a time">
@@ -559,7 +584,17 @@ function ProposeSheet({
           <Text variant="label" color="inkMuted">
             Spot
           </Text>
-          <SpotPicker spots={listingQuery.data.spots} selectedId={spotId} onSelect={setSpotId} />
+          <SpotPicker
+            spots={listingQuery.data.spots}
+            selectedId={spotId}
+            onSelect={setSpotId}
+            campusId={listingQuery.data.campusId}
+            customAddress={customAddress}
+            onCustomAddressChange={(resolved) => {
+              setCustomAddress(resolved);
+              if (resolved) setSpotId(undefined);
+            }}
+          />
 
           <Text variant="label" color="inkMuted" style={styles.sheetSectionSpacing}>
             Time
@@ -584,8 +619,15 @@ function ProposeSheet({
 
           <Button
             title="Send proposal"
-            onPress={() => startsIso && onSubmit(spotId, new Date(startsIso), note)}
-            disabled={!spotId || !startsIso}
+            onPress={() =>
+              startsIso &&
+              onSubmit(
+                spotId ? { spotId } : { customAddress: customAddress!.address },
+                new Date(startsIso),
+                note,
+              )
+            }
+            disabled={!canSubmit}
             style={styles.sheetSectionSpacing}
           />
         </View>

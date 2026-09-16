@@ -193,14 +193,14 @@ export default function ConversationScreen() {
       {relatedReservation ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Meetup ${relatedReservation.status}, ${relatedReservation.spot.name}`}
+          accessibilityLabel={`Meetup ${relatedReservation.status}, ${relatedReservation.spot?.name ?? 'custom address'}`}
           onPress={() => router.push(`/reservation/${relatedReservation.id}`)}
           style={styles.reservationStrip}
         >
           <ReservationStatusPill status={relatedReservation.status} />
           <View style={styles.reservationInfo}>
             <Text variant="caption" weight="600" numberOfLines={1}>
-              {relatedReservation.spot.name}
+              {relatedReservation.spot?.name ?? 'Custom address'}
             </Text>
             <Text variant="caption" color="inkMuted" numberOfLines={1}>
               {formatMeetupTime(relatedReservation.startsAt.toISOString())}

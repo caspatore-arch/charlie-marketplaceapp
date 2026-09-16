@@ -2,11 +2,12 @@
  * Shared server helpers: lazy expiry, timezone maths, block checks and the
  * output shapes described in docs/CONTRACT.md.
  */
-import { and, eq, gte, inArray, lt, lte, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
 
 import type { Db } from '../db/client';
 import {
   availabilityWindows,
+  bids,
   blocks,
   campuses,
   listingPhotos,
@@ -53,6 +54,198 @@ export function localDayBounds(timeZone: string, at: Date = new Date()): { start
   return { start: new Date(startUtcMs), end: new Date(startUtcMs + 24 * 60 * 60 * 1000) };
 }
 
+/* ------------------------------------------------------------- auctions */
+
+/** Every auction runs for 24 hours (docs/AUCTIONS.md §1). */
+export const AUCTION_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** A bid inside the final 2 minutes pushes the end time out to now + 2 minutes. */
+export const ANTI_SNIPE_MS = 2 * 60 * 1000;
+
+/** Minimum step over the current price: $1 or 5%, whichever is larger. */
+export function bidIncrementCents(currentPriceCents: number): number {
+  return Math.max(100, Math.ceil(currentPriceCents * 0.05));
+}
+
+/**
+ * The smallest amount the next bid may be.
+ * With no bids yet that is the start price itself — a single bid sells the
+ * item at the seller's floor, which the sell form states in plain words.
+ */
+export function minNextBidCents(currentPriceCents: number, hasBids: boolean): number {
+  return hasBids ? currentPriceCents + bidIncrementCents(currentPriceCents) : currentPriceCents;
+}
+
+export type AuctionState = {
+  currentPriceCents: number;
+  bidCount: number;
+  topBidderId: string | null;
+};
+
+/** Derived auction state (highest bid else start price) for a batch of listings. */
+export async function auctionStateFor(
+  db: Db,
+  rows: Pick<Listing, 'id' | 'saleType' | 'priceCents' | 'startPriceCents'>[],
+): Promise<Map<string, AuctionState>> {
+  const out = new Map<string, AuctionState>();
+  const auctionIds = rows.filter((r) => r.saleType === 'auction').map((r) => r.id);
+  for (const r of rows) {
+    out.set(r.id, {
+      currentPriceCents: r.saleType === 'auction' ? (r.startPriceCents ?? r.priceCents) : r.priceCents,
+      bidCount: 0,
+      topBidderId: null,
+    });
+  }
+  if (auctionIds.length === 0) return out;
+
+  const agg = await db
+    .select({
+      listingId: bids.listingId,
+      top: sql<number>`max(${bids.amountCents})`,
+      count: sql<number>`count(*)`,
+    })
+    .from(bids)
+    .where(inArray(bids.listingId, auctionIds))
+    .groupBy(bids.listingId);
+
+  for (const a of agg) {
+    const prev = out.get(a.listingId);
+    if (!prev) continue;
+    out.set(a.listingId, {
+      currentPriceCents: Math.max(Number(a.top), prev.currentPriceCents),
+      bidCount: Number(a.count),
+      topBidderId: null,
+    });
+  }
+  return out;
+}
+
+/** The highest bid on a listing; ties broken by whoever bid first. */
+export async function topBid(db: Db, listingId: string) {
+  const [row] = await db
+    .select()
+    .from(bids)
+    .where(eq(bids.listingId, listingId))
+    .orderBy(desc(bids.amountCents), asc(bids.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Where and when a settled auction's meetup is first proposed.
+ *
+ * docs/AUCTIONS.md §1 originally said the settlement reservation carried no
+ * spot and no time. The reservations table forbids that (`spot_id` XOR the
+ * custom-address trio, `starts_at NOT NULL`), so settlement instead opens the
+ * existing meetup flow with a seller-side proposal: the listing's first pickup
+ * spot and its next availability window. Either party counters as usual.
+ */
+export async function openingProposalFor(
+  db: Db,
+  listing: Listing,
+): Promise<{ spotId: string; startsAt: Date } | null> {
+  const [spot] = await db
+    .select({ spotId: listingSpots.spotId })
+    .from(listingSpots)
+    .where(eq(listingSpots.listingId, listing.id))
+    .limit(1);
+  if (!spot) return null;
+
+  const now = new Date();
+  const [win] = await db
+    .select()
+    .from(availabilityWindows)
+    .where(
+      and(eq(availabilityWindows.listingId, listing.id), gte(availabilityWindows.endsAt, now)),
+    )
+    .orderBy(asc(availabilityWindows.startsAt))
+    .limit(1);
+
+  const startsAt =
+    win && win.startsAt > now ? win.startsAt : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  return { spotId: spot.spotId, startsAt };
+}
+
+/**
+ * Settles one ended auction. Transactional and idempotent: the listing row is
+ * locked FOR UPDATE, every precondition is re-checked inside the lock, and a
+ * winner who already has a reservation on this listing never gets a second one.
+ */
+async function settleAuction(db: Db, listingId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [listing] = await tx
+      .select()
+      .from(listings)
+      .where(eq(listings.id, listingId))
+      .for('update')
+      .limit(1);
+    const now = new Date();
+    if (
+      !listing ||
+      listing.saleType !== 'auction' ||
+      listing.status !== 'active' ||
+      !listing.expiresAt ||
+      listing.expiresAt > now
+    ) {
+      return;
+    }
+
+    const [winner] = await tx
+      .select()
+      .from(bids)
+      .where(eq(bids.listingId, listing.id))
+      .orderBy(desc(bids.amountCents), asc(bids.createdAt))
+      .limit(1);
+
+    if (!winner) {
+      await tx
+        .update(listings)
+        .set({ status: 'expired', updatedAt: now })
+        .where(eq(listings.id, listing.id));
+      return;
+    }
+
+    // Idempotency guard: never create a second reservation for the same winner.
+    const already = await tx
+      .select({ id: reservations.id })
+      .from(reservations)
+      .where(
+        and(eq(reservations.listingId, listing.id), eq(reservations.buyerId, winner.bidderId)),
+      )
+      .limit(1);
+
+    if (already.length === 0) {
+      const opening = await openingProposalFor(tx as unknown as Db, listing);
+      if (!opening) {
+        // No pickup spot on the listing at all — nothing we can propose.
+        // Leave it reserved so nobody else can buy it; the seller can message.
+        await tx
+          .update(listings)
+          .set({ status: 'reserved', updatedAt: now })
+          .where(eq(listings.id, listing.id));
+        return;
+      }
+      await tx.insert(reservations).values({
+        listingId: listing.id,
+        buyerId: winner.bidderId,
+        sellerId: listing.sellerId,
+        status: 'requested',
+        spotId: opening.spotId,
+        startsAt: opening.startsAt,
+        proposedById: listing.sellerId,
+        priceCents: winner.amountCents,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await tx
+      .update(listings)
+      .set({ status: 'reserved', updatedAt: now })
+      .where(eq(listings.id, listing.id));
+  });
+}
+
 /* ----------------------------------------------------------- lazy expiry */
 
 const ACCEPTED_GRACE_MS = 2 * 60 * 60 * 1000; // accepted meetups expire 2h after startsAt
@@ -97,10 +290,31 @@ export async function applyExpiry(db: Db): Promise<void> {
       );
   }
 
+  // Auctions past their end time settle one at a time, each inside its own
+  // transaction with the listing row locked — see settleAuction().
+  const dueAuctions = await db
+    .select({ id: listings.id })
+    .from(listings)
+    .where(
+      and(
+        eq(listings.status, 'active'),
+        eq(listings.saleType, 'auction'),
+        lt(listings.expiresAt, now),
+      ),
+    );
+  for (const a of dueAuctions) await settleAuction(db, a.id);
+
+  // Fixed-price "Sell today" expiry — unchanged behaviour.
   await db
     .update(listings)
     .set({ status: 'expired', updatedAt: now })
-    .where(and(eq(listings.status, 'active'), lt(listings.expiresAt, now)));
+    .where(
+      and(
+        eq(listings.status, 'active'),
+        eq(listings.saleType, 'fixed'),
+        lt(listings.expiresAt, now),
+      ),
+    );
 }
 
 /* --------------------------------------------------------------- blocking */
@@ -154,6 +368,10 @@ export type ListingCard = Listing & {
   coverPhotoUrl: string | null;
   seller: PublicUser;
   hasAvailabilityToday: boolean;
+  /** Highest bid for an auction, else the fixed price. Derived, never stored. */
+  currentPriceCents: number;
+  /** Number of bids placed. Always 0 for a fixed-price listing. */
+  bidCount: number;
 };
 
 /** Builds ListingCards for a batch of listings in a fixed number of queries. */
@@ -161,7 +379,7 @@ export async function toListingCards(db: Db, rows: Listing[]): Promise<ListingCa
   if (rows.length === 0) return [];
   const listingIds = rows.map((l) => l.id);
 
-  const [photos, sellers, campusRows] = await Promise.all([
+  const [photos, sellers, campusRows, auctionStates] = await Promise.all([
     db
       .select()
       .from(listingPhotos)
@@ -175,6 +393,7 @@ export async function toListingCards(db: Db, rows: Listing[]): Promise<ListingCa
       .select()
       .from(campuses)
       .where(inArray(campuses.id, [...new Set(rows.map((l) => l.campusId))])),
+    auctionStateFor(db, rows),
   ]);
 
   const cover = new Map<string, string>();
@@ -200,12 +419,17 @@ export async function toListingCards(db: Db, rows: Listing[]): Promise<ListingCa
     );
   const hasToday = new Set(todayWindows.map((w) => w.listingId));
 
-  return rows.map((l) => ({
-    ...l,
-    coverPhotoUrl: cover.get(l.id) ?? null,
-    seller: toPublicUser(sellerById.get(l.sellerId)!),
-    hasAvailabilityToday: hasToday.has(l.id),
-  }));
+  return rows.map((l) => {
+    const auction = auctionStates.get(l.id);
+    return {
+      ...l,
+      coverPhotoUrl: cover.get(l.id) ?? null,
+      seller: toPublicUser(sellerById.get(l.sellerId)!),
+      hasAvailabilityToday: hasToday.has(l.id),
+      currentPriceCents: auction?.currentPriceCents ?? l.priceCents,
+      bidCount: auction?.bidCount ?? 0,
+    };
+  });
 }
 
 export type ListingDetail = ListingCard & {
@@ -282,12 +506,13 @@ export async function toListingDetail(
 
 export type ReservationDetail = Omit<Reservation, 'handoffCode'> & {
   listing: ListingCard;
-  spot: MeetupSpot;
+  /** Null when the meetup is at a custom address instead of a campus spot. */
+  spot: MeetupSpot | null;
   buyer: PublicUser;
   seller: PublicUser;
   /** Only ever non-null for the buyer — the seller types it in to confirm. */
   handoffCode: string | null;
-  directionsUrl: string;
+  directionsUrl: string | null;
 };
 
 export function directionsUrlFor(spot: MeetupSpot): string {
@@ -309,7 +534,11 @@ export async function toReservationDetails(
     db
       .select()
       .from(meetupSpots)
-      .where(inArray(meetupSpots.id, [...new Set(rows.map((r) => r.spotId))])),
+      .where(
+        inArray(meetupSpots.id, [
+          ...new Set(rows.map((r) => r.spotId).filter((id): id is string => id != null)),
+        ]),
+      ),
     db
       .select()
       .from(users)
@@ -322,7 +551,7 @@ export async function toReservationDetails(
   const userById = new Map(userRows.map((u) => [u.id, u]));
 
   return rows.map((r) => {
-    const spot = spotById.get(r.spotId)!;
+    const spot = r.spotId ? (spotById.get(r.spotId) ?? null) : null;
     return {
       ...r,
       listing: cardById.get(r.listingId)!,
@@ -330,7 +559,7 @@ export async function toReservationDetails(
       buyer: toPublicUser(userById.get(r.buyerId)!),
       seller: toPublicUser(userById.get(r.sellerId)!),
       handoffCode: viewerId === r.buyerId ? r.handoffCode : null,
-      directionsUrl: directionsUrlFor(spot),
+      directionsUrl: spot ? directionsUrlFor(spot) : null,
     };
   });
 }

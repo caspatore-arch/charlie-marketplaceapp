@@ -46,7 +46,7 @@ export function ReservationRow({ reservation, viewerId, role, onPress }: Reserva
           <ReservationStatusPill status={reservation.status} />
         </View>
         <Text variant="caption" color="inkMuted" numberOfLines={1}>
-          {otherParty.displayName} · {reservation.spot.name}
+          {otherParty.displayName} · {reservation.spot?.name ?? 'Custom address'}
         </Text>
         <Text variant="caption" color="inkFaint" numberOfLines={1}>
           {formatMeetupTime(reservation.startsAt.toISOString())}

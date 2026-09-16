@@ -71,6 +71,63 @@ export const env = {
       .map((id) => id.trim())
       .filter(Boolean);
   },
+  /* ------------------------------------------------------------ payments */
+
+  /**
+   * Raw value of PAYMENTS_MODE. Never read this directly for a decision —
+   * use `resolvePaymentsMode()` in backend/stripe/client.ts, which forces
+   * `simulated` when there is no secret key (docs/AUCTIONS.md §3).
+   */
+  get paymentsModeRaw(): string {
+    return (process.env.PAYMENTS_MODE ?? 'simulated').trim().toLowerCase();
+  },
+  get stripeSecretKey(): string | undefined {
+    const v = process.env.STRIPE_SECRET_KEY?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  get stripeWebhookSecret(): string | undefined {
+    const v = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  /** `live` additionally requires this, so one variable cannot reach real money. */
+  get stripeLiveAck(): boolean {
+    return process.env.STRIPE_LIVE_ACK === '1';
+  },
+  /**
+   * How many days Stripe holds a seller's funds before paying them out —
+   * `settings.payouts.schedule.delay_days` on the connected Express account.
+   *
+   * **Default 0**, which this app maps to Stripe's `minimum` (the lowest value
+   * the seller's country allows) — i.e. pay the seller out as fast as Stripe
+   * will. That is the riskiest setting under direct charges: a dispute that
+   * lands after payout usually finds no seller balance to draw from, so
+   * Stripe's negative-balance rules push the residual loss back onto the
+   * platform. `7` is the recommended pilot value. See docs/AUCTIONS.md §3.
+   *
+   * Validated as an integer 0–30; anything else throws rather than silently
+   * choosing a number nobody intended.
+   */
+  get payoutDelayDays(): number {
+    const raw = process.env.PAYOUT_DELAY_DAYS?.trim();
+    if (raw === undefined || raw === '') return 0;
+    if (!/^\d+$/.test(raw)) {
+      throw new Error(`PAYOUT_DELAY_DAYS must be a whole number 0–30, got "${raw}".`);
+    }
+    const n = Number(raw);
+    if (n < 0 || n > 30) {
+      throw new Error(`PAYOUT_DELAY_DAYS must be between 0 and 30, got ${n}.`);
+    }
+    return n;
+  },
+
+  /** Public base URL Stripe returns the seller to after Connect onboarding. */
+  get publicAppUrl(): string {
+    return (process.env.PUBLIC_APP_URL ?? `http://localhost:${process.env.PORT ?? 3000}`).replace(
+      /\/$/,
+      '',
+    );
+  },
+
   /** Where LocalDiskStorage keeps uploaded files. */
   get uploadsDir(): string {
     return process.env.UPLOADS_DIR ?? 'backend/data/uploads';

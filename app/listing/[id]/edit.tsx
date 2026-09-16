@@ -110,6 +110,10 @@ export default function EditListingScreen() {
 
   const initialValues: Partial<ListingFormInitialValues> = {
     photos: listing.photos.map((p) => ({ key: p.id, url: p.url, status: 'done' as const })),
+    saleType: listing.saleType,
+    startPriceCents: listing.startPriceCents,
+    buyoutPriceCents: listing.buyoutPriceCents,
+    bidCount: listing.bidCount,
     title: listing.title,
     category: listing.category,
     condition: listing.condition,
@@ -151,6 +155,7 @@ export default function EditListingScreen() {
                   This listing is {listing.status}. Relist it to make it visible again.
                 </Text>
                 <RelistControl
+                  isAuction={listing.saleType === 'auction'}
                   onRelist={(isSellToday) => relistMutation.mutate({ id: listing.id, isSellToday })}
                   loading={relistMutation.isPending}
                 />
@@ -172,11 +177,26 @@ export default function EditListingScreen() {
   );
 }
 
-function RelistControl({ onRelist, loading }: { onRelist: (isSellToday: boolean) => void; loading: boolean }) {
+function RelistControl({
+  isAuction,
+  onRelist,
+  loading,
+}: {
+  isAuction: boolean;
+  onRelist: (isSellToday: boolean) => void;
+  loading: boolean;
+}) {
   const [sellToday, setSellToday] = useState(false);
   return (
     <View style={styles.relistWrap}>
-      <SellTodayToggle value={sellToday} onChange={setSellToday} />
+      {isAuction ? (
+        <Text variant="caption" color="inkMuted">
+          Relisting starts a brand-new 24-hour auction at the same start price. Bids from the last
+          run are cleared.
+        </Text>
+      ) : (
+        <SellTodayToggle value={sellToday} onChange={setSellToday} />
+      )}
       <Button title="Relist" onPress={() => onRelist(sellToday)} loading={loading} style={styles.relistButton} />
     </View>
   );
