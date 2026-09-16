@@ -32,7 +32,7 @@ export function SellerRow({ seller, onPress }: SellerRowProps) {
     >
       <Avatar uri={seller.avatarUrl} name={seller.displayName} size={36} />
       <View style={styles.info}>
-        <Text variant="label" weight="600">
+        <Text variant="label" weight="600" numberOfLines={1} ellipsizeMode="tail">
           {seller.displayName}
         </Text>
         <View style={styles.badges}>
@@ -47,7 +47,7 @@ export function SellerRow({ seller, onPress }: SellerRowProps) {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   pressed: { opacity: 0.7 },
-  info: { gap: 4 },
+  info: { flex: 1, gap: 4 },
   badges: { flexDirection: 'row', gap: space.xs },
 });
 

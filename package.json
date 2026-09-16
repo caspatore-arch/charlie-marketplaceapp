@@ -57,7 +57,7 @@
     "backend": "tsx watch backend/server.ts",
     "backend:once": "tsx backend/server.ts",
     "db:seed": "tsx backend/db/seed.ts",
-    "db:reset": "rm -rf backend/data/pg && tsx backend/db/seed.ts",
+    "db:reset": "tsx backend/db/guard.ts && rm -rf backend/data/pg && tsx backend/db/seed.ts",
     "db:check": "tsx scripts/check-db-url.ts",
     "test:e2e": "tsx scripts/e2e.ts",
     "typecheck": "tsc --noEmit",

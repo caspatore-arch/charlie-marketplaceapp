@@ -47,7 +47,7 @@ export function PhotoGallery({ photos, aspectRatio = 4 / 5 }: PhotoGalleryProps)
           <Image
             accessibilityLabel="Listing photo"
             source={{ uri: resolveMediaUrl(item.url) }}
-            style={{ width: screenWidth, height }}
+            style={{ width: screenWidth, height, backgroundColor: colors.surfaceMuted }}
             contentFit="cover"
             transition={150}
           />

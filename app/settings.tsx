@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { AccountSection } from '@/components/settings/AccountSection';
 import { SafetySection } from '@/components/settings/SafetySection';
 import { AboutPrototypeSection } from '@/components/settings/AboutPrototypeSection';
+import { LegalSection } from '@/components/settings/LegalSection';
 import { CloseAccountSection } from '@/components/settings/CloseAccountSection';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { useAuth } from '@/hooks/useAuth';
@@ -68,6 +69,10 @@ export default function SettingsScreen() {
 
         <SettingsSection title="About this prototype">
           <AboutPrototypeSection />
+        </SettingsSection>
+
+        <SettingsSection title="Legal">
+          <LegalSection />
         </SettingsSection>
 
         <Button

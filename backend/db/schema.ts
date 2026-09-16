@@ -219,6 +219,24 @@ export const conversations = pgTable(
   (t) => [uniqueIndex('conversations_listing_buyer_uq').on(t.listingId, t.buyerId)],
 );
 
+/** Per-participant read state for a conversation. One row per (conversation, user). */
+export const conversationReads = pgTable(
+  'conversation_reads',
+  {
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    lastReadAt: ts('last_read_at'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.conversationId, t.userId] }),
+    index('conversation_reads_user_idx').on(t.userId),
+  ],
+);
+
 export const messages = pgTable(
   'messages',
   {
@@ -349,6 +367,7 @@ export type Listing = typeof listings.$inferSelect;
 export type ListingPhoto = typeof listingPhotos.$inferSelect;
 export type AvailabilityWindow = typeof availabilityWindows.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
+export type ConversationRead = typeof conversationReads.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Reservation = typeof reservations.$inferSelect;
 export type Report = typeof reports.$inferSelect;

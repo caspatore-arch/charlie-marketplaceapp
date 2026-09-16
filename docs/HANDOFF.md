@@ -27,7 +27,8 @@ Scan the QR code with the iPhone camera → opens in Expo Go.
 
 - **Fastest way in:** Profile tab → "Switch test user (dev only)" → Maya / Jordan / Sam. Use two phones (or one phone + the web preview `npm run web`) to play buyer and seller.
 - **Email sign-in path:** enter `anything@arizona.edu` → the 6‑digit code is printed in the backend terminal → type it in.
-- If the phone shows "network request failed": run `npm run env:lan` again (your Mac's Wi‑Fi IP changed) and restart `npm start`.
+- If the phone shows "network request failed", the app now shows a banner naming the exact address it is trying. Run `npm run env:lan` again (your Mac's Wi‑Fi IP changed), restart `npm start`, then tap **Retry**.
+- **Never run `npm run db:seed` or `db:reset` while `npm run backend` is running.** The local database allows one writer at a time, and doing both at once makes the running server throw confusing 500 errors. Both commands now refuse with a clear message instead, so this is a speed bump rather than a trap — stop the backend, reseed, start it again.
 
 Scripted proof (no phone needed):
 ```bash

@@ -7,7 +7,7 @@
  * and explicit copy for declined/cancelled/expired.
  */
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter, useIsFocused, Stack } from 'expo-router';
 import { CheckCircle2, MapPin } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
@@ -149,7 +149,12 @@ export default function ReservationScreen() {
   }
 
   return (
-    <Screen scroll contentContainerStyle={styles.content}>
+    <KeyboardAvoidingView
+      style={styles.flexFill}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <Screen scroll contentContainerStyle={styles.content}>
       <Stack.Screen options={{ title: 'Meetup' }} />
 
       <MeetupCard
@@ -286,7 +291,8 @@ export default function ReservationScreen() {
           reportMutation.mutate({ targetUserId: otherParty.id, reason, details: details || undefined })
         }
       />
-    </Screen>
+      </Screen>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -668,6 +674,7 @@ function ReportSheet({
 }
 
 const styles = StyleSheet.create({
+  flexFill: { flex: 1 },
   loadingWrap: { gap: space.md, padding: space.lg },
   content: { padding: space.lg, gap: space.lg, paddingBottom: space.huge },
   paymentNote: { marginTop: -space.sm },

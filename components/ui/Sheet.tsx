@@ -3,7 +3,7 @@
  * Usage: <Sheet visible={open} onClose={() => setOpen(false)} title="Pick a time">{...}</Sheet>
  */
 import React from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, space } from '@/constants/theme';
 import { Text } from './Text';
@@ -26,15 +26,26 @@ export function Sheet({ visible, onClose, title, children }: SheetProps) {
         accessibilityLabel="Close"
         onPress={onClose}
       />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + space.lg }]}>
-        <View style={styles.handle} />
-        {title ? (
-          <Text variant="heading" style={styles.title}>
-            {title}
-          </Text>
-        ) : null}
-        {children}
-      </View>
+      {/* RN's Modal renders in its own native window, so the screen's own
+          KeyboardAvoidingView (if any) never sees it — every sheet with a
+          text field (ReportSheet, PriceFilterSheet, WindowEditor's add-window
+          sheet, ModerationActionSheet, the reservation propose/cancel/report
+          sheets) needs its own avoidance or the keyboard covers the input. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.avoider}
+        pointerEvents="box-none"
+      >
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + space.lg }]}>
+          <View style={styles.handle} />
+          {title ? (
+            <Text variant="heading" style={styles.title}>
+              {title}
+            </Text>
+          ) : null}
+          {children}
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -43,6 +54,9 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(22,21,19,0.4)',
+  },
+  avoider: {
+    width: '100%',
   },
   sheet: {
     backgroundColor: colors.surface,

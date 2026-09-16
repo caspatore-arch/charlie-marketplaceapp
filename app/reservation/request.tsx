@@ -133,7 +133,7 @@ export default function RequestMeetupScreen() {
     >
       <Screen scroll contentContainerStyle={styles.content}>
         <View style={styles.summary}>
-          <Image source={{ uri: coverPhoto }} style={styles.thumb} contentFit="cover" />
+          <Image source={{ uri: coverPhoto }} style={styles.thumb} contentFit="cover" transition={150} />
           <View style={styles.summaryInfo}>
             <Text variant="label" weight="600" numberOfLines={2}>
               {listing.title}

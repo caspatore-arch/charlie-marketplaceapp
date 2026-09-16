@@ -287,6 +287,28 @@ async function main(): Promise<number> {
     const thread = await maya.conversation.messages.query({ conversationId });
     assertEqual(thread.items.length, 1, 'the seller should see the message');
 
+    // --- read state: Jordan's message leaves Maya with one unread thread. ---
+    const mayaListUnread = await maya.conversation.list.query();
+    const mayaUnreadEntry = mayaListUnread.find((c) => c.id === conversationId);
+    assertEqual(mayaUnreadEntry?.unreadCount, 1, "Maya's list shows the unread message");
+    const mayaTotalUnread = await maya.conversation.unreadTotal.query();
+    assertEqual(mayaTotalUnread.conversations, 1, "Maya's unreadTotal counts the thread");
+
+    // Marking read drops both to zero.
+    const markResult = await maya.conversation.markRead.mutate({ conversationId });
+    assertEqual(markResult.ok, true, 'markRead reports ok');
+    const mayaListRead = await maya.conversation.list.query();
+    assertEqual(
+      mayaListRead.find((c) => c.id === conversationId)?.unreadCount,
+      0,
+      'unreadCount drops to 0 after markRead',
+    );
+    const mayaTotalRead = await maya.conversation.unreadTotal.query();
+    assertEqual(mayaTotalRead.conversations, 0, 'unreadTotal.conversations drops to 0 after markRead');
+
+    // A non-participant cannot mark this thread read.
+    await expectTrpcError('FORBIDDEN', () => sam.conversation.markRead.mutate({ conversationId }));
+
     // The seller can also open (or resume) the same thread by naming the buyer.
     const sellerOpened = await maya.conversation.open.mutate({ listingId, buyerId: JORDAN_ID });
     assertEqual(sellerOpened.id, conversationId, 'seller-opened conversation is the same thread');
@@ -304,6 +326,79 @@ async function main(): Promise<number> {
       threadAfterSellerReply.items.some((m) => m.body === 'Yep, still available!'),
       'the buyer should see the seller-initiated message',
     );
+
+    // Jordan sends again — Maya's unread count goes back to 1.
+    await jordan.conversation.send.mutate({
+      conversationId,
+      body: 'Great, want to meet up?',
+    });
+    const mayaListAgain = await maya.conversation.list.query();
+    assertEqual(
+      mayaListAgain.find((c) => c.id === conversationId)?.unreadCount,
+      1,
+      "Maya's unread count returns to 1 after Jordan sends again",
+    );
+    const mayaTotalAgain = await maya.conversation.unreadTotal.query();
+    assertEqual(mayaTotalAgain.conversations, 1, "Maya's unreadTotal returns to 1");
+
+    // --- actionableReservations: exercised on a throwaway listing (not
+    // `listingId`) so it doesn't add extra rows to reservation.forListing,
+    // which criterion 4 asserts an exact count against. ---
+    const probeListing = await maya.listing.create.mutate({
+      title: 'Actionable-count probe item',
+      category: 'other',
+      condition: 'good',
+      priceCents: 100,
+      isSellToday: false,
+      photoUrls: ['/api/uploads/demo-bag.svg'],
+      spotIds: [spotAId],
+      windows: [
+        {
+          startsAt: new Date(Date.now() + 15 * 60 * 1000),
+          endsAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
+        },
+      ],
+    });
+    const probeSlot = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    const probe = await jordan.reservation.request.mutate({
+      listingId: probeListing.id,
+      spotId: spotAId,
+      startsAt: probeSlot,
+    });
+    const mayaActionableAfterRequest = await maya.conversation.unreadTotal.query();
+    assertEqual(
+      mayaActionableAfterRequest.actionableReservations,
+      1,
+      "the seller's actionableReservations is 1 once a request lands (ball in her court)",
+    );
+    const jordanActionableAfterRequest = await jordan.conversation.unreadTotal.query();
+    assertEqual(
+      jordanActionableAfterRequest.actionableReservations,
+      0,
+      "the requester's actionableReservations is 0 (they made the last move)",
+    );
+
+    await maya.reservation.counter.mutate({
+      id: probe.id,
+      spotId: spotAId,
+      startsAt: probeSlot,
+      note: 'probe counter',
+    });
+    const jordanActionableAfterCounter = await jordan.conversation.unreadTotal.query();
+    assertEqual(
+      jordanActionableAfterCounter.actionableReservations,
+      1,
+      'after the seller counters, the ball is back in the buyer\'s court',
+    );
+    const mayaActionableAfterCounter = await maya.conversation.unreadTotal.query();
+    assertEqual(
+      mayaActionableAfterCounter.actionableReservations,
+      0,
+      "the seller's actionableReservations drops to 0 after countering",
+    );
+
+    await jordan.reservation.cancel.mutate({ id: probe.id, reason: 'probe cleanup' });
 
     const reservation = await jordan.reservation.request.mutate({
       listingId,

@@ -10,7 +10,11 @@ export const colors = {
   surfaceMuted: '#F1EDE7',
   ink: '#161513',
   inkMuted: '#6F6A62',
-  inkFaint: '#A8A29A',
+  // 4.62:1 on `bg`, 4.90:1 on `surface` — WCAG AA for small text. It sits close
+  // to `inkMuted` on purpose: on a near-white ground a genuinely faint grey
+  // cannot reach 4.5:1. Do not lighten this back to a prettier value (it was
+  // #A8A29A at 2.4:1, unreadable for low-vision users).
+  inkFaint: '#767068',
   line: '#E6E1DA',
   accent: '#C8442B',
   accentSoft: '#FBE9E4',

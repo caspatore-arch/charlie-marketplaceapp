@@ -1,11 +1,11 @@
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, inArray, lt, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
-import { conversations, listings, messages, users } from '../../db/schema';
+import { conversationReads, conversations, listings, messages, reservations, users } from '../../db/schema';
 import { applyExpiry, isBlockedBetween, toListingCards, toPublicUser } from '../lib';
-import { protectedProcedure, router } from '../trpc';
+import { protectedProcedure, publicProcedure, router } from '../trpc';
 
 /** Loads a conversation the caller takes part in, or throws. */
 async function loadParticipantConversation(db: Db, id: string, userId: string) {
@@ -57,19 +57,117 @@ export const conversationRouter = router({
       )
       .orderBy(desc(messages.createdAt));
 
+    const reads = await ctx.db
+      .select()
+      .from(conversationReads)
+      .where(
+        and(
+          inArray(
+            conversationReads.conversationId,
+            rows.map((c) => c.id),
+          ),
+          eq(conversationReads.userId, ctx.user.id),
+        ),
+      );
+    const lastReadById = new Map(reads.map((r) => [r.conversationId, r.lastReadAt]));
+
     return rows.map((c) => {
       const mine = allMessages.filter((m) => m.conversationId === c.id);
       const otherId = c.buyerId === ctx.user.id ? c.sellerId : c.buyerId;
+      const lastReadAt = lastReadById.get(c.id) ?? null;
       return {
         id: c.id,
         listing: cardById.get(c.listingId)!,
         otherUser: toPublicUser(userById.get(otherId)!),
         lastMessage: mine[0] ?? undefined,
-        // No per-user read receipts in the MVP; unread = messages from the other side.
-        unreadCount: mine.filter((m) => m.senderId !== ctx.user.id).length,
+        // Messages from the other participant sent after our lastReadAt (all of
+        // them if we've never read this thread).
+        unreadCount: mine.filter(
+          (m) => m.senderId !== ctx.user.id && (lastReadAt == null || m.createdAt > lastReadAt),
+        ).length,
       };
     });
   }),
+
+  /** One cheap call for the Inbox tab badge. Returns zeroes when signed out. */
+  unreadTotal: publicProcedure.query(async ({ ctx }) => {
+    if (!ctx.user) return { conversations: 0, actionableReservations: 0 };
+    await applyExpiry(ctx.db);
+    const userId = ctx.user.id;
+
+    const convoRows = await ctx.db
+      .select()
+      .from(conversations)
+      .where(or(eq(conversations.buyerId, userId), eq(conversations.sellerId, userId)));
+
+    let unreadConversations = 0;
+    if (convoRows.length > 0) {
+      const reads = await ctx.db
+        .select()
+        .from(conversationReads)
+        .where(
+          and(
+            inArray(
+              conversationReads.conversationId,
+              convoRows.map((c) => c.id),
+            ),
+            eq(conversationReads.userId, userId),
+          ),
+        );
+      const lastReadById = new Map(reads.map((r) => [r.conversationId, r.lastReadAt]));
+
+      const allMessages = await ctx.db
+        .select()
+        .from(messages)
+        .where(
+          inArray(
+            messages.conversationId,
+            convoRows.map((c) => c.id),
+          ),
+        );
+
+      for (const c of convoRows) {
+        const lastReadAt = lastReadById.get(c.id) ?? null;
+        const hasUnread = allMessages.some(
+          (m) =>
+            m.conversationId === c.id &&
+            m.senderId !== userId &&
+            (lastReadAt == null || m.createdAt > lastReadAt),
+        );
+        if (hasUnread) unreadConversations += 1;
+      }
+    }
+
+    const actionableRows = await ctx.db
+      .select({ id: reservations.id })
+      .from(reservations)
+      .where(
+        and(
+          or(eq(reservations.buyerId, userId), eq(reservations.sellerId, userId)),
+          inArray(reservations.status, ['requested', 'countered']),
+          ne(reservations.proposedById, userId),
+        ),
+      );
+
+    return { conversations: unreadConversations, actionableReservations: actionableRows.length };
+  }),
+
+  markRead: protectedProcedure
+    .input(z.object({ conversationId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const convo = await loadParticipantConversation(ctx.db, input.conversationId, ctx.user.id);
+      const now = new Date();
+
+      await ctx.db
+        .insert(conversationReads)
+        .values({ conversationId: convo.id, userId: ctx.user.id, lastReadAt: now })
+        .onConflictDoUpdate({
+          target: [conversationReads.conversationId, conversationReads.userId],
+          set: { lastReadAt: now },
+        });
+
+      return { ok: true as const };
+    }),
 
   open: protectedProcedure
     .input(z.object({ listingId: z.uuid(), buyerId: z.uuid().optional() }))

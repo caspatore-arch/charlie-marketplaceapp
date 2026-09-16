@@ -29,6 +29,7 @@ ModerationAction = 'dismiss' | 'remove_listing' | 'note'
 - **availability_windows**: id, listingId, startsAt, endsAt
 - **conversations**: id, listingId, buyerId, sellerId, createdAt, lastMessageAt; unique(listingId, buyerId)
 - **messages**: id, conversationId, senderId, body, createdAt
+- **conversation_reads**: conversationId, userId (PK both), lastReadAt? — one row per participant per conversation; `null`/missing row means "never read". Kept as its own table (rather than two columns on `conversations`) so "who read what" stays answerable and group threads wouldn't need a second migration.
 - **reservations**: id, listingId, buyerId, sellerId, status, spotId, startsAt (agreed/proposed time), proposedById (who made the current proposal), priceCents (agreed price snapshot), handoffCode? (4 digits, set on accept), buyerConfirmedAt?, sellerConfirmedAt?, cancelledById?, cancelReason?, createdAt, updatedAt
   - **partial unique index**: `(listingId) WHERE status = 'accepted'` — DB guarantees one accepted hold per item.
 - **handoff_confirmations**: id, reservationId, userId, confirmedAt, method ('code' | 'tap')
@@ -92,9 +93,18 @@ listing.toggleSave    P    { id }                   → { saved: boolean }
 listing.saved         P    –                        → ListingCard[]
 
 conversation.list     P    –                        → { id, listing: ListingCard, otherUser, lastMessage?, unreadCount }[]
+      unreadCount = messages from the other participant newer than the caller's conversation_reads.lastReadAt
+      (all of them if the caller has never read this thread).
 conversation.open     P    { listingId, buyerId? }  → Conversation  (buyer: creates if none for this listing; seller: buyerId required, opens/creates the thread with that buyer)
 conversation.messages P    { conversationId, cursor? } → { items: Message[], nextCursor? }
 conversation.send     P    { conversationId, body (1–2000) } → Message
+conversation.markRead P    { conversationId }       → { ok: true }   (participants only, FORBIDDEN otherwise; sets the caller's lastReadAt to now)
+conversation.unreadTotal pub –                       → { conversations: number, actionableReservations: number }
+      One cheap call for the tab badge. `conversations` = number of the caller's conversations with
+      unreadCount > 0. `actionableReservations` = reservations where the caller is a participant, status
+      is `requested` or `countered`, and `proposedById !== caller` (the ball is in their court). Public
+      procedure: returns `{ conversations: 0, actionableReservations: 0 }` for an anonymous caller instead
+      of throwing, so the tab bar never needs auth branching.
 
 reservation.request   P    { listingId, spotId, startsAt }    → Reservation
 reservation.counter   P    { id, spotId, startsAt, note? }    → Reservation   (either party; sets proposedById)

@@ -21,6 +21,7 @@ import {
   users,
 } from './schema';
 import { LocalDiskStorage } from '../storage';
+import { refuseIfBackendRunning } from './guard';
 import { localDayBounds } from '../trpc/lib';
 
 const TIMEZONE = 'America/Phoenix';
@@ -458,7 +459,8 @@ const invokedDirectly =
   process.argv[1] != null && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 
 if (invokedDirectly) {
-  seed()
+  refuseIfBackendRunning()
+    .then(() => seed())
     .then(() => process.exit(0))
     .catch((err) => {
       console.error(err);

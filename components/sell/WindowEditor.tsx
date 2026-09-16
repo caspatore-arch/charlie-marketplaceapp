@@ -140,7 +140,7 @@ export function WindowEditor({ windows, onChange }: WindowEditorProps) {
                 accessibilityRole="button"
                 accessibilityLabel="Remove this window"
                 onPress={() => handleRemove(w.key)}
-                hitSlop={8}
+                hitSlop={14}
                 style={styles.deleteButton}
               >
                 <Trash2 size={18} color={colors.danger} />

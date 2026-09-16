@@ -39,7 +39,7 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search listings'
           onPress={() => onChangeText('')}
           accessibilityRole="button"
           accessibilityLabel="Clear search"
-          hitSlop={8}
+          hitSlop={12}
           style={styles.clearBtn}
         >
           <X size={16} color={colors.inkFaint} />

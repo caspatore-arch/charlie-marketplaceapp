@@ -93,11 +93,27 @@ export default function ConversationScreen() {
     },
   });
 
+  const markReadMutation = trpc.conversation.markRead.useMutation({
+    onSuccess: () => {
+      utils.conversation.list.invalidate();
+      utils.conversation.unreadTotal.invalidate();
+    },
+  });
+
   const allMessages = useMemo<OptimisticMessage[]>(() => {
     const fetched = (messagesQuery.data?.pages ?? []).flatMap((p) => p.items);
     const merged = [...fetched, ...optimistic.filter((o) => !fetched.some((f) => f.id === o.id))];
     return merged.slice().sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }, [messagesQuery.data, optimistic]);
+
+  // Mark read when the thread opens and whenever new messages arrive while focused.
+  const latestMessageId = allMessages[0]?.id;
+  React.useEffect(() => {
+    if (!id || !isFocused) return;
+    if (!latestMessageId) return; // nothing to mark read yet (or still loading)
+    markReadMutation.mutate({ conversationId: id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isFocused, latestMessageId]);
 
   const handleSend = useCallback(() => {
     const body = draft.trim();

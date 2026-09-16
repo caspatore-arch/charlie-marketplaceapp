@@ -5,7 +5,7 @@
  * `listing.feed` (public) plus `campus.list` (public).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
@@ -200,6 +200,10 @@ export default function BrowseScreen() {
           if (feedQuery.hasNextPage && !feedQuery.isFetchingNextPage) feedQuery.fetchNextPage();
         }}
         keyboardDismissMode="on-drag"
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
         ListFooterComponent={
           feedQuery.isFetchingNextPage ? (
             <View style={styles.footerLoading}>

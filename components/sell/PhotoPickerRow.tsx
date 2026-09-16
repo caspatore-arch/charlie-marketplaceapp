@@ -133,6 +133,7 @@ export function PhotoPickerRow({ photos, onChange, max = 8, error }: PhotoPicker
                 source={{ uri: photo.status === 'done' ? resolveMediaUrl(photo.url) : photo.localUri }}
                 style={styles.image}
                 contentFit="cover"
+                transition={150}
                 accessibilityLabel={index === 0 ? 'Cover photo' : `Photo ${index + 1}`}
               />
               {photo.status === 'uploading' ? (
@@ -165,7 +166,7 @@ export function PhotoPickerRow({ photos, onChange, max = 8, error }: PhotoPicker
               accessibilityRole="button"
               accessibilityLabel="Remove photo"
               onPress={() => handleRemove(photo.key)}
-              hitSlop={8}
+              hitSlop={12}
               style={styles.removeButton}
             >
               <X size={14} color={colors.white} />
