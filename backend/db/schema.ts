@@ -5,6 +5,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   doublePrecision,
   integer,
   pgEnum,
@@ -62,6 +63,12 @@ export const reportStatusEnum = pgEnum('report_status', ['open', 'reviewed']);
 
 export const handoffMethodEnum = pgEnum('handoff_method', ['code', 'tap']);
 
+/**
+ * How a listing is sold. 'fixed' is the original (and default) behaviour —
+ * every pre-auction row keeps working untouched. See docs/AUCTIONS.md §1.
+ */
+export const saleTypeEnum = pgEnum('sale_type', ['fixed', 'auction']);
+
 /* ----------------------------------------------------------------- tables */
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -73,6 +80,16 @@ export const campuses = pgTable('campuses', {
   emailDomains: text('email_domains').array().notNull(),
   timezone: text('timezone').notNull(),
   isDemo: boolean('is_demo').notNull().default(false),
+  /**
+   * Campus center for the "custom meetup address" radius check
+   * (docs/AUCTIONS.md §2). Defaulted to the University of Arizona's
+   * approximate coordinates so existing/seeded rows pick this up without a
+   * seed.ts change — [FOUNDER TO CONFIRM], approximate.
+   */
+  centerLat: doublePrecision('center_lat').notNull().default(32.2319),
+  centerLng: doublePrecision('center_lng').notNull().default(-110.9501),
+  /** 2 miles. */
+  meetupRadiusMeters: integer('meetup_radius_meters').notNull().default(3219),
 });
 
 export const users = pgTable('users', {
@@ -144,6 +161,12 @@ export const listings = pgTable(
     category: categoryEnum('category').notNull(),
     condition: conditionEnum('condition').notNull(),
     priceCents: integer('price_cents').notNull(),
+    /** 'fixed' (default) or 'auction'. Auction columns below are null for 'fixed'. */
+    saleType: saleTypeEnum('sale_type').notNull().default('fixed'),
+    /** Auctions only: the seller's floor, >= 100 ($1). A single bid sells at this price. */
+    startPriceCents: integer('start_price_cents'),
+    /** Auctions only, optional: buy-it-now. Must be > startPriceCents. */
+    buyoutPriceCents: integer('buyout_price_cents'),
     size: text('size'),
     brand: text('brand'),
     status: listingStatusEnum('status').notNull().default('active'),
@@ -155,6 +178,7 @@ export const listings = pgTable(
   },
   (t) => [
     index('listings_campus_status_idx').on(t.campusId, t.status),
+    index('listings_sale_type_expires_idx').on(t.saleType, t.expiresAt),
     index('listings_seller_idx').on(t.sellerId),
   ],
 );
@@ -198,6 +222,29 @@ export const availabilityWindows = pgTable(
     endsAt: ts('ends_at').notNull(),
   },
   (t) => [index('availability_windows_listing_idx').on(t.listingId)],
+);
+
+/**
+ * One row per bid. Bids are append-only: the current price is the highest
+ * amount, so history stays auditable and settlement is a simple max().
+ */
+export const bids = pgTable(
+  'bids',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    bidderId: uuid('bidder_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    amountCents: integer('amount_cents').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('bids_listing_amount_idx').on(t.listingId, t.amountCents.desc()),
+    index('bids_bidder_idx').on(t.bidderId),
+  ],
 );
 
 export const conversations = pgTable(
@@ -267,9 +314,17 @@ export const reservations = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     status: reservationStatusEnum('status').notNull().default('requested'),
-    spotId: uuid('spot_id')
-      .notNull()
-      .references(() => meetupSpots.id),
+    /**
+     * Exactly one of `spotId` or the custom-address trio below is set — a
+     * meetup happens at a curated campus spot OR a party-proposed custom
+     * address, never both, never neither. Enforced by a DB check
+     * constraint (docs/AUCTIONS.md §2), not just app code.
+     */
+    spotId: uuid('spot_id').references(() => meetupSpots.id),
+    /** Free-text address as geocoded, only ever shown to the two participants. */
+    customAddress: text('custom_address'),
+    customLat: doublePrecision('custom_lat'),
+    customLng: doublePrecision('custom_lng'),
     /** Agreed (or currently proposed) meetup time. */
     startsAt: ts('starts_at').notNull(),
     /** Who made the proposal that is currently on the table. */
@@ -296,6 +351,17 @@ export const reservations = pgTable(
     index('reservations_listing_idx').on(t.listingId),
     index('reservations_buyer_idx').on(t.buyerId),
     index('reservations_seller_idx').on(t.sellerId),
+    // Exactly one of spotId or the (customAddress, customLat, customLng) trio.
+    check(
+      'reservations_spot_xor_custom',
+      sql`(
+        ${t.spotId} is not null
+        and ${t.customAddress} is null and ${t.customLat} is null and ${t.customLng} is null
+      ) or (
+        ${t.spotId} is null
+        and ${t.customAddress} is not null and ${t.customLat} is not null and ${t.customLng} is not null
+      )`,
+    ),
   ],
 );
 
@@ -357,6 +423,20 @@ export const savedListings = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.listingId] })],
 );
 
+/**
+ * Read-through cache for `backend/geocode.ts` (Nominatim lookups). Keyed by
+ * the normalized query text so repeat lookups of the same address don't hit
+ * the third-party geocoder again — Nominatim's usage policy forbids heavy
+ * traffic from one client.
+ */
+export const geocodeCache = pgTable('geocode_cache', {
+  query: text('query').primaryKey(),
+  lat: doublePrecision('lat').notNull(),
+  lng: doublePrecision('lng').notNull(),
+  displayName: text('display_name').notNull(),
+  fetchedAt: ts('fetched_at').notNull().defaultNow(),
+});
+
 /* ------------------------------------------------------------ row types */
 
 export type Campus = typeof campuses.$inferSelect;
@@ -370,4 +450,6 @@ export type Conversation = typeof conversations.$inferSelect;
 export type ConversationRead = typeof conversationReads.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Reservation = typeof reservations.$inferSelect;
+export type Bid = typeof bids.$inferSelect;
 export type Report = typeof reports.$inferSelect;
+export type GeocodeCacheRow = typeof geocodeCache.$inferSelect;
