@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gte, inArray, lt, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
@@ -104,6 +104,7 @@ export const listingRouter = router({
     .input(
       z.object({
         campusId: z.uuid(),
+        q: z.string().trim().min(1).max(80).optional(),
         category: categorySchema.optional(),
         minCents: z.number().int().min(0).optional(),
         maxCents: z.number().int().min(0).optional(),
@@ -121,6 +122,18 @@ export const listingRouter = router({
       if (input.minCents !== undefined) conditions.push(gte(listings.priceCents, input.minCents));
       if (input.maxCents !== undefined) conditions.push(lte(listings.priceCents, input.maxCents));
       if (input.size) conditions.push(eq(listings.size, input.size));
+      if (input.q) {
+        // Escape ILIKE wildcards in the user's input before wrapping it in %...%.
+        const escaped = input.q.replace(/[\\%_]/g, (c) => `\\${c}`);
+        const pattern = `%${escaped}%`;
+        conditions.push(
+          or(
+            ilike(listings.title, pattern),
+            ilike(listings.brand, pattern),
+            ilike(listings.description, pattern),
+          )!,
+        );
+      }
 
       // Hide listings from anyone in a block relationship with the viewer.
       if (ctx.user) {

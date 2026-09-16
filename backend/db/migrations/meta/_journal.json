@@ -15,6 +15,13 @@
       "when": 1789429781988,
       "tag": "0001_confused_wind_dancer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789522370437,
+      "tag": "0002_swift_imperial_guard",
+      "breakpoints": true
     }
   ]
 }

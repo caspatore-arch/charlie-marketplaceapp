@@ -23,6 +23,28 @@ export const apiBaseUrl: string =
 
 const trpcUrl = `${apiBaseUrl}/api/trpc`;
 
+/**
+ * Wraps global fetch so a network-level failure (phone can't reach the Mac —
+ * wrong LAN IP, different Wi-Fi, backend not running) surfaces a human
+ * message instead of a raw `TypeError: Network request failed`/`Failed to
+ * fetch`. Only fetch *rejecting* hits this path; a real tRPC error response
+ * (4xx/5xx with a JSON-RPC error body) still resolves normally and is left
+ * untouched so real tRPC errors reach the caller as-is.
+ */
+async function fetchWithFriendlyNetworkErrors(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw new Error(
+      "Can't reach the server — check the connection banner at the top of the screen.",
+    );
+  }
+}
+
 /** Reads the persisted bearer token (SecureStore native, AsyncStorage fallback on web). */
 async function readToken(): Promise<string | null> {
   try {
@@ -63,6 +85,7 @@ export const trpcClient = trpc.createClient({
     httpLink({
       url: trpcUrl,
       transformer: superjson,
+      fetch: fetchWithFriendlyNetworkErrors,
       async headers() {
         const token = await readToken();
         return token ? { Authorization: `Bearer ${token}` } : {};

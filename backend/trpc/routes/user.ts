@@ -1,8 +1,18 @@
 import { TRPCError } from '@trpc/server';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { blocks, campuses, listings, reports, users } from '../../db/schema';
+import {
+  blocks,
+  campuses,
+  emailCodes,
+  listings,
+  reports,
+  reservations,
+  savedListings,
+  sessions,
+  users,
+} from '../../db/schema';
 import { applyExpiry, toPublicUser, type PublicUser } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
@@ -135,6 +145,94 @@ export const userRouter = router({
         reason: input.reason,
         details: input.details ?? null,
       });
+      return { ok: true as const };
+    }),
+
+  /**
+   * Account closure (docs/CONTRACT.md "Account closure"). This is
+   * anonymization, not erasure: the user row stays so existing threads,
+   * reservations and reports still resolve, but it is stripped of anything
+   * identifying and the caller can no longer sign in as this account.
+   *
+   *   any accepted reservation (buyer or seller) ──▶ CONFLICT, nothing changes
+   *   otherwise, in one transaction:
+   *     users            → deletedAt set, displayName/email/avatar/bio wiped
+   *     listings (mine)  → active|reserved|expired → removed (sold/removed untouched)
+   *     reservations     → requested|countered (mine) → cancelled, 'account_closed'
+   *                        (completed reservations are never touched)
+   *     sessions, saved_listings, blocks (both directions), email_codes → deleted
+   *     messages, reports, completed reservations → kept as-is
+   */
+  deleteAccount: protectedProcedure
+    .input(z.object({ confirmText: z.literal('DELETE') }))
+    .mutation(async ({ ctx }) => {
+      const userId = ctx.user.id;
+      const oldEmail = ctx.user.email;
+
+      await ctx.db.transaction(async (tx) => {
+        // Refused while either side of an accepted meetup is still open —
+        // closing the account mid-handoff would strand the other party.
+        const [openAccepted] = await tx
+          .select({ id: reservations.id })
+          .from(reservations)
+          .where(
+            and(
+              eq(reservations.status, 'accepted'),
+              or(eq(reservations.buyerId, userId), eq(reservations.sellerId, userId)),
+            ),
+          )
+          .limit(1);
+        if (openAccepted) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Finish or cancel your open meetups before closing your account.',
+          });
+        }
+
+        const now = new Date();
+
+        await tx
+          .update(users)
+          .set({
+            deletedAt: now,
+            displayName: 'Deleted user',
+            email: `deleted+${userId}@account.invalid`,
+            avatarUrl: null,
+            bio: null,
+          })
+          .where(eq(users.id, userId));
+
+        await tx
+          .update(listings)
+          .set({ status: 'removed', updatedAt: now })
+          .where(
+            and(eq(listings.sellerId, userId), inArray(listings.status, ['active', 'reserved', 'expired'])),
+          );
+
+        await tx
+          .update(reservations)
+          .set({
+            status: 'cancelled',
+            cancelledById: userId,
+            cancelReason: 'account_closed',
+            handoffCode: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              or(eq(reservations.buyerId, userId), eq(reservations.sellerId, userId)),
+              inArray(reservations.status, ['requested', 'countered']),
+            ),
+          );
+
+        await tx.delete(sessions).where(eq(sessions.userId, userId));
+        await tx.delete(savedListings).where(eq(savedListings.userId, userId));
+        await tx
+          .delete(blocks)
+          .where(or(eq(blocks.blockerId, userId), eq(blocks.blockedId, userId)));
+        await tx.delete(emailCodes).where(eq(emailCodes.email, oldEmail));
+      });
+
       return { ok: true as const };
     }),
 });

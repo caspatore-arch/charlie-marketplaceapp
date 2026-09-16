@@ -88,6 +88,8 @@ export const users = pgTable('users', {
   bio: text('bio'),
   isDemo: boolean('is_demo').notNull().default(false),
   createdAt: ts('created_at').notNull().defaultNow(),
+  /** Set by user.deleteAccount. Anonymized, not erased — the row stays. */
+  deletedAt: ts('deleted_at'),
 });
 
 export const sessions = pgTable('sessions', {

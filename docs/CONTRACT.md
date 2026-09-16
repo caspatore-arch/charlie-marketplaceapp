@@ -77,7 +77,8 @@ auth.signOut          P    –                        → { ok }
 campus.list           pub  –                        → Campus[]
 campus.spots          pub  { campusId }             → MeetupSpot[]
 
-listing.feed          pub  { campusId, category?, minCents?, maxCents?, size?, pickupToday?: boolean, cursor?, limit? }
+listing.feed          pub  { campusId, q?, category?, minCents?, maxCents?, size?, pickupToday?: boolean, cursor?, limit? }
+      q = free-text search (trimmed, 1–80 chars); case-insensitive match over title, brand and description
                                                     → { items: ListingCard[], nextCursor? }
       ListingCard = listing + coverPhotoUrl + seller{ id, displayName, avatarUrl, isDemo, campusEmailVerified } + hasAvailabilityToday
 listing.byId          pub  { id }                   → ListingDetail = listing + photos[] + seller + spots[] + availabilityWindows[] + activeReservationId? + viewerRole ('seller'|'buyer'|'guest') + isSaved
@@ -111,6 +112,7 @@ user.block            P    { userId }               → { ok }
 user.unblock          P    { userId }               → { ok }
 user.blocked          P    –                        → PublicProfile[]
 user.report           P    { targetUserId?, targetListingId?, reason, details? } → { ok }
+user.deleteAccount    P    { confirmText: 'DELETE' }        → { ok: true }   (see "Account closure" below)
 
 payment.quote         pub  { priceCents }           → { priceCents, platformFeeCents, sellerNetCents, feePercent, simulated: true, label: 'Simulated — no money moves' }
 
@@ -131,6 +133,23 @@ moderation.reviewReport M  { id, action: ModerationAction, note?: string } → R
 `MODERATOR_USER_IDS` — comma-separated user ids with moderation access. `.env.example` defaults this to Maya's
 fixed seed id (`00000000-0000-4000-8000-000000000001`) so the pilot always has a responsible operator who can
 review reports. There is no roles table — this is deliberately the simplest thing that gives reports an owner.
+
+## Account closure (`user.deleteAccount`)
+
+Closes the caller's own account. **This is anonymization, not erasure** — say so in the UI and never imply otherwise.
+
+Refused with `CONFLICT` when the caller has any `accepted` reservation (as buyer *or* seller): "Finish or cancel your open meetups before closing your account." This keeps the other party from being stranded mid-arrangement.
+
+Otherwise, in one transaction:
+- `users`: set `deletedAt`, `displayName` → `'Deleted user'`, `email` → `'deleted+<id>@account.invalid'`, `avatarUrl`/`bio` → null. The row stays so existing threads, reservations and reports still resolve.
+- listings owned by the caller in `active`/`reserved`/`expired` → `removed` (`sold` and already-`removed` untouched, so sale history survives).
+- reservations involving the caller in `requested`/`countered` → `cancelled`, `cancelReason: 'account_closed'`. `completed` reservations are never touched.
+- delete: all `sessions` for the user (signs out everywhere), their `saved_listings`, all `blocks` in both directions, and any `email_codes` for the old address.
+- **kept:** `messages` bodies (the other party's thread stays readable, attributed to "Deleted user"), `reports` they filed or that name them, and `completed` reservations.
+
+`users.deletedAt` (nullable timestamptz) is added to the schema. `createContext` treats a session whose user has `deletedAt` set as signed out (`UNAUTHORIZED`). `user.byId` still returns the anonymized profile with `activeListingCount: 0`. A closed address can sign up again via `auth.requestCode` — it becomes a brand-new account.
+
+**Not implemented (needs a real privacy review before launch):** hard erasure of message content, export-my-data, and any retention schedule.
 
 Errors: use tRPC codes `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `BAD_REQUEST` with human-readable messages the UI can show verbatim.
 

@@ -1,7 +1,8 @@
 /**
  * Profile tab. Signed-out: sign-in CTA. Signed-in: identity, active listings
- * grid, saved listings, blocked users, sign out, and (dev builds only) a
- * "Switch test user" panel for the three seeded identities in CONTRACT.md.
+ * grid, saved listings, a link to Settings (account details, blocked users,
+ * sign out, close account), and (dev builds only) a "Switch test user"
+ * panel for the three seeded identities in CONTRACT.md.
  */
 import React, { useCallback } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
@@ -18,8 +19,8 @@ import { Divider } from '@/components/ui/Divider';
 import { ListingCard } from '@/components/ListingCard';
 import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
-import { colors, space } from '@/constants/theme';
-import type { ListingCard as ListingCardType, PublicProfile } from '@/types';
+import { space } from '@/constants/theme';
+import type { ListingCard as ListingCardType } from '@/types';
 
 const DEV_TEST_USERS = [
   { id: '00000000-0000-4000-8000-000000000001', label: 'Maya Test' },
@@ -28,7 +29,7 @@ const DEV_TEST_USERS = [
 ];
 
 export default function ProfileScreen() {
-  const { status, user, signOut, devSignIn } = useAuth();
+  const { status, user, devSignIn } = useAuth();
   const router = useRouter();
 
   if (status === 'loading') {
@@ -59,28 +60,22 @@ export default function ProfileScreen() {
     );
   }
 
-  return <SignedInProfile userId={user.id} displayName={user.displayName} onSignOut={signOut} onDevSignIn={devSignIn} />;
+  return <SignedInProfile userId={user.id} displayName={user.displayName} onDevSignIn={devSignIn} />;
 }
 
 function SignedInProfile({
   userId,
   displayName,
-  onSignOut,
   onDevSignIn,
 }: {
   userId: string;
   displayName: string;
-  onSignOut: () => Promise<void>;
   onDevSignIn: (id: string) => Promise<void>;
 }) {
   const router = useRouter();
   const meQuery = trpc.auth.me.useQuery();
   const mineQuery = trpc.listing.mine.useQuery();
   const savedQuery = trpc.listing.saved.useQuery();
-  const blockedQuery = trpc.user.blocked.useQuery();
-  const unblockMutation = trpc.user.unblock.useMutation({
-    onSuccess: () => blockedQuery.refetch(),
-  });
   const isModeratorQuery = trpc.moderation.isModerator.useQuery();
 
   const goToListing = useCallback((id: string) => router.push(`/listing/${id}`), [router]);
@@ -126,34 +121,6 @@ function SignedInProfile({
         )}
       </Section>
 
-      <Section title="Blocked users">
-        {blockedQuery.isPending ? (
-          <Skeleton height={48} />
-        ) : blockedQuery.isError ? (
-          <ErrorState message={blockedQuery.error.message} onRetry={() => blockedQuery.refetch()} />
-        ) : (blockedQuery.data ?? []).length === 0 ? (
-          <Text variant="body" color="inkMuted">
-            You haven&apos;t blocked anyone.
-          </Text>
-        ) : (
-          <View style={styles.blockedList}>
-            {blockedQuery.data!.map((u: PublicProfile) => (
-              <View key={u.id} style={styles.blockedRow}>
-                <Text variant="body" style={styles.blockedName}>
-                  {u.displayName}
-                </Text>
-                <Button
-                  title="Unblock"
-                  variant="secondary"
-                  onPress={() => unblockMutation.mutate({ userId: u.id })}
-                  loading={unblockMutation.isPending && unblockMutation.variables?.userId === u.id}
-                />
-              </View>
-            ))}
-          </View>
-        )}
-      </Section>
-
       {isModeratorQuery.data ? (
         <Section title="Moderation">
           <Button
@@ -165,7 +132,13 @@ function SignedInProfile({
         </Section>
       ) : null}
 
-      <Button title="Sign out" variant="ghost" onPress={onSignOut} style={styles.signOut} />
+      <Button
+        title="Settings"
+        variant="secondary"
+        onPress={() => router.push('/settings')}
+        style={styles.settingsButton}
+        accessibilityLabel="Open settings"
+      />
 
       {process.env.EXPO_PUBLIC_DEV_LOGIN === '1' ? (
         <DevSwitchUser onSelect={onDevSignIn} currentUserId={userId} />
@@ -251,17 +224,7 @@ const styles = StyleSheet.create({
   gridRow: { gap: space.md },
   gridContent: { gap: space.md },
   gridCell: { flex: 1 },
-  blockedList: { gap: space.sm },
-  blockedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: space.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  blockedName: { flex: 1 },
-  signOut: { marginTop: space.lg },
+  settingsButton: { marginTop: space.lg },
   devWrap: { marginTop: space.xxl, marginBottom: space.xxl },
   devTitle: { marginBottom: space.sm },
   devButtons: { gap: space.sm },

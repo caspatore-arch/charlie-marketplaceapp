@@ -29,6 +29,11 @@ export async function userFromAuthHeader(header: string | null | undefined): Pro
     .where(and(eq(sessions.tokenHash, hashToken(match[1]!)), gt(sessions.expiresAt, new Date())))
     .limit(1);
 
+  // A closed account's session (if it somehow still exists) resolves to
+  // signed-out rather than a live user — deleteAccount also removes the
+  // sessions themselves, but this is the defense-in-depth backstop.
+  if (row?.user.deletedAt != null) return null;
+
   return row?.user ?? null;
 }
 

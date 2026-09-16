@@ -48,9 +48,11 @@ Prints PASS/FAIL for acceptance criteria 1–8.
 | 7. Handoff → sold, no payment event | PASS (asserts no payment table exists) | ✅ buyer code 1771 → seller entered → buyer confirmed → "Handed off — item marked sold" |
 | 8. Report / block / access control | PASS (FORBIDDEN / UNAUTHORIZED / moderator checks) | ✅ report + block from profile and item page; blocked user's listings vanish from feed; unblock restores; saved items; signed‑out gating; email code sign‑in |
 | 9. Works at iPhone sizes incl. keyboard/photo picker | — | Layout verified at 390×844 in web preview; **keyboard + native photo picker still need a real‑device pass** |
+| 10. This document | — | — |
+
+Added after the first build and verified the same way: **search** on Browse (title/brand/description, composes with filters), **Settings** (edit name/bio, blocked users, honest prototype disclosures, sign out), **Close account**, a **moderation** screen for reports, and a **connection banner** that names the exact server address when the phone can't reach the Mac — with Retry restoring the feed, not just the banner.
 
 Bugs found and fixed during QA: confirm dialogs silent on web (now `utils/confirm.ts`), web photo upload sending the wrong body, and a stale‑state bug that could erase a just‑added photo (would have affected iPhone too).
-| 10. This document | — | — |
 
 Also verified: `npm run typecheck` clean; `npx expo export --platform ios` bundles (≈3.7k modules); seed is idempotent; data survives backend restart (PGlite on disk).
 
@@ -71,8 +73,9 @@ Also verified: `npm run typecheck` clean; `npx expo export --platform ios` bundl
 | Demo photos | Generated SVG placeholders with a "DEMO" mark. Real photos come from the picker. |
 | Time zone | Sell form uses the device's time zone (fine on campus). |
 | Hosted database | `DATABASE_URL` is now a one‑variable switch: set it (e.g. to a Neon connection string) and the backend uses `drizzle-orm/node-postgres` automatically — no code changes. Run `npm run db:check` after setting it to connect, apply migrations, and print the table count before pointing the app at it. Schema needs no change. |
-| Moderation | Basic access is built: reports land in the `reports` table and `MODERATOR_USER_IDS` (defaults to Maya's demo id) can list them (`moderation.reports`) and act (`moderation.reviewReport`: dismiss, remove the listing, or leave a note) via the API — no admin screen/UI yet, so this is exercised by `npm run test:e2e` and would need a client screen before a real pilot. |
-| Account deletion, age gating, privacy policy | Not built (required before public launch). |
+| Moderation | Built end to end: reports land in the `reports` table, `MODERATOR_USER_IDS` (defaults to Maya's demo id) grants access, and a **Moderation screen** (Profile → Settings area, visible only to a moderator) lists open/reviewed reports and can dismiss, add a note, or remove a listing. Removing a listing also cancels its accepted reservation. No email alerts to the moderator yet — they have to look. |
+| Account closure | **Built, and it is anonymization — not erasure.** Closing an account removes your listings, cancels pending requests, signs you out everywhere and renames you "Deleted user"; message history, reports and completed sales are kept. It refuses while you have an accepted meetup. Hard erasure, data export and a retention policy are **not** built. |
+| Age gating, privacy policy, terms | Not built (required before public launch). |
 
 ## 4. Rork
 

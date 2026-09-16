@@ -154,6 +154,83 @@ async function main(): Promise<number> {
       feed.items.some((i) => i.hasAvailabilityToday),
       'some seeded listings should have pickup availability today',
     );
+
+    // Free-text search (`q`): matches a seeded title, excludes non-matching
+    // listings, returns empty for nonsense, and composes with other filters.
+    // A distinctive word plucked from one seeded title is very unlikely to
+    // appear (via title/brand/description) on every OTHER seeded listing, so
+    // asserting some-match/not-all-match is a reliable, seed-agnostic check.
+    const target = feed.items.find((i) => i.title.trim().includes(' ')) ?? feed.items[0]!;
+    const needle = target.title.trim().split(/\s+/).sort((a, b) => b.length - a.length)[0]!;
+    const searched = await guest.listing.feed.query({
+      campusId: CAMPUS_ID,
+      q: needle,
+      limit: 50,
+    });
+    assert(
+      searched.items.some((i) => i.id === target.id),
+      `q="${needle}" should still return the listing titled "${target.title}"`,
+    );
+    assert(
+      searched.items.length < feed.items.length,
+      'q should narrow the feed down, not return everything',
+    );
+
+    const nonsense = await guest.listing.feed.query({
+      campusId: CAMPUS_ID,
+      q: 'zzzqqqxxx_no_such_listing_should_match_this_9999',
+      limit: 50,
+    });
+    assertEqual(nonsense.items.length, 0, 'a nonsense q should return an empty page');
+    assertEqual(nonsense.nextCursor, undefined, 'a nonsense q should have no next page');
+
+    if (target.category) {
+      const combined = await guest.listing.feed.query({
+        campusId: CAMPUS_ID,
+        q: needle,
+        category: target.category,
+        limit: 50,
+      });
+      assert(
+        combined.items.some((i) => i.id === target.id),
+        'q combined with a matching category filter should still find the listing',
+      );
+      assert(
+        combined.items.every((i) => i.category === target.category),
+        'q combined with a category filter should still respect the category filter',
+      );
+
+      const otherCategories = (
+        ['clothing', 'shoes', 'jewelry', 'accessories', 'dorm', 'books', 'tech', 'other'] as const
+      ).filter((c) => c !== target.category);
+      const mismatched = await guest.listing.feed.query({
+        campusId: CAMPUS_ID,
+        q: needle,
+        category: otherCategories[0],
+        limit: 50,
+      });
+      assert(
+        mismatched.items.every((i) => i.id !== target.id),
+        'q combined with a non-matching category filter should exclude the listing',
+      );
+    }
+
+    // q + keyset pagination: a small page size still finds a match beyond page 1.
+    const commonWord = 'e'; // near-certain to hit multiple seeded titles/descriptions
+    const pageOne = await guest.listing.feed.query({ campusId: CAMPUS_ID, q: commonWord, limit: 2 });
+    if (pageOne.nextCursor) {
+      const pageTwo = await guest.listing.feed.query({
+        campusId: CAMPUS_ID,
+        q: commonWord,
+        limit: 2,
+        cursor: pageOne.nextCursor,
+      });
+      const idsPageOne = new Set(pageOne.items.map((i) => i.id));
+      assert(
+        pageTwo.items.every((i) => !idsPageOne.has(i.id)),
+        'q + cursor should return a distinct second page, not repeat page one',
+      );
+    }
   });
 
   /* ------------------------------------------------------------------ 2 */
@@ -498,6 +575,134 @@ async function main(): Promise<number> {
       feedAfterModeration.items.every((i) => i.id !== SEEDED_MAYA_LISTING),
       'the removed listing vanishes from the public feed',
     );
+
+    // Account closure (user.deleteAccount). Needs the real email code, which
+    // is only ever printed to the server console — so, like the payment-table
+    // introspection above, this piece reads the in-process DB directly and
+    // only runs for the in-process harness (not E2E_URL).
+    if (!external) {
+      const { db } = await import('../backend/db/client');
+      const schema = await import('../backend/db/schema');
+      const { eq: eqOp } = await import('drizzle-orm');
+
+      const throwawayEmail = 'throwaway-e2e@demo.campus.test';
+      await guest.auth.requestCode.mutate({ email: throwawayEmail });
+      const [codeRow] = await db
+        .select()
+        .from(schema.emailCodes)
+        .where(eqOp(schema.emailCodes.email, throwawayEmail))
+        .limit(1);
+      assert(codeRow != null, 'requestCode should insert a code row for the throwaway user');
+
+      const verified = await guest.auth.verifyCode.mutate({
+        email: throwawayEmail,
+        code: codeRow!.code,
+        displayName: 'Throwaway E2E',
+      });
+      const throwaway: Client = clientFor(url, verified.token);
+      const throwawayId = verified.user.id;
+
+      const closureWindow = {
+        startsAt: new Date(Date.now() + 15 * 60 * 1000),
+        endsAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
+      };
+      const closureTime = new Date(Date.now() + 45 * 60 * 1000);
+
+      const makeThrowawayListing = (title: string) =>
+        throwaway.listing.create.mutate({
+          title,
+          category: 'other',
+          condition: 'good',
+          priceCents: 500,
+          isSellToday: false,
+          photoUrls: ['/api/uploads/demo-bag.svg'],
+          spotIds: [spotAId],
+          windows: [closureWindow],
+        });
+
+      // Listing 1 → an accepted-then-cancelled reservation (used to exercise
+      // the CONFLICT guard, then cleared so the account can actually close).
+      const listing1 = await makeThrowawayListing('Closure test item 1 (accepted then cancelled)');
+      const res1 = await jordan.reservation.request.mutate({
+        listingId: listing1.id,
+        spotId: spotAId,
+        startsAt: closureTime,
+      });
+
+      // Listing 2 → left `requested` (pending) at closure time.
+      const listing2 = await makeThrowawayListing('Closure test item 2 (stays pending)');
+      const res2 = await jordan.reservation.request.mutate({
+        listingId: listing2.id,
+        spotId: spotAId,
+        startsAt: closureTime,
+      });
+      assertEqual(res2.status, 'requested', 'reservation 2 starts out pending');
+
+      // Listing 3 → carried all the way to `completed` before closure.
+      const listing3 = await makeThrowawayListing('Closure test item 3 (already completed)');
+      const res3 = await jordan.reservation.request.mutate({
+        listingId: listing3.id,
+        spotId: spotAId,
+        startsAt: closureTime,
+      });
+      await throwaway.reservation.accept.mutate({ id: res3.id });
+      const res3Buyer = await jordan.reservation.byId.query({ id: res3.id });
+      await jordan.reservation.confirmHandoff.mutate({ id: res3.id });
+      const res3Final = await throwaway.reservation.confirmHandoff.mutate({
+        id: res3.id,
+        code: res3Buyer.handoffCode!,
+      });
+      assertEqual(res3Final.status, 'completed', 'reservation 3 is completed before closure');
+
+      // (a) an open `accepted` reservation blocks account closure with CONFLICT.
+      const accepted1 = await throwaway.reservation.accept.mutate({ id: res1.id });
+      assertEqual(accepted1.status, 'accepted', 'reservation 1 is accepted');
+      const conflictMessage = await expectTrpcError('CONFLICT', () =>
+        throwaway.user.deleteAccount.mutate({ confirmText: 'DELETE' }),
+      );
+      assertEqual(
+        conflictMessage,
+        'Finish or cancel your open meetups before closing your account.',
+        'the CONFLICT message is the one the UI shows',
+      );
+
+      // (b) once nothing is `accepted`, deleteAccount succeeds.
+      await throwaway.reservation.cancel.mutate({ id: res1.id, reason: 'clearing for closure test' });
+      const closeResult = await throwaway.user.deleteAccount.mutate({ confirmText: 'DELETE' });
+      assertEqual(closeResult.ok, true, 'deleteAccount succeeds once no accepted reservation remains');
+
+      // (c) the now-closed account's session is rejected.
+      await expectTrpcError('UNAUTHORIZED', () => throwaway.auth.me.query());
+
+      // (d) their listing (active at closure time) is removed and gone from the feed.
+      const closedListing1 = await guest.listing.byId.query({ id: listing1.id });
+      assertEqual(closedListing1.status, 'removed', "the closed seller's listing is removed");
+      const feedAfterClosure = await guest.listing.feed.query({ campusId: CAMPUS_ID, limit: 50 });
+      assert(
+        feedAfterClosure.items.every((i) => i.id !== listing1.id),
+        "the closed seller's listing is gone from the public feed",
+      );
+
+      // (e) user.byId still resolves — to the anonymized "Deleted user" profile.
+      const closedProfile = await guest.user.byId.query({ id: throwawayId });
+      assertEqual(closedProfile.displayName, 'Deleted user', 'the profile shows "Deleted user"');
+      assertEqual(closedProfile.activeListingCount, 0, 'the closed profile has no active listings');
+
+      // (f) their pending reservation is cancelled with reason 'account_closed'.
+      const closedRes2 = await jordan.reservation.byId.query({ id: res2.id });
+      assertEqual(closedRes2.status, 'cancelled', 'the pending reservation is cancelled on closure');
+      assertEqual(
+        closedRes2.cancelReason,
+        'account_closed',
+        'the cancellation reason records the account closure',
+      );
+
+      // (g) a previously completed reservation (and its sale) is untouched.
+      const closedRes3 = await jordan.reservation.byId.query({ id: res3.id });
+      assertEqual(closedRes3.status, 'completed', 'a completed reservation is never touched');
+      const closedListing3 = await guest.listing.byId.query({ id: listing3.id });
+      assertEqual(closedListing3.status, 'sold', "the completed sale's listing stays 'sold'");
+    }
   });
 
   stop?.();

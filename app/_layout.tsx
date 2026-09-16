@@ -12,6 +12,7 @@ import { StatusBar } from 'expo-status-bar';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { AuthProvider } from '@/components/AuthProvider';
 import { colors } from '@/constants/theme';
+import { ConnectionBanner } from '@/components/ui/ConnectionBanner';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -36,6 +37,7 @@ export default function RootLayout() {
           <trpc.Provider client={trpcClient} queryClient={queryClient}>
             <AuthProvider>
               <StatusBar style="dark" />
+              <ConnectionBanner />
               <Stack
                 screenOptions={{
                   headerStyle: { backgroundColor: colors.bg },
@@ -59,6 +61,7 @@ export default function RootLayout() {
                 <Stack.Screen name="conversation/[id]" options={{ title: 'Conversation' }} />
                 <Stack.Screen name="user/[id]" options={{ title: 'Profile' }} />
                 <Stack.Screen name="moderation" options={{ title: 'Moderation' }} />
+                <Stack.Screen name="settings" options={{ title: 'Settings' }} />
                 <Stack.Screen
                   name="auth/sign-in"
                   options={{ presentation: 'modal', title: 'Sign in' }}

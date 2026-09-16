@@ -4,7 +4,7 @@
  * loading, and empty/error states. Works signed-out — every query here is
  * `listing.feed` (public) plus `campus.list` (public).
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search } from 'lucide-react-native';
@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { ListingCard } from '@/components/ListingCard';
 import { FilterBar, type CategoryFilter } from '@/components/browse/FilterBar';
+import { SearchBar } from '@/components/browse/SearchBar';
 import { PriceFilterSheet } from '@/components/browse/PriceFilterSheet';
 import { SizeFilterSheet } from '@/components/browse/SizeFilterSheet';
 import { BrowseGridSkeleton } from '@/components/browse/BrowseGridSkeleton';
@@ -40,6 +41,14 @@ export default function BrowseScreen() {
   const [priceSheetOpen, setPriceSheetOpen] = useState(false);
   const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
 
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+  const hasSearch = debouncedSearch.length > 0;
+
   const sizeVisible = category === 'clothing' || category === 'shoes';
   const sizeOptions = category === 'clothing' ? CLOTHING_SIZE_OPTIONS : category === 'shoes' ? SHOE_SIZE_OPTIONS : [];
 
@@ -63,6 +72,12 @@ export default function BrowseScreen() {
     setSize(undefined);
   }, []);
 
+  const clearFiltersAndSearch = useCallback(() => {
+    clearFilters();
+    setSearchInput('');
+    setDebouncedSearch('');
+  }, [clearFilters]);
+
   const priceLabel = useMemo(() => {
     if (minCents === undefined && maxCents === undefined) return 'Price';
     if (minCents !== undefined && maxCents !== undefined) {
@@ -75,6 +90,7 @@ export default function BrowseScreen() {
   const feedQuery = trpc.listing.feed.useInfiniteQuery(
     {
       campusId: campus?.id ?? '',
+      q: hasSearch ? debouncedSearch : undefined,
       category: category === 'all' ? undefined : category,
       minCents,
       maxCents,
@@ -104,6 +120,9 @@ export default function BrowseScreen() {
           Demo campus — listings and locations are for demonstration only.
         </Text>
       ) : null}
+      <View style={styles.searchWrap}>
+        <SearchBar value={searchInput} onChangeText={setSearchInput} />
+      </View>
       <View style={styles.filterWrap}>
         <FilterBar
           category={category}
@@ -180,6 +199,7 @@ export default function BrowseScreen() {
         onEndReached={() => {
           if (feedQuery.hasNextPage && !feedQuery.isFetchingNextPage) feedQuery.fetchNextPage();
         }}
+        keyboardDismissMode="on-drag"
         ListFooterComponent={
           feedQuery.isFetchingNextPage ? (
             <View style={styles.footerLoading}>
@@ -191,14 +211,20 @@ export default function BrowseScreen() {
           <View style={styles.padHorizontal}>
             <EmptyState
               icon={<Search size={40} color={colors.inkFaint} />}
-              title={filtersActive ? 'No matches' : 'No listings yet'}
+              title={
+                hasSearch
+                  ? `No results for "${debouncedSearch}"`
+                  : filtersActive
+                    ? 'No matches'
+                    : 'No listings yet'
+              }
               body={
-                filtersActive
-                  ? 'Try widening your filters.'
+                hasSearch || filtersActive
+                  ? 'Try widening your search or filters.'
                   : 'Check back soon — new items get posted often.'
               }
-              actionLabel={filtersActive ? 'Clear filters' : undefined}
-              onAction={filtersActive ? clearFilters : undefined}
+              actionLabel={hasSearch || filtersActive ? 'Clear filters' : undefined}
+              onAction={hasSearch || filtersActive ? clearFiltersAndSearch : undefined}
             />
           </View>
         }
@@ -235,7 +261,8 @@ const styles = StyleSheet.create({
   padHorizontal: { paddingHorizontal: space.lg },
   header: { paddingTop: space.sm, paddingBottom: space.md, paddingHorizontal: space.lg },
   demoNote: { marginTop: 2 },
-  filterWrap: { marginTop: space.lg },
+  searchWrap: { marginTop: space.lg },
+  filterWrap: { marginTop: space.md },
   gridRow: { gap: space.md, paddingHorizontal: space.lg },
   gridContent: { gap: space.md, paddingBottom: space.xxl },
   gridCell: { flex: 1 },
