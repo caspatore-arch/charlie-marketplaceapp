@@ -22,6 +22,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Divider } from '@/components/ui/Divider';
 import { MeetupCard } from '@/components/MeetupCard';
 import { DemoBadge } from '@/components/DemoBadge';
+import { ReservationPaymentRow } from '@/components/payments/ReservationPaymentRow';
 import { SpotPicker, type ResolvedCustomAddress } from '@/components/SpotPicker';
 import { TimeSlotPicker } from '@/components/TimeSlotPicker';
 import { trpc } from '@/lib/trpc';
@@ -172,9 +173,10 @@ export default function ReservationScreen() {
         }
       />
 
-      <Text variant="caption" color="inkMuted" style={styles.paymentNote}>
-        Payment is arranged in person — this prototype does not process payments.
-      </Text>
+      <ReservationPaymentRow
+        reservationId={reservation.id}
+        enabled={reservation.status === 'accepted' || reservation.status === 'completed'}
+      />
 
       <Card style={styles.infoCard}>
         <View style={styles.infoRow}>
