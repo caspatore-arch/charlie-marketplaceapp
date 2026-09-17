@@ -1,14 +1,14 @@
 # Legal & eligibility to-do (read this before any real launch)
 
 **This is not legal advice.** This checklist and the placeholder Terms/Privacy
-text in `app/legal/content.ts` were written by a non-lawyer founder (with AI
+text in `constants/legal.ts` were written by a non-lawyer founder (with AI
 assistance) for a local prototype. Before onboarding real students, a lawyer
 needs to review the final Terms of Service and Privacy Policy, and confirm the
 age-gating and data-handling approach.
 
 ## Every `[FOUNDER TO CONFIRM]` marker, in one place
 
-These live in `app/legal/content.ts` and are rendered verbatim inside the
+These live in `constants/legal.ts` and are rendered verbatim inside the
 Terms and Privacy screens (`app/legal/terms.tsx`, `app/legal/privacy.tsx`) so
 they're impossible to miss while reading the document.
 
@@ -42,6 +42,46 @@ None of these four are done yet. Items 2–4 are copy/config work once the
 founder answers are in; item 1 needs the Terms/Privacy text hosted somewhere
 public (even a simple static page) before App Store Connect will accept it.
 
+## Decisions that are not legal, but are yours alone
+
+These surfaced while building auctions, payments, custom meetup addresses and
+notifications. None of them can be answered by an engineer or an AI assistant,
+and each one is currently sitting on a default that was chosen to be *safe to
+change*, not because it is right.
+
+| Decision | Current default | Why it needs you |
+|---|---|---|
+| **Payout delay** (`PAYOUT_DELAY_DAYS`) | `0` — pay the seller as fast as Stripe allows | Payments use **direct charges**, so a dispute is drawn from the seller's Stripe balance rather than yours. At `0` that balance is normally empty by the time a dispute lands, Stripe pushes the seller's account negative, and Stripe's negative-balance rules put the loss back on **you**. `7` is the recommended pilot value. This is one number in `.env` and it is the difference between the seller being liable on paper and being liable in fact. |
+| **Whether to take payments at all** | Built, but forced to simulated (no Stripe key) | Cash or Venmo at handoff removes card-dispute exposure entirely and needs no Stripe account. You lose the 10%. A pilot can learn whether students will meet and trade without processing a cent. |
+| **Custom meetup addresses** | On, limited to 2 miles from campus | Curated campus spots are safer by design: public, lit, other people present. A custom address removes that guardrail, and there is **no verification that an address is a sane place to meet, no way to flag a bad one afterwards, and no support-side record** if something goes wrong there. Either accept that knowingly for the pilot or turn the option off until someone is answering reports. |
+| **Bid enforcement** | A bid is described as a commitment; nothing enforces it | No deposit, no payment held. A winner who ghosts costs the seller 24 hours and the only backstop is report/block. This is a policy call, not a code one. |
+| **Geocoding provider** | OpenStreetMap Nominatim (free) | Its usage policy forbids production/commercial volume. Fine for a pilot, must be swapped before real traffic. One file: `backend/geocode.ts`. |
+| **Object storage provider** | Local disk (not shippable) | Photos must move to S3-compatible storage before the app can be installed from TestFlight. See `docs/DEPLOY.md`. |
+| **Database and container host** | PGlite on your Mac | Roughly $5-10/month once hosted. See `docs/DEPLOY.md`. |
+| **Brand name** | "Campus Swap (dev)" placeholder | Needed for the App Store listing. |
+| **Bundle identifier** | `com.placeholder.campusswap` | **Cannot be changed after first submission to Apple.** Pick deliberately. |
+| **Commission rate** | 10% (`PLATFORM_FEE_PERCENT`) | On a $30 item that is $3.00 to you under direct charges. A single chargeback costs the item value plus Stripe's $15 dispute fee. |
+
+### Things the app now does that the Terms and Privacy text does not yet mention
+
+The rule above still applies: these documents must stay in sync with what the
+app actually does. Since they were drafted, the app gained:
+
+- **Auctions** with binding-sounding bid language ("a bid is a commitment to
+  buy"). The Terms say nothing about what a bid obliges anyone to do.
+- **Payments** via Stripe Connect, including the platform taking a fee and the
+  seller becoming merchant of record. The Terms have no payment section, no
+  refund/dispute policy, and no statement of who carries chargeback liability.
+- **Custom meetup addresses**, meaning users now share home or off-campus
+  addresses with each other through the app. The Privacy Policy does not
+  describe this, how long it is kept, or who can see it.
+- **Push notification tokens**, a new category of device data collected.
+- **Object storage**, meaning photos will leave your machine and sit with a
+  third-party provider once hosting is set up - a processor the Privacy Policy
+  must name.
+
+Each of these belongs in front of the lawyer alongside the original draft.
+
 ## Everything else worth knowing
 
 - The age gate in `app/auth/verify.tsx` is a **self-declared checkbox, not
@@ -54,5 +94,5 @@ public (even a simple static page) before App Store Connect will accept it.
   and the matching parts of the Privacy Policy need to be updated in the
   same change, not left stale.
 - None of this has been reviewed by a lawyer. Treat every sentence in
-  `app/legal/content.ts` as a first draft to hand to one, not as something
+  `constants/legal.ts` as a first draft to hand to one, not as something
   ready to bind real students to.

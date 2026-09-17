@@ -1,6 +1,6 @@
 /**
  * Privacy Policy screen. Renders the shared placeholder content from
- * app/legal/content.ts — see that file's header comment before editing any
+ * constants/legal.ts — see that file's header comment before editing any
  * copy. Mirrors app/legal/terms.tsx's layout exactly so the two screens
  * feel like one document set.
  */

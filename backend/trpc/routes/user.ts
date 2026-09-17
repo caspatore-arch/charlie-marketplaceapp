@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import {
@@ -21,6 +21,44 @@ export type PublicProfile = PublicUser & {
   bio: string | null;
   activeListingCount: number;
   memberSince: Date;
+};
+
+/**
+ * Derived reputation summary for `user.trustSummary` — built ONLY from
+ * reservations that actually reached a terminal state, never from a
+ * user-submitted score. See docs/CONTRACT.md "Trust summary" for the full
+ * contract and honesty rules (zeros are a real, displayed state; a closed
+ * account returns all zeros with `isClosed: true` rather than leaking
+ * history).
+ *
+ * Deliberately excluded, and why:
+ *  - No-shows: the schema has no state that means "the other person
+ *    confirmed you didn't show up." `reports.reason = 'no_show'` is an
+ *    unmoderated accusation one user files about another — surfacing it as
+ *    a number on a stranger's profile would present an unverified claim as
+ *    fact, which is worse than not having the signal. Left out entirely.
+ *  - "Cancelled after accepting" specifically: `reservations` overwrites
+ *    `status` in place and always nulls `handoffCode` on cancel, so nothing
+ *    on the row (or anywhere else) records whether a since-cancelled
+ *    reservation had ever reached `accepted`. `cancelledByUser` below is the
+ *    closest honest substitute: every reservation this user cancelled, at
+ *    any stage. Getting the stricter "after accepting" figure would need a
+ *    schema change (e.g. a status-history table, or a
+ *    `reachedAcceptedAt` timestamp) — flagged to the founder rather than
+ *    approximated.
+ */
+export type TrustSummary = {
+  userId: string;
+  isDemo: boolean;
+  /** True when this account has been closed (user.deleteAccount). Every count below is 0 when true. */
+  isClosed: boolean;
+  memberSince: Date;
+  activeListingCount: number;
+  completedAsSeller: number;
+  completedAsBuyer: number;
+  completedTotal: number;
+  /** Reservations this user cancelled, at any stage — see the note above. */
+  cancelledByUser: number;
 };
 
 export const userRouter = router({
@@ -50,6 +88,77 @@ export const userRouter = router({
     };
     return profile;
   }),
+
+  /**
+   * Derived reputation summary (docs/CONTRACT.md "Trust summary"). Public,
+   * same visibility as `user.byId` — no extra block-based hiding here,
+   * because a viewer's profile page is not block-gated anywhere else either
+   * (only the feed, messaging and requests are); adding a special case here
+   * would be inconsistent with the rest of the app, not more correct.
+   *
+   * Aggregates in one query (no per-listing/per-reservation loop) and
+   * returns real zeros for a brand-new user rather than omitting fields. A
+   * closed/anonymized account (`deletedAt` set) returns every count as 0
+   * with `isClosed: true` so its history never leaks through this endpoint,
+   * even though the underlying `completed` reservations are kept per the
+   * account-closure contract.
+   */
+  trustSummary: publicProcedure
+    .input(z.object({ id: z.uuid() }))
+    .query(async ({ ctx, input }): Promise<TrustSummary> => {
+      await applyExpiry(ctx.db);
+
+      const [user] = await ctx.db.select().from(users).where(eq(users.id, input.id)).limit(1);
+      if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'That profile does not exist.' });
+
+      const isClosed = user.deletedAt != null;
+
+      if (isClosed) {
+        return {
+          userId: user.id,
+          isDemo: user.isDemo,
+          isClosed: true,
+          memberSince: user.createdAt,
+          activeListingCount: 0,
+          completedAsSeller: 0,
+          completedAsBuyer: 0,
+          completedTotal: 0,
+          cancelledByUser: 0,
+        };
+      }
+
+      const [active] = await ctx.db
+        .select({ count: sql<number>`count(*)` })
+        .from(listings)
+        .where(and(eq(listings.sellerId, user.id), eq(listings.status, 'active')));
+
+      // Single aggregate query: three filtered counts in one pass over the
+      // rows where this user is a participant, rather than one query per
+      // count or (worse) one per reservation.
+      const [counts] = await ctx.db
+        .select({
+          completedAsSeller: sql<number>`count(*) filter (where ${reservations.sellerId} = ${user.id} and ${reservations.status} = 'completed')`,
+          completedAsBuyer: sql<number>`count(*) filter (where ${reservations.buyerId} = ${user.id} and ${reservations.status} = 'completed')`,
+          cancelledByUser: sql<number>`count(*) filter (where ${reservations.cancelledById} = ${user.id} and ${reservations.status} = 'cancelled')`,
+        })
+        .from(reservations)
+        .where(or(eq(reservations.sellerId, user.id), eq(reservations.buyerId, user.id)));
+
+      const completedAsSeller = Number(counts?.completedAsSeller ?? 0);
+      const completedAsBuyer = Number(counts?.completedAsBuyer ?? 0);
+
+      return {
+        userId: user.id,
+        isDemo: user.isDemo,
+        isClosed: false,
+        memberSince: user.createdAt,
+        activeListingCount: Number(active?.count ?? 0),
+        completedAsSeller,
+        completedAsBuyer,
+        completedTotal: completedAsSeller + completedAsBuyer,
+        cancelledByUser: Number(counts?.cancelledByUser ?? 0),
+      };
+    }),
 
   updateMe: protectedProcedure
     .input(

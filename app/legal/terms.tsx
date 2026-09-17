@@ -1,6 +1,6 @@
 /**
  * Terms of Service screen. Renders the shared placeholder content from
- * app/legal/content.ts — see that file's header comment before editing any
+ * constants/legal.ts — see that file's header comment before editing any
  * copy. This screen must stay a plain, scrollable read: no forms, no
  * acceptance action here (the sign-up gate that requires agreeing to these
  * Terms lives in app/auth/verify.tsx).
