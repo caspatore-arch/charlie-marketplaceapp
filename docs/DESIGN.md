@@ -60,3 +60,36 @@ Tabs: **Browse · Sell · Inbox · Profile** (lucide: `search`, `plus-circle`, `
 ## Accessibility
 
 `accessibilityRole`/`Label` on tappables, ≥48pt targets, 4.5:1 text contrast, respect `AccessibilityInfo.isReduceMotionEnabled` (skip animations), Dynamic Type via `allowFontScaling` default on.
+
+## Trust signals (added after the sections above; nothing earlier was rewritten)
+
+`components/TrustSignals.tsx` renders the derived reputation summary from `user.trustSummary`
+(docs/CONTRACT.md "Trust summary"). It reports **history, not an endorsement** — see the hard copy
+rules below before touching this component's text.
+
+- `<TrustBlock summary={...} />` — full block, `Card` primitive, used on the profile screen
+  (`app/user/[id]`) below the header/bio. Rows (member since, handoffs completed with a seller/buyer
+  breakdown, active listings, cancellations) each pair a small `lucide-react-native` icon with a text
+  label — icons are decorative next to text, not icon-only tappables, so they carry no separate
+  accessibility label. Ends with one plain-language line of honest framing (what the numbers do and
+  don't mean) and, for `isDemo` accounts, an explicit "Demo account — this history is sample data"
+  note in `colors.demo`, on top of (not instead of) the existing `<Badge kind="demo" />` elsewhere on
+  the screen.
+- `<TrustCompact summary={...} />` — one caption-sized line for the listing detail seller row: just
+  handoffs completed + member since, the two most decision-relevant figures. Everything else in the
+  full block is deliberately left out here so the seller row stays scannable.
+- Both components render real zeros rather than omitting the section — a brand-new account is not
+  made to look suspicious ("0 handoffs completed" is stated plainly, not hidden), and a
+  heavily-used one is not made to look endorsed by the platform.
+- `isClosed: true` collapses either component to a single neutral line ("This account is closed" /
+  "Account closed") instead of numbers, so a closed account's history never renders even indirectly.
+
+### Copy rules for trust signals (non-negotiable, in addition to "Rules of copy" above)
+
+- Never imply the platform vouches for a person. Do not use "safe", "trusted", "verified seller",
+  "protected", "guaranteed", or similar anywhere near these numbers.
+- "Campus email verified" (the existing `Badge kind="verified"`) is never identity verification and
+  must never be placed or worded so a reader could conclude otherwise — trust-signal copy must not
+  blur into it (e.g. never say "verified" about a handoff count).
+- State counts as plain facts ("12 handoffs completed", "Member since Sep 2026"), never as praise or
+  a warning.

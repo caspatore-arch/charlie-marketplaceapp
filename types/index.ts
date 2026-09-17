@@ -26,6 +26,8 @@ export type Message = RouterOutputs['conversation']['messages']['items'][number]
 // ---- user ----
 export type AuthUser = RouterOutputs['auth']['me'];
 export type PublicProfile = RouterOutputs['user']['byId'];
+/** Derived reputation summary — see docs/CONTRACT.md "Trust summary". */
+export type TrustSummary = RouterOutputs['user']['trustSummary'];
 
 // ---- campus ----
 export type Campus = RouterOutputs['campus']['list'][number];

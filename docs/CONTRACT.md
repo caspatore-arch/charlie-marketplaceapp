@@ -229,3 +229,57 @@ payload carries `data.path`, an expo-router path for the client to deep-link to 
 - Meetup spots (all `isDemo: true`, description says "Demo location — verify hours and permission before pilot"): Student Union Memorial Center (main entrance), Main Library (front steps), Old Main (front lawn), Student Recreation Center (entrance).
 - Users (`isDemo: true`, `campusEmailVerifiedAt` set): **Maya Test** (`maya@demo.campus.test`, fixed id `00000000-0000-4000-8000-000000000001`), **Jordan Test** (`jordan@demo.campus.test`, id `…0002`). A third **Sam Test** (`…0003`) for the double-booking test.
 - ~12 listings split between Maya and Jordan, mix of categories, 2–3 photos each (generated SVG placeholders with a visible "DEMO" mark served from `/api/uploads/demo-*.svg`), several with availability windows today, two `isSellToday`.
+
+## Trust summary (added after the sections above; nothing earlier was rewritten)
+
+`user.trustSummary` — a derived reputation summary computed **only** from existing tables
+(`reservations`, `listings`, `users`). There is no ratings/review system and no user-submitted score —
+see docs/DESIGN.md "Trust signals" for the product reasoning and the copy rules this must follow.
+
+```
+user.trustSummary      pub  { id: uuid }   → TrustSummary
+```
+
+```ts
+TrustSummary = {
+  userId: string
+  isDemo: boolean
+  isClosed: boolean          // true when the account is closed (users.deletedAt set)
+  memberSince: Date          // users.createdAt
+  activeListingCount: number // listings: sellerId = id AND status = 'active'
+  completedAsSeller: number  // reservations: sellerId = id AND status = 'completed'
+  completedAsBuyer: number   // reservations: buyerId  = id AND status = 'completed'
+  completedTotal: number     // completedAsSeller + completedAsBuyer
+  cancelledByUser: number    // reservations: cancelledById = id AND status = 'cancelled'
+}
+```
+
+Rules:
+- Public procedure, same visibility as `user.byId`. Deliberately **not** block-aware: nothing else in
+  the app hides a profile from a blocked viewer (only the feed, messaging and requests are
+  block-gated), so this endpoint doesn't invent a new restriction either — a blocked viewer sees the
+  identical result an anonymous viewer would.
+- `NOT_FOUND` for an id that doesn't exist, matching `user.byId`.
+- A closed/anonymized account (`deletedAt` set) returns `isClosed: true` and every count zeroed —
+  including `completedAsSeller`/`completedAsBuyer`, even though `completed` reservations are kept per
+  "Account closure" above. This is an intentional zero-out at the API boundary so a closed account's
+  history never leaks through this endpoint, not a side effect of the underlying rows being deleted.
+- All counts are honest zeros for a user with no history — never omitted, never an error.
+- Counts come only from reservations in a **terminal** state (`completed`, `cancelled`); `requested`,
+  `countered`, `accepted` and `expired` reservations are never counted as completed or as a
+  cancellation.
+- Computed as a small number of aggregate SQL queries (`count(*) filter (where ...)`), never one query
+  per listing or per reservation.
+
+**Deliberately not implemented, and why (do not fabricate these):**
+- **No-shows.** The schema has no state meaning "the other participant confirmed this person didn't
+  show up." `reports.reason = 'no_show'` is an unmoderated accusation one user files about another;
+  treating it as a fact on a stranger's profile would present an unverified claim as verified history,
+  which is worse than omitting the signal. Not surfaced anywhere in `trustSummary`.
+- **"Cancelled after accepting" as a distinct count.** `reservations.status` is overwritten in place on
+  cancel, and `handoffCode` is unconditionally nulled at the same time, so nothing on the row (or
+  anywhere else) records whether a since-cancelled reservation had ever reached `accepted`.
+  `cancelledByUser` is the closest honest substitute — every reservation this user cancelled, at any
+  stage. The stricter figure would need a schema change (e.g. a status-history table, or a
+  `reachedAcceptedAt` timestamp on `reservations`) that this change does not make — see the report to
+  the founder for the recommendation.

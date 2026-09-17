@@ -15,6 +15,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ListingCard } from '@/components/ListingCard';
 import { DemoBadge } from '@/components/DemoBadge';
+import { TrustBlock } from '@/components/TrustSignals';
 import { trpc } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { space } from '@/constants/theme';
@@ -27,6 +28,7 @@ export default function PublicProfileScreen() {
   const requireAuth = useRequireAuth();
 
   const profileQuery = trpc.user.byId.useQuery({ id }, { enabled: !!id });
+  const trustQuery = trpc.user.trustSummary.useQuery({ id }, { enabled: !!id });
   const listingsQuery = trpc.listing.bySeller.useQuery({ sellerId: id }, { enabled: !!id });
 
   const blockMutation = trpc.user.block.useMutation();
@@ -79,9 +81,10 @@ export default function PublicProfileScreen() {
       <View style={styles.header}>
         <Avatar uri={profile.avatarUrl} name={profile.displayName} size={72} />
         <Text variant="title">{profile.displayName}</Text>
+        {/* Member-since lives in the trust block below, to the month. Repeating
+            a vaguer year here read as two different facts about one person. */}
         <Text variant="body" color="inkMuted">
           {profile.campus?.name}
-          {profile.memberSince ? ` · Member since ${new Date(profile.memberSince).getFullYear()}` : ''}
         </Text>
         <View style={styles.badgeRow}>
           {profile.campusEmailVerified ? <Badge kind="verified" /> : null}
@@ -93,6 +96,12 @@ export default function PublicProfileScreen() {
           </Text>
         ) : null}
       </View>
+
+      {trustQuery.isPending ? (
+        <Skeleton height={140} radius={20} style={styles.trustBlock} />
+      ) : trustQuery.data ? (
+        <TrustBlock summary={trustQuery.data} style={styles.trustBlock} />
+      ) : null}
 
       {!isSelf ? (
         <View style={styles.actions}>
@@ -132,6 +141,7 @@ const styles = StyleSheet.create({
   header: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
   badgeRow: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
   bio: { textAlign: 'center', marginTop: space.md, paddingHorizontal: space.lg },
+  trustBlock: { marginTop: space.lg, marginBottom: space.lg },
   actions: { flexDirection: 'row', gap: space.md, marginBottom: space.xl },
   actionBtn: { flex: 1 },
   listingsTitle: { marginBottom: space.md },

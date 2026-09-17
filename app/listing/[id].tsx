@@ -20,6 +20,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PhotoGallery } from '@/components/PhotoGallery';
 import { SellerRow } from '@/components/SellerRow';
+import { TrustCompact } from '@/components/TrustSignals';
 import { SpotPicker } from '@/components/SpotPicker';
 import { ListingCard } from '@/components/ListingCard';
 import { StatusBanner } from '@/components/browse/StatusBanner';
@@ -100,6 +101,11 @@ export default function ListingDetailScreen() {
     },
     onError: (err) => Alert.alert('Could not buy it now', err.message),
   });
+
+  const sellerTrustQuery = trpc.user.trustSummary.useQuery(
+    { id: listing?.seller.id ?? '' },
+    { enabled: !!listing },
+  );
 
   const bySellerQuery = trpc.listing.bySeller.useQuery(
     { sellerId: listing?.seller.id ?? '' },
@@ -318,6 +324,11 @@ export default function ListingDetailScreen() {
           >
             <SellerRow seller={listing.seller} />
           </Pressable>
+          {sellerTrustQuery.data ? (
+            <View style={styles.sellerTrust}>
+              <TrustCompact summary={sellerTrustQuery.data} />
+            </View>
+          ) : null}
 
           <Divider style={styles.divider} />
 
@@ -511,6 +522,7 @@ const styles = StyleSheet.create({
   description: { marginTop: space.lg, lineHeight: 22 },
   divider: { marginVertical: space.xl },
   sectionTitle: { marginBottom: space.md },
+  sellerTrust: { marginTop: space.sm, marginLeft: 36 + space.md },
   windowsWrap: { marginTop: space.lg, gap: 4 },
   windowRow: { marginTop: 2 },
   noWindows: { marginTop: 2 },

@@ -19,6 +19,7 @@ import {
   listingSpots,
   listings,
   meetupSpots,
+  reservations,
   users,
 } from './schema';
 import { LocalDiskStorage } from '../storage';
@@ -93,6 +94,7 @@ async function writeDemoPhotos(): Promise<Record<string, string>> {
 /* ------------------------------------------------------------------ times */
 
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 
 /** A window at local [startHour, endHour) on the local day `dayOffset` days out. */
 function localWindow(startHour: number, endHour: number, dayOffset = 0) {
@@ -151,6 +153,46 @@ type SeedListing = {
 };
 
 const L = (n: number) => `00000000-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`;
+
+/**
+ * Past sales, so the trust signals on a profile have something real behind them.
+ *
+ * These are deliberately SEPARATE listings, already `sold`, rather than marking
+ * the 16 browsable demo listings sold: the feed has to stay full. Maya reads as
+ * an established seller, Jordan has a shorter mixed history, and Sam is left at
+ * zero on purpose so the brand-new-account state is visible in a demo. Do not
+ * give Sam history: an account with no record is exactly the case a buyer most
+ * needs to be able to recognise.
+ */
+const H = (n: number) => `00000000-0000-4000-8000-0000000002${String(n).padStart(2, '0')}`;
+const R = (n: number) => `00000000-0000-4000-8000-0000000003${String(n).padStart(2, '0')}`;
+
+type SeedHistory = {
+  n: number;
+  title: string;
+  sellerId: string;
+  buyerId: string;
+  priceCents: number;
+  daysAgo: number;
+  /** 'cancelled' rows are cancelled BY the buyer, so the count lands on them. */
+  status: 'completed' | 'cancelled';
+};
+
+const SEED_HISTORY: SeedHistory[] = [
+  { n: 1, title: 'Mini fridge', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 5500, daysAgo: 61, status: 'completed' },
+  { n: 2, title: 'Textbook: Organic Chemistry', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 3400, daysAgo: 54, status: 'completed' },
+  { n: 3, title: 'Shower caddy', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 800, daysAgo: 47, status: 'completed' },
+  { n: 4, title: 'Bike lock', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 1500, daysAgo: 40, status: 'completed' },
+  { n: 5, title: 'Floor lamp', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 2200, daysAgo: 33, status: 'completed' },
+  { n: 6, title: 'Rug, 5x7', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 4000, daysAgo: 26, status: 'completed' },
+  { n: 7, title: 'Desk organiser', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 1200, daysAgo: 19, status: 'completed' },
+  { n: 8, title: 'Wireless keyboard', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 2800, daysAgo: 12, status: 'completed' },
+  { n: 9, title: 'Coffee maker', sellerId: JORDAN_ID, buyerId: MAYA_ID, priceCents: 2500, daysAgo: 30, status: 'completed' },
+  { n: 10, title: 'Beach cruiser tyres', sellerId: JORDAN_ID, buyerId: MAYA_ID, priceCents: 1800, daysAgo: 17, status: 'completed' },
+  { n: 11, title: 'Standing desk riser', sellerId: JORDAN_ID, buyerId: MAYA_ID, priceCents: 3900, daysAgo: 8, status: 'completed' },
+  // One cancellation, so that row is not always a flat zero in the demo.
+  { n: 12, title: 'Bookshelf', sellerId: MAYA_ID, buyerId: JORDAN_ID, priceCents: 3000, daysAgo: 22, status: 'cancelled' },
+];
 
 const SEED_LISTINGS: SeedListing[] = [
   {
@@ -458,6 +500,8 @@ export async function seed(): Promise<void> {
         campusEmailVerifiedAt: new Date(),
         bio: 'Demo seller account. Junior, moving out in May.',
         isDemo: true,
+        // Staggered so "Member since" differs between the demo accounts.
+        createdAt: new Date(Date.now() - 400 * DAY),
       },
       {
         id: JORDAN_ID,
@@ -467,6 +511,7 @@ export async function seed(): Promise<void> {
         campusEmailVerifiedAt: new Date(),
         bio: 'Demo account. Buys and sells around the rec center.',
         isDemo: true,
+        createdAt: new Date(Date.now() - 150 * DAY),
       },
       {
         id: SAM_ID,
@@ -476,6 +521,7 @@ export async function seed(): Promise<void> {
         campusEmailVerifiedAt: new Date(),
         bio: 'Demo account used for the double-booking test.',
         isDemo: true,
+        createdAt: new Date(Date.now() - 2 * DAY),
       },
     ])
     .onConflictDoNothing();
@@ -580,10 +626,62 @@ export async function seed(): Promise<void> {
     if (bidRows.length > 0) await db.insert(bids).values(bidRows);
   }
 
+  // Past sales and their completed meetups. Inserted after the browsable
+  // listings so the feed is untouched: every row here is already `sold`.
+  await db
+    .insert(listings)
+    .values(
+      SEED_HISTORY.map((h) => ({
+        id: H(h.n),
+        sellerId: h.sellerId,
+        campusId: CAMPUS_ID,
+        title: h.title,
+        description: 'Sample past sale, kept so profile activity is not empty.',
+        category: 'other' as const,
+        condition: 'good' as const,
+        priceCents: h.priceCents,
+        // Never 'active': nothing in this history set may reach the public
+        // feed. A completed sale is 'sold'; the cancelled one simply lapsed,
+        // which is what happens when a meetup falls through and nobody
+        // relists. These rows have no photos, so a feed leak also breaks the
+        // "every listing has a demo photo" acceptance check.
+        status: (h.status === 'completed' ? 'sold' : 'expired') as 'sold' | 'expired',
+        soldAt: h.status === 'completed' ? new Date(Date.now() - h.daysAgo * DAY) : null,
+        createdAt: new Date(Date.now() - (h.daysAgo + 3) * DAY),
+        isDemo: true,
+      })),
+    )
+    .onConflictDoNothing();
+
+  await db
+    .insert(reservations)
+    .values(
+      SEED_HISTORY.map((h) => ({
+        id: R(h.n),
+        listingId: H(h.n),
+        buyerId: h.buyerId,
+        sellerId: h.sellerId,
+        status: h.status,
+        spotId: SPOT_UNION,
+        startsAt: new Date(Date.now() - h.daysAgo * DAY),
+        proposedById: h.buyerId,
+        priceCents: h.priceCents,
+        // A finished handoff has both confirmations and no live code.
+        handoffCode: null,
+        buyerConfirmedAt: h.status === 'completed' ? new Date(Date.now() - h.daysAgo * DAY) : null,
+        sellerConfirmedAt: h.status === 'completed' ? new Date(Date.now() - h.daysAgo * DAY) : null,
+        cancelledById: h.status === 'cancelled' ? h.buyerId : null,
+        cancelReason: h.status === 'cancelled' ? 'Buyer could not make the time' : null,
+        createdAt: new Date(Date.now() - (h.daysAgo + 1) * DAY),
+      })),
+    )
+    .onConflictDoNothing();
+
   const total = await db.select({ id: listings.id }).from(listings);
   console.log(
     `seeded: 1 campus, 4 demo spots, 3 test users, ${SEED_LISTINGS.length} demo listings ` +
       `(${SEED_LISTINGS.filter((l) => l.saleType === 'auction').length} auctions, ` +
+      `${SEED_HISTORY.length} past sales for profile history, ` +
       `${total.length} listings in db), ${DEMO_ART.length} demo photos written`,
   );
 }
