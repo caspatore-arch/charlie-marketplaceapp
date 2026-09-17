@@ -150,3 +150,17 @@ Added after the section above; nothing earlier in this document was rewritten. W
 **Seller‑facing numbers are now estimates.** Because the seller pays Stripe's fee, "price minus 10%" is no longer what they keep, and Stripe's exact fee is unknown until settlement. The app shows the platform fee exactly, the card fee as an estimate, and the seller's take‑home as an estimate with that word attached. Do not let any future copy state an exact seller net.
 
 **One change still needed that this pass was not allowed to make:** `components/FeeBreakdown.tsx` (the fee panel on the request‑meetup sheet) still labels its bottom row "Seller receives" over a figure that is the price minus the platform fee only — i.e. before Stripe's fee. It should read "Seller receives (before card fee)", or show `sellerNetEstimateCents` with the estimate wording. The data it needs is already on `payment.quote`.
+
+## 9. Buildable and submittable (2026‑09‑16, third pass): eas.json, app identity, App Store guide
+
+Added after everything above; nothing earlier in this document was rewritten.
+
+| What | Where it now stands |
+|---|---|
+| `eas.json` | Added at the repo root — `development`, `preview`, `production` build profiles, plus an iOS `submit` block with three placeholders (`appleId`, `ascAppId`, `appleTeamId`) that are **not filled in** — they're the founder's Apple account details and don't exist yet. |
+| App identity (name, slug, bundle identifier, scheme, version) | Now centralized in **`app.config.ts`** (new file) instead of scattered — one commented block at the top of that file is the only place to edit any of them. `app.json` still exists and still carries the same placeholder values (some tooling reads it directly), but `app.config.ts` is what actually applies at build time. Verified with `npx expo config --type public` before and after: byte-identical output, so nothing changed behaviorally — see the report from this pass for the full diff command and result. |
+| Brand name / bundle identifier | Still **`Campus Swap (dev)`** / **`com.placeholder.campusswap`** — deliberately not decided by this pass. `app.config.ts`'s comment block explains the one-time, permanent nature of the bundle identifier (cannot change after first Apple submission) and points at `docs/APP-STORE.md`. |
+| `assets/icon.png` | Verified 1024×1024, RGB, **no alpha channel** — meets Apple's store-icon requirement as-is. Not regenerated. |
+| `docs/APP-STORE.md` | New — a founder-readable guide to the Apple Developer Program ($99/yr), what `eas build`/`eas submit` do, TestFlight, a drafted (placeholder) App Store listing, an App Privacy "nutrition label" table derived from `backend/db/schema.ts`, and the specific App Review guidelines this app touches (5.1.1(v) account deletion, 1.2 report/block, no IAP needed, safety-feature scrutiny). |
+| Verification run this pass | `npm run typecheck` — clean. `npm run test:e2e` — 8/8. `npx expo-doctor` — 18/21 checks pass; the 3 failures (an `app.json` schema warning for `newArchEnabled`, a missing `react-native-worklets` peer dependency, and two packages slightly behind the SDK's expected patch version) all **pre-exist this pass** and were not introduced by it — no packages were installed or changed, per this pass's constraints. |
+| Not done, not claimed | No `eas build`, `eas init`, or `eas submit` was run — this machine has no Apple Developer account, no Xcode, no registered EAS project. No Apple/EAS IDs were invented anywhere. |
