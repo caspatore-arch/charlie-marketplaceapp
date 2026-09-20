@@ -38,9 +38,10 @@ process.env.DEV_LOGIN = '1';
 // Installs the drizzle query logger; counting stays off until a probe turns it
 // on, so the throughput phase is not measuring the instrumentation.
 process.env.SQL_TRACE = '1';
-// Note: the limiter in backend/ratelimit.ts is only mounted on auth,
-// checkAddress and uploads — none of the tRPC read paths driven below — so
-// nothing here needs disabling. That gap is itself a finding.
+process.env.RATE_LIMIT_API_PER_MIN = '10000000';
+// The API limiter would otherwise cap this harness at 300 req/min and we
+// would be measuring the limiter instead of the app. Raised here, then
+// checked for real at the end of the run with its production default.
 
 /* ------------------------------------------------------------------ args */
 
@@ -300,9 +301,58 @@ async function main(): Promise<number> {
       : `UNDER the burst estimate on ${dbKind} — ${rps.toFixed(0)} req/s vs ${burstRps.toFixed(0)} needed.`,
   );
 
+  /* ------------------------------------------------ rate limiter check */
+
+  // The mounted limiter captures its limit when app.use runs at import time,
+  // so it cannot be re-tuned from here — it is pinned high for the throughput
+  // phase above. Exercise the middleware itself instead, at a low limit: that
+  // covers the counting, the 429 with Retry-After, and the property this app
+  // actually depends on, which is that two signed-in users behind one campus
+  // NAT gateway get separate buckets.
+  const { Hono } = await import('hono');
+  const { rateLimit, callerKey, __resetRateLimitsForTests } = await import('../backend/ratelimit');
+  __resetRateLimitsForTests();
+
+  const limit = 5;
+  const probe = new Hono();
+  probe.use('*', rateLimit('probe', limit, 60_000, callerKey));
+  probe.get('/', (c) => c.text('ok'));
+
+  async function hit(headers: Record<string, string>): Promise<Response> {
+    return probe.request('http://local/', { headers });
+  }
+
+  const sharedNat = { 'x-forwarded-for': '10.0.0.1' };
+  let accepted = 0;
+  let throttled = 0;
+  let retryAfter: string | null = null;
+  for (let i = 0; i < limit * 2; i += 1) {
+    const res = await hit(sharedNat);
+    if (res.status === 429) {
+      throttled += 1;
+      retryAfter ??= res.headers.get('Retry-After');
+    } else accepted += 1;
+  }
+
+  // Same gateway IP, but a signed-in user: must not inherit the exhausted
+  // anonymous bucket.
+  const signedIn = await hit({ ...sharedNat, authorization: 'Bearer user-one-token' });
+  const otherUser = await hit({ ...sharedNat, authorization: 'Bearer user-two-token' });
+
+  const shedsLoad = throttled === limit && accepted === limit && retryAfter !== null;
+  const isolatesUsers = signedIn.status === 200 && otherUser.status === 200;
+
+  console.log(
+    `\nrate limiter (${limit}/min cap):\n` +
+      `  anonymous burst      ${accepted} accepted, ${throttled} throttled, ` +
+      `Retry-After: ${retryAfter ?? 'missing'}  ${shedsLoad ? 'OK' : 'FAILED'}\n` +
+      `  signed-in on same IP ${signedIn.status}, second user ${otherUser.status}  ` +
+      `${isolatesUsers ? 'OK — campus NAT does not share a bucket' : 'FAILED'}`,
+  );
+
   server.close();
   fs.rmSync(tempRoot, { recursive: true, force: true });
-  return totalErrors === 0 ? 0 : 1;
+  return totalErrors === 0 && shedsLoad && isolatesUsers ? 0 : 1;
 }
 
 main()

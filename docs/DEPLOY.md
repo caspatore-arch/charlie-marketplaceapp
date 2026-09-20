@@ -159,9 +159,49 @@ Go through this before letting anyone outside your test group use the app.
 
 ---
 
+## 6a. Will it hold up? Sizing for ~5,000 students a day
+
+Short answer: yes, comfortably, on the smallest paid tier of anything listed above. Here is the actual arithmetic rather than a reassurance.
+
+**What 5,000 daily active users means in requests.** A student opens the app, scrolls the grid, taps a few items, maybe sends a message — call it 20 requests a session. That is ~100,000 requests a day. Campus traffic is spiky (between classes, evenings), so assume the busiest hour carries 15% of the day and has bursts three times its own average inside it:
+
+| | requests/second |
+|---|---|
+| Daily average | ~1.2 |
+| Peak hour average | ~4.2 |
+| Burst inside the peak hour | ~13 |
+
+**What the backend actually does.** `npm run loadtest` builds a campus that has been running a semester — 15,000 users, 24,000 listings, 66,000 messages — and drives a browse-weighted mix at it. On the local WASM database, which is the slowest thing this code will ever run on, it sustains **~270 requests/second** with a p50 of 29ms. That is roughly 20x the burst figure above, on one process, on a laptop.
+
+Real Postgres is faster per query and, unlike the local database, serves many connections at once. So the honest read is: **the database is not what limits you at 5,000 DAU.** Photo bandwidth and your object storage bill will matter sooner.
+
+**What to actually provision:**
+
+- **One backend instance** is enough. Do not turn on auto-scaling — you do not need it, and the rate limiter counts per-process (§7).
+- **The smallest paid Postgres tier.** The whole dataset above is well under a gigabyte. Watch the *connection limit* rather than CPU: set `DB_POOL_MAX` so that `DB_POOL_MAX x number of instances` stays below it, with a few spare for you to connect with a database tool.
+- **Object storage with a CDN in front.** Photos are the bulk of the bytes you will serve and the one cost that scales with users.
+
+**Re-run the numbers against your real database before launch.** Point the same script at it:
+
+```
+DATABASE_URL='your-connection-string' npm run loadtest
+```
+
+That is the run that counts, because it is the only one that can show connection-pool and locking behaviour. Use a throwaway database — it writes tens of thousands of fixture rows.
+
+**The signals to watch once you are live**, in the order they will bite:
+
+1. Response times creeping up while traffic is flat — usually a query that lost its index.
+2. "too many connections" errors — `DB_POOL_MAX` too high for your tier, or too many instances.
+3. Storage bandwidth cost — photos, and the first bill that grows faster than users.
+
+---
+
 ## 7. A blunt limitation: rate limiting and multiple instances
 
-To stop abuse (someone hammering the sign-in code endpoint, or spamming the free address-lookup service the app uses for custom meetup spots), the backend now counts requests **in its own memory**, per visitor, per minute.
+To stop abuse (someone hammering the sign-in code endpoint, spamming the free address-lookup service, or a phone stuck in a retry loop hitting the main API), the backend counts requests **in its own memory**, per caller, per minute.
+
+"Per caller" is deliberately not "per IP". Several hundred students on campus wifi share a single NAT address, so a per-IP limit would treat the whole building as one abusive visitor and throttle everyone at exactly the busiest time of day. Signed-in requests are counted against the session instead, and only anonymous traffic falls back to the IP address.
 
 This works great for a single running copy of the backend — which is what every host above gives you by default on a hobby/starter tier. **It stops working correctly if you ever run more than one copy at once** (e.g. you turn on "auto-scaling" or "multiple instances" on your host to handle more traffic): each copy counts separately, so the *real* limit becomes however many copies are running times the intended limit, and a determined abuser can dodge it by landing on a different copy each time.
 

@@ -4,7 +4,7 @@ import { cors } from 'hono/cors';
 
 import { db, dbKind } from './db/client';
 import { env } from './env';
-import { rateLimit } from './ratelimit';
+import { callerKey, rateLimit } from './ratelimit';
 import { paymentsMode } from './stripe/client';
 import {
   processSimulatedEvent,
@@ -120,6 +120,16 @@ app.post('/api/stripe/simulated-test-event', async (c) => {
  * scale to multiple instances — see the docstring in backend/ratelimit.ts
  * and docs/DEPLOY.md.
  */
+// Blanket cap on the tRPC surface. Every limiter below it is narrower and
+// still applies; this one exists because until now the API that carries all
+// real traffic had no ceiling at all, so one client stuck in a retry loop —
+// or anyone with curl — could saturate the backend. Keyed by session rather
+// than IP so campus NAT does not put a whole building in one bucket.
+app.use(
+  '/api/trpc/*',
+  rateLimit('api', env.rateLimitApiPerMinute, 60_000, callerKey),
+);
+
 app.use(
   '/api/trpc/auth.requestCode',
   rateLimit('auth.requestCode', env.rateLimitAuthRequestCodePerMinute, 60_000),

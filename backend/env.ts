@@ -193,6 +193,39 @@ export const env = {
   get rateLimitUploadsPerMinute(): number {
     return Number(process.env.RATE_LIMIT_UPLOADS_PER_MIN ?? 20);
   },
+  /** Per-IP cap on tRPC calls, the API surface that carries all real traffic. */
+  get rateLimitApiPerMinute(): number {
+    return Number(process.env.RATE_LIMIT_API_PER_MIN ?? 300);
+  },
+
+  /* ------------------------------------------------ postgres connections */
+
+  /**
+   * Pool size per backend process. The ceiling that matters is the database's
+   * own connection limit divided by the number of app instances — a managed
+   * Postgres hobby tier is often 20-ish in total, so two instances at the
+   * node-postgres default of 10 already saturate it.
+   */
+  get dbPoolMax(): number {
+    return Number(process.env.DB_POOL_MAX ?? 10);
+  },
+  /**
+   * How long a request waits for a free connection before failing. The
+   * node-postgres default is 0, meaning wait forever: under a burst every
+   * request queues indefinitely and the process stops responding rather than
+   * shedding load. A bounded wait turns that into an error the caller can see.
+   */
+  get dbConnectionTimeoutMs(): number {
+    return Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 5_000);
+  },
+  /**
+   * Server-side cap on a single statement. Without it one pathological query
+   * holds a pooled connection until the client gives up, which at pool size 10
+   * means ten of them take the whole instance down.
+   */
+  get dbStatementTimeoutMs(): number {
+    return Number(process.env.DB_STATEMENT_TIMEOUT_MS ?? 10_000);
+  },
 };
 
 /**

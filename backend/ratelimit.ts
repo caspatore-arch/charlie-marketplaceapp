@@ -12,6 +12,8 @@
  * replace this with a shared store (Redis via e.g. `@upstash/ratelimit`, or
  * a limiter at the edge/reverse-proxy/CDN layer) — see docs/DEPLOY.md.
  */
+import { createHash } from 'node:crypto';
+
 import type { Context, Next } from 'hono';
 
 type Bucket = { count: number; resetAt: number };
@@ -37,17 +39,47 @@ function clientIp(c: Context): string {
 }
 
 /**
- * Returns Hono middleware that allows `limit` requests per `windowMs` per
- * (client IP, `name`) pair, and responds 429 with a plain-English message
- * once exceeded.
+ * Identifies the caller for limiting: the session when there is one, the IP
+ * only when there is not.
+ *
+ * Keying purely on IP is wrong for a campus app. Several hundred students
+ * share one NAT gateway on campus wifi, so a per-IP bucket treats the whole
+ * campus as a single client and throttles everyone the moment the building
+ * gets busy — the exact hour the app most needs to work. A signed-in user
+ * carries a bearer token, which gives them their own bucket wherever they are.
+ *
+ * The token is hashed rather than used directly, so the limiter's map cannot
+ * become a second place session tokens sit in plaintext.
  */
-export function rateLimit(name: string, limit: number, windowMs: number) {
+export function callerKey(c: Context): string {
+  const auth = c.req.header('authorization');
+  if (auth?.startsWith('Bearer ')) {
+    const token = auth.slice('Bearer '.length).trim();
+    if (token.length > 0) {
+      return `s:${createHash('sha256').update(token).digest('base64url').slice(0, 22)}`;
+    }
+  }
+  return `ip:${clientIp(c)}`;
+}
+
+/**
+ * Returns Hono middleware that allows `limit` requests per `windowMs` per
+ * (caller, `name`) pair, and responds 429 with a plain-English message once
+ * exceeded. `keyOf` defaults to the client IP; pass `callerKey` for limits on
+ * surfaces that authenticated users hit in normal use.
+ */
+export function rateLimit(
+  name: string,
+  limit: number,
+  windowMs: number,
+  keyOf: (c: Context) => string = (c) => `ip:${clientIp(c)}`,
+) {
   return async (c: Context, next: Next) => {
     if (!(limit > 0)) return next(); // limit <= 0 disables this limiter
     const now = Date.now();
     sweep(now);
 
-    const key = `${name}:${clientIp(c)}`;
+    const key = `${name}:${keyOf(c)}`;
     let bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       bucket = { count: 0, resetAt: now + windowMs };

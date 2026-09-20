@@ -89,7 +89,30 @@ function createDb(): Db {
     pool = new Pool({
       connectionString: env.databaseUrl,
       ssl: sslOptionFor(env.databaseUrl),
+      max: env.dbPoolMax,
+      // node-postgres defaults this to 0 — wait forever for a free connection.
+      // Under a burst that converts a slow database into an unresponsive app,
+      // because every request queues instead of failing. See env.ts.
+      connectionTimeoutMillis: env.dbConnectionTimeoutMs,
+      idleTimeoutMillis: 30_000,
+      // Enforced by Postgres itself, so it still applies to a query whose
+      // client has already gone away.
+      statement_timeout: env.dbStatementTimeoutMs,
+      // Names the connections in pg_stat_activity, which is the first place
+      // anyone looks when the database is the suspect.
+      application_name: 'campus-swap',
     });
+
+    // An idle client that errors (a database restart, a failover, an idle
+    // connection reaped by the provider) emits on the pool. node-postgres
+    // treats an unhandled 'error' here as an unhandled exception and takes the
+    // process down, so a routine provider maintenance window would otherwise
+    // read as a crash. The pool discards the bad client and reconnects on its
+    // own; logging is the correct response.
+    pool.on('error', (err) => {
+      console.error('[db] idle client error (pool will reconnect):', err.message);
+    });
+
     return nodePgDrizzle(pool, { schema, logger });
   }
 
