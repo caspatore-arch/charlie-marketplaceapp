@@ -189,6 +189,20 @@ DATABASE_URL='your-connection-string' npm run loadtest
 
 That is the run that counts, because it is the only one that can show connection-pool and locking behaviour. Use a throwaway database — it writes tens of thousands of fixture rows.
 
+**What overload actually looks like.** Worth knowing in advance, because it is not what most people expect. Driving the same dataset harder and harder:
+
+| Simultaneous requests | Throughput | Typical response | Slowest 1% |
+|---|---|---|---|
+| 8 | 282/s | 28ms | 47ms |
+| 16 | 284/s | 55ms | 89ms |
+| 32 | 283/s | 110ms | 311ms |
+| 64 | 278/s | 211ms | 2.1s |
+| 128 | 285/s | 279ms | 8.5s |
+
+Throughput stops improving almost immediately — the backend is already at capacity around 8 simultaneous requests, and everything past that is queueing. Note the last column: **nothing fails, it just gets slower, without limit.** There are no errors in any of those runs. So an overloaded backend does not announce itself with a crash or a red graph; it announces itself with users saying the app "feels slow", while every health check still passes.
+
+For context, 5,000 DAU bursts to roughly 13 simultaneous requests. You have about 20x headroom, and real Postgres is faster than the local database these numbers came from. This is a thing to recognise if it ever happens, not a thing to solve now.
+
 **The signals to watch once you are live**, in the order they will bite:
 
 1. Response times creeping up while traffic is flat — usually a query that lost its index.
