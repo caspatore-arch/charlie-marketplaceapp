@@ -1,0 +1,1 @@
+CREATE INDEX "listings_feed_idx" ON "listings" USING btree ("campus_id","status","created_at" DESC NULLS FIRST,"id" DESC NULLS FIRST);

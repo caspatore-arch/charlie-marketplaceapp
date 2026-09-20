@@ -57,6 +57,13 @@
       "when": 1789541164226,
       "tag": "0007_tiresome_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789895290965,
+      "tag": "0008_clever_pretty_boy",
+      "breakpoints": true
     }
   ]
 }

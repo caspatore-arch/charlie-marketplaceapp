@@ -235,7 +235,31 @@ export async function bulkSeed(sizing: BulkSizing): Promise<void> {
   console.log(`done: ${total.toLocaleString()} listings total`);
 }
 
+/**
+ * Refuses to write tens of thousands of fixture rows into the dev database.
+ *
+ * This is not hypothetical: PGLITE_DIR has to be set before backend/db/client
+ * is evaluated, and ES imports are hoisted, so a script that assigns it in its
+ * module body assigns it too late and silently targets backend/data/pg. That
+ * mistake put 24k load-test listings into the local dev database once already.
+ */
+function refuseToPolluteDevData(): void {
+  if (process.env.DATABASE_URL) return; // a real Postgres the caller chose
+  if (process.env.BULK_SEED_ALLOW_DEV_DIR === '1') return;
+  const dir = process.env.PGLITE_DIR;
+  if (dir && !dir.includes('backend/data')) return;
+  console.error(
+    `\nThis would write bulk fixture rows into the dev database (${dir ?? 'backend/data/pg'}).\n\n` +
+      `Point it somewhere disposable:\n` +
+      `  PGLITE_DIR=/tmp/campus-load/pg npx tsx scripts/bulk-seed.ts --scale=1\n\n` +
+      `Or run scripts/loadtest.ts, which manages a throwaway datadir for you.\n` +
+      `Set BULK_SEED_ALLOW_DEV_DIR=1 only if polluting dev data is the intent.\n`,
+  );
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
+  refuseToPolluteDevData();
   const scaleArg = process.argv.find((a) => a.startsWith('--scale='));
   const scale = scaleArg ? Number(scaleArg.split('=')[1]) : 1;
   if (!Number.isFinite(scale) || scale <= 0) throw new Error('--scale must be a positive number');

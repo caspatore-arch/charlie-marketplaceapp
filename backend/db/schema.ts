@@ -193,6 +193,25 @@ export const listings = pgTable(
   },
   (t) => [
     index('listings_campus_status_idx').on(t.campusId, t.status),
+    // The feed filters on (campusId, status) and then orders by
+    // (createdAt DESC, id DESC) for keyset pagination. With only the filter
+    // indexed, Postgres reads every active listing on the campus and top-N
+    // sorts it to return 20 — measured at 2,414 rows scanned per page on a
+    // 24k-listing dataset, and it is the 55%-of-traffic query. Carrying the
+    // sort columns in the index turns each page into a bounded index scan
+    // whose cost does not grow with how much active inventory exists.
+    // nullsFirst() is load-bearing: drizzle's .desc() emits "DESC NULLS LAST",
+    // while a plain "ORDER BY created_at DESC" means NULLS FIRST. The operator
+    // classes then do not match, and Postgres silently ignores the index for
+    // ordering — it picked a bitmap scan plus a top-N sort even when index
+    // scans were forced. Both columns are NOT NULL, so this only aligns the
+    // declared ordering with the query's.
+    index('listings_feed_idx').on(
+      t.campusId,
+      t.status,
+      t.createdAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
+    ),
     index('listings_sale_type_expires_idx').on(t.saleType, t.expiresAt),
     index('listings_seller_idx').on(t.sellerId),
   ],
