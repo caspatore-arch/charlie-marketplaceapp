@@ -3,7 +3,14 @@
  * <PhotoGallery photos={listingDetail.photos} />
  */
 import React, { useState } from 'react';
-import { Dimensions, FlatList, StyleSheet, View, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
+import {
+  FlatList,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
+} from 'react-native';
 import { Image } from 'expo-image';
 import { colors, space } from '@/constants/theme';
 import { resolveMediaUrl } from '@/lib/trpc';
@@ -18,10 +25,13 @@ export interface PhotoGalleryProps {
   aspectRatio?: number;
 }
 
-const { width: screenWidth } = Dimensions.get('window');
-
 export function PhotoGallery({ photos, aspectRatio = 4 / 5 }: PhotoGalleryProps) {
   const [index, setIndex] = useState(0);
+  // Read the width on every render rather than once at module load: a
+  // module-level Dimensions.get() freezes the width the app happened to start
+  // at, so the pages stop matching the screen after a rotation or a resize and
+  // paging lands between photos.
+  const { width: screenWidth } = useWindowDimensions();
   const height = screenWidth / aspectRatio;
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {

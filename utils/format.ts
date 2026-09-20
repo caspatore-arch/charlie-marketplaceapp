@@ -77,3 +77,57 @@ export function conditionLabel(condition: Condition | string): string {
 export function categoryLabel(category: Category | string): string {
   return CATEGORY_LABELS[category as Category] ?? category;
 }
+
+/**
+ * Compact label for a pickup window, e.g. "Today 4–6 PM", "Tomorrow 10 AM–1 PM",
+ * "Sat 10 AM–1 PM". Built for the listing card, where horizontal room is tight:
+ * minutes are dropped when a time lands on the hour, and the meridiem is shown
+ * once when both ends share it ("4–6 PM", not "4 PM–6 PM").
+ */
+export function formatPickupWindow(
+  startsAt: string | Date,
+  endsAt: string | Date,
+  timeZone?: string,
+): string {
+  const start = typeof startsAt === 'string' ? new Date(startsAt) : startsAt;
+  const end = typeof endsAt === 'string' ? new Date(endsAt) : endsAt;
+  const now = new Date();
+
+  const dayFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  let dayLabel: string;
+  if (dayFmt.format(start) === dayFmt.format(now)) dayLabel = 'Today';
+  else if (dayFmt.format(start) === dayFmt.format(tomorrow)) dayLabel = 'Tomorrow';
+  else dayLabel = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(start);
+
+  const parts = (d: Date) => {
+    const bits = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).formatToParts(d);
+    const get = (t: string) => bits.find((b) => b.type === t)?.value ?? '';
+    const minute = get('minute');
+    return {
+      clock: minute === '00' ? get('hour') : `${get('hour')}:${minute}`,
+      meridiem: get('dayPeriod').toUpperCase(),
+    };
+  };
+
+  const a = parts(start);
+  const b = parts(end);
+  const range =
+    a.meridiem === b.meridiem
+      ? `${a.clock}–${b.clock} ${b.meridiem}`
+      : `${a.clock} ${a.meridiem}–${b.clock} ${b.meridiem}`;
+
+  return `${dayLabel} ${range}`;
+}

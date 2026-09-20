@@ -5,10 +5,19 @@
  * that differs for the seller vs. everyone else.
  */
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Heart, Share as ShareIcon } from 'lucide-react-native';
+import { Heart, MessageCircle, Share as ShareIcon } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { PriceText } from '@/components/ui/PriceText';
@@ -249,6 +258,22 @@ export default function ListingDetailScreen() {
             : 'This listing has expired.'
           : undefined;
 
+  const messageIconButton = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Message ${listing.seller.displayName}`}
+      onPress={onMessage}
+      disabled={openConversationMutation.isPending}
+      style={({ pressed }) => [styles.footerIconBtn, pressed && styles.footerIconBtnPressed]}
+    >
+      {openConversationMutation.isPending ? (
+        <ActivityIndicator size="small" color={colors.ink} />
+      ) : (
+        <MessageCircle size={22} color={colors.ink} />
+      )}
+    </Pressable>
+  );
+
   return (
     <Screen padded={false}>
       <Stack.Screen options={{ title: listing.title }} />
@@ -348,8 +373,14 @@ export default function ListingDetailScreen() {
               Next available times
             </Text>
             {upcomingWindows.length === 0 ? (
+              // Say what the buyer can do, not just what is missing. Requesting
+              // a meetup still works with no posted windows — the buyer
+              // proposes the time — and the old copy read like a dead end
+              // sitting directly above the primary button.
               <Text variant="body" color="inkFaint" style={styles.noWindows}>
-                No upcoming pickup times listed.
+                {isSeller
+                  ? "You haven't posted pickup times. Adding some lets buyers pick a slot instead of asking."
+                  : "This seller hasn't posted times yet — propose one when you request a meetup."}
               </Text>
             ) : (
               upcomingWindows.map((w) => (
@@ -375,7 +406,11 @@ export default function ListingDetailScreen() {
                 contentContainerStyle={styles.sellerListContent}
                 renderItem={({ item }) => (
                   <View style={styles.sellerListCell}>
-                    <ListingCard listing={item} onPress={() => router.push(`/listing/${item.id}`)} />
+                    <ListingCard
+                      listing={item}
+                      onPress={() => router.push(`/listing/${item.id}`)}
+                      showSeller={false}
+                    />
                   </View>
                 )}
               />
@@ -426,16 +461,15 @@ export default function ListingDetailScreen() {
                   A bid is a commitment to buy, not a reservation.
                 </Text>
                 <View style={styles.footerRow}>
-                  <Button
-                    title="Message"
-                    variant="ghost"
-                    onPress={onMessage}
-                    loading={openConversationMutation.isPending}
-                    style={styles.footerBtnFlex}
-                  />
+                  {messageIconButton}
                   {listing.buyoutPriceCents != null ? (
                     <Button
-                      title={`Buy now ${formatPrice(listing.buyoutPriceCents)}`}
+                      // "Buy now $60" does not fit beside "Place bid" and the
+                      // message icon on a 375pt bar; it ellipsised to "Buy now
+                      // ...", hiding the one number that matters. The price
+                      // earns the space, "now" does not.
+                      title={`Buy ${formatPrice(listing.buyoutPriceCents)}`}
+                      accessibilityLabel={`Buy it now for ${formatPrice(listing.buyoutPriceCents)}`}
                       variant="secondary"
                       onPress={onBuyItNow}
                       loading={buyoutMutation.isPending}
@@ -445,20 +479,14 @@ export default function ListingDetailScreen() {
                   <Button
                     title="Place bid"
                     onPress={onPlaceBid}
-                    style={styles.footerBtnPrimary}
+                    style={styles.footerBtnFlex}
                     accessibilityLabel={`Place bid, current price ${formatPrice(listing.currentPriceCents)}`}
                   />
                 </View>
               </>
             ) : (
               <View style={styles.footerRow}>
-                <Button
-                  title="Message"
-                  variant="secondary"
-                  onPress={onMessage}
-                  loading={openConversationMutation.isPending}
-                  style={styles.footerBtnFlex}
-                />
+                {messageIconButton}
                 <Button
                   title={isAuction ? 'Auction ended' : 'Request meetup'}
                   onPress={onRequestMeetup}
@@ -536,9 +564,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingTop: space.md,
   },
-  footerRow: { flexDirection: 'row', gap: space.md },
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   footerBtnFlex: { flex: 1 },
   footerBtnPrimary: { flex: 2 },
+  // Message is an icon, not a text button (docs/DESIGN.md). A "Message" label
+  // costs ~90px of a 343px bar, which is exactly what pushed "Buy now $60"
+  // into a three-line wrap on a 375pt screen.
+  footerIconBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceMuted,
+  },
+  footerIconBtnPressed: { opacity: 0.6 },
   unavailableNote: { marginBottom: space.sm },
   auctionWrap: { marginTop: space.lg },
 });

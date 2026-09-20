@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { Sheet } from '@/components/ui/Sheet';
 import { Chip } from '@/components/ui/Chip';
 import { colors, radius, space } from '@/constants/theme';
+import { formatPickupWindow } from '@/utils/format';
 
 export interface WindowItem {
   key: string;
@@ -68,6 +69,33 @@ function buildTimeOptions(): { label: string; minutes: number }[] {
   return options;
 }
 
+/**
+ * One-tap windows for the common cases. The custom sheet costs four taps and
+ * two scrolls through 31 time chips, which is enough friction that sellers
+ * publish with no windows at all — and a listing with no windows is exactly
+ * the "message me to work it out" experience this app exists to replace.
+ */
+const QUICK_PRESETS: { dayOffset: 0 | 1; startMin: number; endMin: number }[] = [
+  { dayOffset: 0, startMin: 9 * 60, endMin: 12 * 60 },
+  { dayOffset: 0, startMin: 13 * 60, endMin: 16 * 60 },
+  { dayOffset: 0, startMin: 17 * 60, endMin: 20 * 60 },
+  { dayOffset: 1, startMin: 9 * 60, endMin: 12 * 60 },
+  { dayOffset: 1, startMin: 13 * 60, endMin: 16 * 60 },
+  { dayOffset: 1, startMin: 17 * 60, endMin: 20 * 60 },
+];
+
+/** Resolves a preset against the current local day. */
+function presetRange(p: { dayOffset: 0 | 1; startMin: number; endMin: number }) {
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  day.setDate(day.getDate() + p.dayOffset);
+  const startsAt = new Date(day);
+  startsAt.setMinutes(p.startMin);
+  const endsAt = new Date(day);
+  endsAt.setMinutes(p.endMin);
+  return { startsAt, endsAt };
+}
+
 function formatWindowRange(startsAt: string, endsAt: string): string {
   const start = new Date(startsAt);
   const end = new Date(endsAt);
@@ -95,6 +123,31 @@ export function WindowEditor({ windows, onChange }: WindowEditorProps) {
 
   const dayOptions = useMemo(buildDayOptions, []);
   const timeOptions = useMemo(buildTimeOptions, []);
+
+  // Drop presets that have already passed, and any the seller has added, so
+  // the row only ever offers windows that would actually do something.
+  // `now` is captured once on mount rather than read during each render: the
+  // preset row does not need to tick, and reading the clock while rendering
+  // makes the component non-idempotent (react-hooks/purity).
+  const [now] = useState(() => Date.now());
+
+  const quickOptions = useMemo(() => {
+    const taken = new Set(windows.map((w) => `${w.startsAt}|${w.endsAt}`));
+    return QUICK_PRESETS.map((p) => {
+      const { startsAt, endsAt } = presetRange(p);
+      return {
+        label: formatPickupWindow(startsAt, endsAt),
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+      };
+    })
+      .filter((o) => new Date(o.endsAt).getTime() > now && !taken.has(`${o.startsAt}|${o.endsAt}`))
+      .slice(0, 4);
+  }, [windows, now]);
+
+  function addQuick(option: { startsAt: string; endsAt: string }) {
+    onChange([...windows, { key: nextKey(), startsAt: option.startsAt, endsAt: option.endsAt }]);
+  }
 
   function openSheet() {
     setDayIndex(null);
@@ -150,8 +203,22 @@ export function WindowEditor({ windows, onChange }: WindowEditorProps) {
         </View>
       )}
 
+      {quickOptions.length > 0 ? (
+        <View style={styles.quickWrap}>
+          {quickOptions.map((o) => (
+            <Chip
+              key={o.startsAt}
+              label={o.label}
+              selected={false}
+              onPress={() => addQuick(o)}
+              accessibilityLabel={`Add pickup window ${o.label}`}
+            />
+          ))}
+        </View>
+      ) : null}
+
       <Button
-        title="Add window"
+        title={windows.length > 0 ? 'Add another time' : 'Pick a custom time'}
         variant="secondary"
         onPress={openSheet}
         icon={<Plus size={18} color={colors.ink} />}
@@ -225,6 +292,7 @@ const styles = StyleSheet.create({
   },
   rowText: { flex: 1 },
   deleteButton: { padding: space.xs },
+  quickWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md },
   addButton: { alignSelf: 'flex-start' },
   sheetScroll: { maxHeight: 480 },
   sectionLabel: { marginTop: space.lg, marginBottom: space.sm },

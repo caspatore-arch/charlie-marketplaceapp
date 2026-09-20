@@ -105,7 +105,7 @@ function SignedInProfile({
         ) : activeListings.length === 0 ? (
           <EmptyState title="No active listings" body="Items you list will show up here." />
         ) : (
-          <ListingGrid listings={activeListings} onPress={goToListing} />
+          <ListingGrid listings={activeListings} onPress={goToListing} showSeller={false} />
         )}
       </Section>
 
@@ -159,7 +159,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function ListingGrid({ listings, onPress }: { listings: ListingCardType[]; onPress: (id: string) => void }) {
+function ListingGrid({
+  listings,
+  onPress,
+  showSeller = true,
+}: {
+  listings: ListingCardType[];
+  onPress: (id: string) => void;
+  /** False for "My listings" — every row would read the viewer's own name.
+   *  Saved items keep it: there the seller is the thing you want to know. */
+  showSeller?: boolean;
+}) {
   return (
     <FlatList
       data={listings}
@@ -170,7 +180,7 @@ function ListingGrid({ listings, onPress }: { listings: ListingCardType[]; onPre
       contentContainerStyle={styles.gridContent}
       renderItem={({ item }) => (
         <View style={styles.gridCell}>
-          <ListingCard listing={item} onPress={() => onPress(item.id)} />
+          <ListingCard listing={item} onPress={() => onPress(item.id)} showSeller={showSeller} />
         </View>
       )}
     />
@@ -223,7 +233,10 @@ const styles = StyleSheet.create({
   sectionDivider: { marginTop: space.xl },
   gridRow: { gap: space.md },
   gridContent: { gap: space.md },
-  gridCell: { flex: 1 },
+  // maxWidth pins a lone cell to half the row. With numColumns={2} a flex:1
+  // cell stretches to the full width whenever a row is short — one search
+  // result rendered as a single giant card.
+  gridCell: { flex: 1, maxWidth: '50%' },
   settingsButton: { marginTop: space.lg },
   devWrap: { marginTop: space.xxl, marginBottom: space.xxl },
   devTitle: { marginBottom: space.sm },

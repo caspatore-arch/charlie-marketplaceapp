@@ -56,7 +56,13 @@ const DEMO_ART: DemoArt[] = [
   { slug: 'demo-dorm', label: 'Dorm', bg: '#EDE4DE', ink: '#43352E', shape: 'box' },
 ];
 
-/** A clean 4:5 placeholder: solid ground, one simple silhouette, a DEMO mark. */
+/**
+ * A clean 4:5 placeholder: solid ground and one simple silhouette. No DEMO mark
+ * is drawn into the art — every surface that shows a photo already renders the
+ * `demo` Badge over it, and two markers per tile read as clutter. The badge is
+ * also the honest one: it tracks the listing, so it still appears once a demo
+ * seller uploads a real photo.
+ */
 function demoSvg(art: DemoArt): string {
   const silhouette =
     art.shape === 'tee'
@@ -69,10 +75,6 @@ function demoSvg(art: DemoArt): string {
   <rect width="800" height="1000" fill="${art.bg}"/>
   ${silhouette}
   <text x="400" y="740" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="46" font-weight="600" fill="${art.ink}" opacity="0.55">${art.label}</text>
-  <g opacity="0.9">
-    <rect x="40" y="40" width="112" height="40" rx="20" fill="#5B4FCF"/>
-    <text x="96" y="67" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="19" font-weight="700" letter-spacing="1.5" fill="#FFFFFF">DEMO</text>
-  </g>
 </svg>`;
 }
 
@@ -115,13 +117,24 @@ function localWindow(startHour: number, endHour: number, dayOffset = 0) {
  */
 export function soonWindow(nowMs: number = Date.now()) {
   const now = nowMs;
-  const { end } = localDayBounds(TIMEZONE);
+  const { start, end } = localDayBounds(TIMEZONE);
   // Round up to the next :00/:30 so the slot chips read "5:00 PM", not "4:34 PM".
   const HALF_HOUR = 30 * 60 * 1000;
-  const startsAt = new Date(Math.ceil((now + HALF_HOUR) / HALF_HOUR) * HALF_HOUR);
-  const latestEnd = end.getTime() - 60 * 1000;
+  const rounded = Math.ceil((now + HALF_HOUR) / HALF_HOUR) * HALF_HOUR;
+
+  // Keep demo slots inside hours a student would actually meet in. Seeding at
+  // 1:30 AM previously produced a real, bookable "Today 2:30-5:30 AM" window:
+  // valid data, but it reads as broken and makes the whole feed look untrusted.
+  const dayStart = start.getTime();
+  const EARLIEST = dayStart + 9 * HOUR;
+  const LATEST_START = dayStart + 19 * HOUR;
+  const startsAt = new Date(Math.max(rounded, EARLIEST));
+
+  const latestEnd = Math.min(end.getTime() - 60 * 1000, dayStart + 21 * HOUR);
   const MIN_WINDOW = HOUR;
-  if (latestEnd - startsAt.getTime() < MIN_WINDOW) return localWindow(9, 12, 1);
+  if (startsAt.getTime() > LATEST_START || latestEnd - startsAt.getTime() < MIN_WINDOW) {
+    return localWindow(9, 12, 1);
+  }
   return { startsAt, endsAt: new Date(Math.min(startsAt.getTime() + 3 * HOUR, latestEnd)) };
 }
 

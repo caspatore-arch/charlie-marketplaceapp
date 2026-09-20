@@ -70,6 +70,7 @@ export function Button({
             variant="heading"
             weight="600"
             color={variant === 'secondary' || variant === 'ghost' ? 'ink' : 'white'}
+            numberOfLines={1}
           >
             {title}
           </Text>

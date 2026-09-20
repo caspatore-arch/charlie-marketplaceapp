@@ -128,7 +128,11 @@ export default function PublicProfileScreen() {
           columnWrapperStyle={styles.gridRow}
           renderItem={({ item }) => (
             <View style={styles.gridCell}>
-              <ListingCard listing={item} onPress={() => router.push(`/listing/${item.id}`)} />
+              <ListingCard
+                listing={item}
+                onPress={() => router.push(`/listing/${item.id}`)}
+                showSeller={false}
+              />
             </View>
           )}
         />
@@ -146,5 +150,8 @@ const styles = StyleSheet.create({
   actionBtn: { flex: 1 },
   listingsTitle: { marginBottom: space.md },
   gridRow: { gap: space.md },
-  gridCell: { flex: 1 },
+  // maxWidth pins a lone cell to half the row. With numColumns={2} a flex:1
+  // cell stretches to the full width whenever a row is short — one search
+  // result rendered as a single giant card.
+  gridCell: { flex: 1, maxWidth: '50%' },
 });

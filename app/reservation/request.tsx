@@ -84,17 +84,27 @@ export default function RequestMeetupScreen() {
     },
   });
 
-  const canSubmit = (!!spotId || !!customAddress) && !!startsAt && !requestMutation.isPending;
+  // When the seller offers exactly one spot there is no choice to make, so it
+  // starts selected: a required tap that can only be answered one way is just
+  // a step. Derived rather than pushed into state by an effect, so there is no
+  // render where the form is briefly and wrongly empty.
+  const effectiveSpotId =
+    spotId ?? (!customAddress && listing?.spots.length === 1 ? listing.spots[0]!.id : undefined);
+
+  const canSubmit =
+    (!!effectiveSpotId || !!customAddress) && !!startsAt && !requestMutation.isPending;
 
   const onSubmit = useCallback(() => {
-    if (!listingId || !startsAt || (!spotId && !customAddress)) return;
+    if (!listingId || !startsAt || (!effectiveSpotId && !customAddress)) return;
     setFormError(undefined);
     requestMutation.mutate({
       listingId,
       startsAt,
-      ...(spotId ? { spotId } : { customAddress: customAddress!.address }),
+      ...(effectiveSpotId
+        ? { spotId: effectiveSpotId }
+        : { customAddress: customAddress!.address }),
     });
-  }, [listingId, spotId, customAddress, startsAt, requestMutation]);
+  }, [listingId, effectiveSpotId, customAddress, startsAt, requestMutation]);
 
   const coverPhoto = useMemo(() => resolveMediaUrl(listing?.coverPhotoUrl ?? undefined), [listing?.coverPhotoUrl]);
 
@@ -165,7 +175,7 @@ export default function RequestMeetupScreen() {
         ) : null}
         <SpotPicker
           spots={listing.spots}
-          selectedId={spotId}
+          selectedId={effectiveSpotId}
           onSelect={setSpotId}
           campusId={listing.campusId}
           customAddress={customAddress}
@@ -218,7 +228,7 @@ export default function RequestMeetupScreen() {
           size="lg"
           style={styles.submit}
         />
-        {(!spotId && !customAddress) || !startsAt ? (
+        {(!effectiveSpotId && !customAddress) || !startsAt ? (
           <Text variant="caption" color="inkFaint" style={styles.hint}>
             Pick a spot and a time to continue.
           </Text>

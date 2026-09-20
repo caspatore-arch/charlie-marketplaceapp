@@ -12,15 +12,28 @@ export interface ChipProps {
   selected?: boolean;
   onPress?: () => void;
   disabled?: boolean;
+  /** Overrides the spoken label when the visible text is not self-explanatory
+   *  on its own — e.g. a chip that adds a pickup window rather than filtering. */
+  accessibilityLabel?: string;
 }
 
-export function Chip({ label, selected = false, onPress, disabled = false }: ChipProps) {
+export function Chip({
+  label,
+  selected = false,
+  onPress,
+  disabled = false,
+  accessibilityLabel,
+}: ChipProps) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected, disabled }}
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel ?? label}
       disabled={disabled}
+      // The pill is 36pt tall by design, below the 48pt minimum target in
+      // docs/DESIGN.md. hitSlop buys back the difference without changing how
+      // a row of chips looks.
+      hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
       onPress={onPress}
       style={({ pressed }) => [
         styles.chip,

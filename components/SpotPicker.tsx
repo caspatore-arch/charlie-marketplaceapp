@@ -81,6 +81,15 @@ export function SpotPicker({
     checkMutation.mutate({ campusId, address: trimmed });
   };
 
+  // Every demo spot carries the same hours caveat. Printed on all four rows it
+  // reads as four separate warnings and stops being read at all, so when the
+  // note is identical across the list it is shown once beneath it instead.
+  const firstNote = spots[0]?.hoursNote ?? null;
+  const sharedNote =
+    spots.length > 1 && firstNote && spots.every((s) => s.hoursNote === firstNote)
+      ? firstNote
+      : null;
+
   return (
     <View style={styles.list}>
       {spots.map((spot) => {
@@ -111,7 +120,7 @@ export function SpotPicker({
               <Text variant="caption" color="inkMuted">
                 {spot.description}
               </Text>
-              {spot.hoursNote ? (
+              {spot.hoursNote && !sharedNote ? (
                 <Text variant="caption" color="inkFaint">
                   {spot.hoursNote}
                 </Text>
@@ -121,6 +130,12 @@ export function SpotPicker({
           </Pressable>
         );
       })}
+
+      {sharedNote ? (
+        <Text variant="caption" color="inkFaint" style={styles.sharedNote}>
+          {sharedNote}
+        </Text>
+      ) : null}
 
       {allowCustom ? (
         <View style={styles.customBlock}>
@@ -189,6 +204,7 @@ export function SpotPicker({
 
 const styles = StyleSheet.create({
   list: { gap: space.sm },
+  sharedNote: { marginTop: space.xs },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

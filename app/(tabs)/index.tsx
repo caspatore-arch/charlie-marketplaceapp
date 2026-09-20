@@ -112,17 +112,13 @@ export default function BrowseScreen() {
 
   const goToListing = useCallback((id: string) => router.push(`/listing/${id}`), [router]);
 
-  const headerBlock = (
-    <View style={styles.header}>
-      <Text variant="title">{campus?.name ?? 'Campus Swap'}</Text>
-      {campus?.isDemo ? (
-        <Text variant="caption" color="inkFaint" style={styles.demoNote}>
-          Demo campus — listings and locations are for demonstration only.
-        </Text>
-      ) : null}
-      <View style={styles.searchWrap}>
-        <SearchBar value={searchInput} onChangeText={setSearchInput} />
-      </View>
+  // The campus name is identity, so it scrolls away with the content. Search
+  // and the filter row are controls: they stay pinned above the grid, because
+  // in an infinite feed a filter you have to scroll back up to reach is a
+  // filter people stop using.
+  const controlsBlock = (
+    <View style={styles.controls}>
+      <SearchBar value={searchInput} onChangeText={setSearchInput} />
       <View style={styles.filterWrap}>
         <FilterBar
           category={category}
@@ -138,6 +134,17 @@ export default function BrowseScreen() {
           onPressSize={() => setSizeSheetOpen(true)}
         />
       </View>
+    </View>
+  );
+
+  const headerBlock = (
+    <View style={styles.header}>
+      <Text variant="title">{campus?.name ?? 'Campus Swap'}</Text>
+      {campus?.isDemo ? (
+        <Text variant="caption" color="inkFaint" style={styles.demoNote}>
+          Demo campus — listings and locations are for demonstration only.
+        </Text>
+      ) : null}
     </View>
   );
 
@@ -238,6 +245,7 @@ export default function BrowseScreen() {
 
   return (
     <Screen padded={false}>
+      {controlsBlock}
       {body}
       <PriceFilterSheet
         visible={priceSheetOpen}
@@ -265,10 +273,20 @@ const styles = StyleSheet.create({
   padHorizontal: { paddingHorizontal: space.lg },
   header: { paddingTop: space.sm, paddingBottom: space.md, paddingHorizontal: space.lg },
   demoNote: { marginTop: 2 },
-  searchWrap: { marginTop: space.lg },
+  controls: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.md,
+    backgroundColor: colors.bg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
   filterWrap: { marginTop: space.md },
   gridRow: { gap: space.md, paddingHorizontal: space.lg },
   gridContent: { gap: space.md, paddingBottom: space.xxl },
-  gridCell: { flex: 1 },
+  // maxWidth pins a lone cell to half the row. With numColumns={2} a flex:1
+  // cell stretches to the full width whenever a row is short — one search
+  // result rendered as a single giant card.
+  gridCell: { flex: 1, maxWidth: '50%' },
   footerLoading: { paddingHorizontal: space.lg, paddingTop: space.md },
 });

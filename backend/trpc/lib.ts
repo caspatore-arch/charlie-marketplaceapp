@@ -424,6 +424,13 @@ export type ListingCard = Listing & {
   coverPhotoUrl: string | null;
   seller: PublicUser;
   hasAvailabilityToday: boolean;
+  /**
+   * Soonest still-open pickup window and where it is, or null when the seller
+   * has listed none. The card shows this instead of a bare "today" flag: the
+   * time and place are what a buyer actually decides on, so surfacing them in
+   * the grid saves the round of messaging other marketplaces force.
+   */
+  nextPickup: { startsAt: Date; endsAt: Date; spotName: string | null } | null;
   /** Highest bid for an auction, else the fixed price. Derived, never stored. */
   currentPriceCents: number;
   /** Number of bids placed. Always 0 for a fixed-price listing. */
@@ -463,25 +470,48 @@ export async function toListingCards(db: Db, rows: Listing[]): Promise<ListingCa
   const timezone = tzByCampus.get(rows[0]!.campusId) ?? 'America/Phoenix';
   const { end } = localDayBounds(timezone);
   const now = new Date();
-  const todayWindows = await db
-    .select({ listingId: availabilityWindows.listingId })
+  // Every still-open window, soonest first. This replaces a bare existence
+  // check: the card needs the window itself, not a yes/no, and it is the same
+  // one query either way.
+  const upcoming = await db
+    .select({
+      listingId: availabilityWindows.listingId,
+      startsAt: availabilityWindows.startsAt,
+      endsAt: availabilityWindows.endsAt,
+    })
     .from(availabilityWindows)
     .where(
-      and(
-        inArray(availabilityWindows.listingId, listingIds),
-        lte(availabilityWindows.startsAt, end),
-        gte(availabilityWindows.endsAt, now),
-      ),
-    );
-  const hasToday = new Set(todayWindows.map((w) => w.listingId));
+      and(inArray(availabilityWindows.listingId, listingIds), gte(availabilityWindows.endsAt, now)),
+    )
+    .orderBy(asc(availabilityWindows.startsAt));
+
+  // First spot per listing, for the "· Student Union" half of the pickup line.
+  const spotRows = await db
+    .select({ listingId: listingSpots.listingId, name: meetupSpots.name })
+    .from(listingSpots)
+    .innerJoin(meetupSpots, eq(meetupSpots.id, listingSpots.spotId))
+    .where(inArray(listingSpots.listingId, listingIds));
+  const spotNameFor = new Map<string, string>();
+  for (const s of spotRows) if (!spotNameFor.has(s.listingId)) spotNameFor.set(s.listingId, s.name);
+
+  const hasToday = new Set<string>();
+  const nextWindow = new Map<string, { startsAt: Date; endsAt: Date }>();
+  for (const w of upcoming) {
+    if (!nextWindow.has(w.listingId)) nextWindow.set(w.listingId, w);
+    if (w.startsAt <= end) hasToday.add(w.listingId);
+  }
 
   return rows.map((l) => {
     const auction = auctionStates.get(l.id);
+    const w = nextWindow.get(l.id);
     return {
       ...l,
       coverPhotoUrl: cover.get(l.id) ?? null,
       seller: toPublicUser(sellerById.get(l.sellerId)!),
       hasAvailabilityToday: hasToday.has(l.id),
+      nextPickup: w
+        ? { startsAt: w.startsAt, endsAt: w.endsAt, spotName: spotNameFor.get(l.id) ?? null }
+        : null,
       currentPriceCents: auction?.currentPriceCents ?? l.priceCents,
       bidCount: auction?.bidCount ?? 0,
     };
