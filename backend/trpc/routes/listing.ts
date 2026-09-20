@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gte, ilike, inArray, lt, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, ilike, inArray, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
@@ -15,6 +15,7 @@ import {
 import {
   AUCTION_TTL_MS,
   applyExpiry,
+  applyExpiryForRead,
   blockedUserIds,
   localDayBounds,
   toListingCards,
@@ -184,9 +185,17 @@ export const listingRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      await applyExpiry(ctx.db);
+      await applyExpiryForRead(ctx.db);
 
-      const conditions = [eq(listings.campusId, input.campusId), eq(listings.status, 'active')];
+      const conditions = [
+        eq(listings.campusId, input.campusId),
+        eq(listings.status, 'active'),
+        // Expiry is swept on a timer for reads (applyExpiryForRead), so a row
+        // can briefly still say 'active' after its deadline. Filtering here
+        // means the feed is correct regardless of when the last sweep ran —
+        // the sweep only has to catch up on the stored status.
+        or(isNull(listings.expiresAt), gt(listings.expiresAt, new Date()))!,
+      ];
       if (input.category) conditions.push(eq(listings.category, input.category));
       if (input.minCents !== undefined) conditions.push(gte(listings.priceCents, input.minCents));
       if (input.maxCents !== undefined) conditions.push(lte(listings.priceCents, input.maxCents));
@@ -249,7 +258,7 @@ export const listingRouter = router({
     }),
 
   byId: publicProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
     const [listing] = await ctx.db.select().from(listings).where(eq(listings.id, input.id)).limit(1);
     if (!listing) throw new TRPCError({ code: 'NOT_FOUND', message: 'That item no longer exists.' });
     return toListingDetail(ctx.db, listing, ctx.user?.id ?? null);
@@ -258,7 +267,7 @@ export const listingRouter = router({
   bySeller: publicProcedure
     .input(z.object({ sellerId: z.uuid(), includeSold: z.boolean().default(false) }))
     .query(async ({ ctx, input }) => {
-      await applyExpiry(ctx.db);
+      await applyExpiryForRead(ctx.db);
       const statuses = input.includeSold
         ? (['active', 'reserved', 'sold'] as const)
         : (['active', 'reserved'] as const);
@@ -271,7 +280,7 @@ export const listingRouter = router({
     }),
 
   mine: protectedProcedure.query(async ({ ctx }) => {
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
     const rows = await ctx.db
       .select()
       .from(listings)
@@ -519,7 +528,7 @@ export const listingRouter = router({
     }),
 
   saved: protectedProcedure.query(async ({ ctx }) => {
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
     const rows = await ctx.db
       .select({ listing: listings })
       .from(savedListings)

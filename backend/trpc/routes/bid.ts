@@ -15,6 +15,7 @@ import { notifyOutbid } from '../../notifications/events';
 import {
   ANTI_SNIPE_MS,
   applyExpiry,
+  applyExpiryForRead,
   bidIncrementCents,
   isBlockedBetween,
   minNextBidCents,
@@ -74,7 +75,7 @@ export const bidRouter = router({
   forListing: publicProcedure
     .input(z.object({ listingId: z.uuid(), limit: z.number().int().min(1).max(100).default(50) }))
     .query(async ({ ctx, input }) => {
-      await applyExpiry(ctx.db);
+      await applyExpiryForRead(ctx.db);
 
       const rows = await ctx.db
         .select()
@@ -102,7 +103,7 @@ export const bidRouter = router({
 
   /** The caller's own bids, newest first, with the listing card for each. */
   mine: protectedProcedure.query(async ({ ctx }) => {
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
 
     const rows = await ctx.db
       .select()

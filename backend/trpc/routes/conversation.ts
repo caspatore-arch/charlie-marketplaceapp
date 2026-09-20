@@ -5,7 +5,8 @@ import { z } from 'zod';
 import type { Db } from '../../db/client';
 import { conversationReads, conversations, listings, messages, reservations, users } from '../../db/schema';
 import { notifyNewMessage } from '../../notifications/events';
-import { applyExpiry, isBlockedBetween, toListingCards, toPublicUser } from '../lib';
+import { applyExpiry,
+  applyExpiryForRead, isBlockedBetween, toListingCards, toPublicUser } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
 /** Loads a conversation the caller takes part in, or throws. */
@@ -22,7 +23,7 @@ async function loadParticipantConversation(db: Db, id: string, userId: string) {
 
 export const conversationRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
 
     const rows = await ctx.db
       .select()
@@ -93,7 +94,7 @@ export const conversationRouter = router({
   /** One cheap call for the Inbox tab badge. Returns zeroes when signed out. */
   unreadTotal: publicProcedure.query(async ({ ctx }) => {
     if (!ctx.user) return { conversations: 0, actionableReservations: 0 };
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
     const userId = ctx.user.id;
 
     const convoRows = await ctx.db

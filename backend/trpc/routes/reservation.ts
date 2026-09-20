@@ -31,6 +31,7 @@ import { directionsUrlForCoords, geocodeAddress, haversineMeters, GeocodeError }
 import { notifyMeetupEvent, type MeetupEventKind } from '../../notifications/events';
 import {
   applyExpiry,
+  applyExpiryForRead,
   isBlockedBetween,
   isUniqueViolation,
   toReservationDetails,
@@ -596,7 +597,7 @@ export const reservationRouter = router({
     }),
 
   byId: protectedProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
     const res = await loadParticipantReservation(ctx.db, input.id, ctx.user.id);
     return detailFor(ctx.db, res, ctx.user.id);
   }),
@@ -604,7 +605,7 @@ export const reservationRouter = router({
   mine: protectedProcedure
     .input(z.object({ role: z.enum(['buyer', 'seller']).optional() }).default({}))
     .query(async ({ ctx, input }) => {
-      await applyExpiry(ctx.db);
+      await applyExpiryForRead(ctx.db);
 
       const who =
         input.role === 'buyer'
@@ -624,7 +625,7 @@ export const reservationRouter = router({
   forListing: protectedProcedure
     .input(z.object({ listingId: z.uuid() }))
     .query(async ({ ctx, input }) => {
-      await applyExpiry(ctx.db);
+      await applyExpiryForRead(ctx.db);
 
       const [listing] = await ctx.db
         .select()

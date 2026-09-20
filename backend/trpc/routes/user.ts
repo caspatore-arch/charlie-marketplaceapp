@@ -13,7 +13,8 @@ import {
   sessions,
   users,
 } from '../../db/schema';
-import { applyExpiry, toPublicUser, type PublicUser } from '../lib';
+import { applyExpiry,
+  applyExpiryForRead, toPublicUser, type PublicUser } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
 export type PublicProfile = PublicUser & {
@@ -63,7 +64,7 @@ export type TrustSummary = {
 
 export const userRouter = router({
   byId: publicProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
-    await applyExpiry(ctx.db);
+    await applyExpiryForRead(ctx.db);
 
     const [user] = await ctx.db.select().from(users).where(eq(users.id, input.id)).limit(1);
     if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'That profile does not exist.' });
@@ -106,7 +107,7 @@ export const userRouter = router({
   trustSummary: publicProcedure
     .input(z.object({ id: z.uuid() }))
     .query(async ({ ctx, input }): Promise<TrustSummary> => {
-      await applyExpiry(ctx.db);
+      await applyExpiryForRead(ctx.db);
 
       const [user] = await ctx.db.select().from(users).where(eq(users.id, input.id)).limit(1);
       if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'That profile does not exist.' });

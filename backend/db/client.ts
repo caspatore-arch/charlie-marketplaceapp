@@ -50,20 +50,54 @@ function sslOptionFor(databaseUrl: string): { rejectUnauthorized: boolean } | un
   return isLocalhost ? undefined : { rejectUnauthorized: false };
 }
 
+/**
+ * Opt-in SQL counter, enabled with SQL_TRACE=1. Off by default and costing
+ * nothing when off. scripts/loadtest.ts uses it to report queries per request,
+ * which is the number that predicts how an endpoint behaves under load far
+ * better than a single-user latency reading does.
+ */
+export const sqlStats = {
+  /**
+   * Installed when SQL_TRACE=1, but counting is toggled at call time so a
+   * harness can measure a few probe requests without charging the cost to a
+   * throughput run.
+   */
+  enabled: false,
+  count: 0,
+  /** Per-normalised-statement counts, for spotting N+1 patterns. */
+  byStatement: new Map<string, number>(),
+  reset() {
+    this.count = 0;
+    this.byStatement.clear();
+  },
+};
+
+const tracingLogger = {
+  logQuery(query: string): void {
+    if (!sqlStats.enabled) return;
+    sqlStats.count += 1;
+    // Collapse literals and parameter markers so repeated shapes group together.
+    const shape = query.replace(/\$\d+/g, '?').replace(/\s+/g, ' ').slice(0, 120);
+    sqlStats.byStatement.set(shape, (sqlStats.byStatement.get(shape) ?? 0) + 1);
+  },
+};
+
 function createDb(): Db {
+  const logger = process.env.SQL_TRACE === '1' ? tracingLogger : undefined;
+
   if (env.databaseUrl) {
     pool = new Pool({
       connectionString: env.databaseUrl,
       ssl: sslOptionFor(env.databaseUrl),
     });
-    return nodePgDrizzle(pool, { schema });
+    return nodePgDrizzle(pool, { schema, logger });
   }
 
   // PGlite creates its own datadir but not the parents of it.
   fs.mkdirSync(path.dirname(path.resolve(env.pgliteDir)), { recursive: true });
 
   const client = new PGlite(env.pgliteDir);
-  return pgliteDrizzle(client, { schema });
+  return pgliteDrizzle(client, { schema, logger });
 }
 
 export const db: Db = createDb();

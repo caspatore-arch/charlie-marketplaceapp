@@ -317,6 +317,44 @@ const ACCEPTED_GRACE_MS = 2 * 60 * 60 * 1000; // accepted meetups expire 2h afte
  *     its accepted hold is still open — step 2 runs first, so a listing that
  *     was both released and stale lands on `expired`, which is correct.
  */
+/**
+ * How long a process may coast on its last expiry sweep when serving a read.
+ *
+ * `applyExpiry` issues UPDATEs, and it used to run on all 22 of its call
+ * sites, which meant every public feed request wrote to the database. That is
+ * the single most expensive habit in this codebase at scale: it rules out
+ * routing reads to a replica, and concurrent readers take row locks on the
+ * same listings just to discover there was nothing to expire.
+ *
+ * Reads can coast because nothing depends on the sweep being current:
+ *   - the client renders auction countdowns locally, so the UI ends an auction
+ *     on time whatever the server last swept;
+ *   - every mutation still calls the exact `applyExpiry`, so acting on a stale
+ *     row (bidding on a just-ended auction) is rejected correctly;
+ *   - `listing.feed` additionally filters expired rows in SQL, so the feed is
+ *     right even inside the window.
+ */
+const EXPIRY_SWEEP_INTERVAL_MS = 5_000;
+let nextExpirySweepAt = 0;
+
+/**
+ * Expiry for read paths: sweeps at most once per interval per process.
+ * Mutations must keep calling `applyExpiry` directly.
+ */
+export async function applyExpiryForRead(db: Db): Promise<void> {
+  const now = Date.now();
+  if (now < nextExpirySweepAt) return;
+  // Claimed before awaiting, so concurrent readers fall through immediately
+  // rather than all starting their own sweep.
+  nextExpirySweepAt = now + EXPIRY_SWEEP_INTERVAL_MS;
+  await applyExpiry(db);
+}
+
+/** Test hook: forces the next read-path sweep to actually run. */
+export function __resetExpirySweepForTests(): void {
+  nextExpirySweepAt = 0;
+}
+
 export async function applyExpiry(db: Db): Promise<void> {
   const now = new Date();
 
