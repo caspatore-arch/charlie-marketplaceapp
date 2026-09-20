@@ -148,16 +148,22 @@ async function main(): Promise<number> {
   /* ------------------------------------------------- per-endpoint SQL cost */
 
   console.log('queries per request (single call, cold cache):');
-  const sqlProbe: { name: string; run: () => Promise<unknown> }[] = [
-    { name: 'listing.feed (20)', run: () => guest.listing.feed.query({ campusId: campus.id, limit: 20 }) },
-    { name: 'listing.feed (search)', run: () => guest.listing.feed.query({ campusId: campus.id, q: 'jacket', limit: 20 }) },
-    { name: 'listing.byId', run: () => guest.listing.byId.query({ id: listingIds[0]! }) },
-    { name: 'campus.list', run: () => guest.campus.list.query() },
-    { name: 'conversation.list', run: () => member.conversation.list.query() },
-    { name: 'reservation.mine', run: () => member.reservation.mine.query() },
+  // `budget` is a regression guard, not a target. These endpoints all issue a
+  // fixed number of queries regardless of how many rows they return; a change
+  // that introduces a per-row query will blow the budget and fail the run
+  // rather than quietly showing up as a slow endpoint months later.
+  const sqlProbe: { name: string; budget: number; run: () => Promise<unknown> }[] = [
+    { name: 'listing.feed (20)', budget: 8, run: () => guest.listing.feed.query({ campusId: campus.id, limit: 20 }) },
+    { name: 'listing.feed (50)', budget: 8, run: () => guest.listing.feed.query({ campusId: campus.id, limit: 50 }) },
+    { name: 'listing.feed (search)', budget: 8, run: () => guest.listing.feed.query({ campusId: campus.id, q: 'jacket', limit: 20 }) },
+    { name: 'listing.byId', budget: 9, run: () => guest.listing.byId.query({ id: listingIds[0]! }) },
+    { name: 'campus.list', budget: 2, run: () => guest.campus.list.query() },
+    { name: 'conversation.list', budget: 3, run: () => member.conversation.list.query() },
+    { name: 'reservation.mine', budget: 11, run: () => member.reservation.mine.query() },
   ];
 
   const sqlCost = new Map<string, number>();
+  const budgetFailures: string[] = [];
   for (const probe of sqlProbe) {
     sqlStats.enabled = true;
     sqlStats.reset();
@@ -173,14 +179,32 @@ async function main(): Promise<number> {
       .filter(([shape]) => /^(insert|update|delete)/i.test(shape.trim()))
       .reduce((sum, [, count]) => sum + count, 0);
 
+    const overBudget = n > probe.budget;
+    // Reads must not write. A write on a read path cannot be served by a
+    // replica and takes row locks that concurrent readers queue behind.
+    const writesOnRead = writes > 0;
+    if (overBudget || writesOnRead) budgetFailures.push(probe.name);
+
     console.log(
       `  ${probe.name.padEnd(24)} ${String(n).padStart(4)} queries` +
-        (writes > 0 ? `  (${writes} writes)` : ''),
+        ` (budget ${probe.budget})` +
+        (writes > 0 ? `  ${writes} WRITES ON A READ PATH` : '') +
+        (overBudget ? '  OVER BUDGET' : ''),
     );
     // Any shape running more than twice in one request is an N+1 shape.
     for (const [shape, count] of shapes.filter(([, c]) => c > 2)) {
       console.log(`      x${count}  ${shape.slice(0, 84)}`);
     }
+  }
+
+  // Query count must not depend on how many rows come back.
+  const feed20 = sqlCost.get('listing.feed (20)')!;
+  const feed50 = sqlCost.get('listing.feed (50)')!;
+  if (feed20 !== feed50) {
+    budgetFailures.push(`feed scales with page size (${feed20} -> ${feed50})`);
+    console.log(`  N+1: feed costs ${feed20} queries at limit 20 but ${feed50} at limit 50`);
+  } else {
+    console.log(`  feed cost is flat across page sizes (${feed20} queries at limit 20 and 50)`);
   }
   console.log('');
 
@@ -352,7 +376,11 @@ async function main(): Promise<number> {
 
   server.close();
   fs.rmSync(tempRoot, { recursive: true, force: true });
-  return totalErrors === 0 && shedsLoad && isolatesUsers ? 0 : 1;
+  if (budgetFailures.length > 0) {
+    console.log(`\nFAILED query budgets: ${budgetFailures.join(', ')}`);
+  }
+
+  return totalErrors === 0 && shedsLoad && isolatesUsers && budgetFailures.length === 0 ? 0 : 1;
 }
 
 main()

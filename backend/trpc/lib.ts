@@ -475,6 +475,40 @@ export type ListingCard = Listing & {
   bidCount: number;
 };
 
+/**
+ * Builds the card-shaped fields from rows that have already been loaded.
+ *
+ * Pure — it issues no queries. It exists so the feed (which batches these
+ * lookups across 20 listings) and the detail screen (which needs the same
+ * rows in fuller form anyway) can agree on how a card is derived without the
+ * detail path re-running the feed's queries on top of its own.
+ */
+function deriveCardFields(input: {
+  listing: Listing;
+  coverPhotoUrl: string | null;
+  seller: User;
+  /** Windows not yet finished, soonest first. */
+  upcomingWindows: { startsAt: Date; endsAt: Date }[];
+  spotName: string | null;
+  auction: AuctionState | undefined;
+  /** End of the local campus day, for the "today" flag. */
+  todayEnd: Date;
+}): ListingCard {
+  const { listing, upcomingWindows, auction } = input;
+  const next = upcomingWindows[0];
+  return {
+    ...listing,
+    coverPhotoUrl: input.coverPhotoUrl,
+    seller: toPublicUser(input.seller),
+    hasAvailabilityToday: upcomingWindows.some((w) => w.startsAt <= input.todayEnd),
+    nextPickup: next
+      ? { startsAt: next.startsAt, endsAt: next.endsAt, spotName: input.spotName }
+      : null,
+    currentPriceCents: auction?.currentPriceCents ?? listing.priceCents,
+    bidCount: auction?.bidCount ?? 0,
+  };
+}
+
 /** Builds ListingCards for a batch of listings in a fixed number of queries. */
 export async function toListingCards(db: Db, rows: Listing[]): Promise<ListingCard[]> {
   if (rows.length === 0) return [];
@@ -532,28 +566,25 @@ export async function toListingCards(db: Db, rows: Listing[]): Promise<ListingCa
   const spotNameFor = new Map<string, string>();
   for (const s of spotRows) if (!spotNameFor.has(s.listingId)) spotNameFor.set(s.listingId, s.name);
 
-  const hasToday = new Set<string>();
-  const nextWindow = new Map<string, { startsAt: Date; endsAt: Date }>();
+  // `upcoming` is already sorted soonest-first, so grouping preserves that.
+  const windowsByListing = new Map<string, { startsAt: Date; endsAt: Date }[]>();
   for (const w of upcoming) {
-    if (!nextWindow.has(w.listingId)) nextWindow.set(w.listingId, w);
-    if (w.startsAt <= end) hasToday.add(w.listingId);
+    const list = windowsByListing.get(w.listingId);
+    if (list) list.push(w);
+    else windowsByListing.set(w.listingId, [w]);
   }
 
-  return rows.map((l) => {
-    const auction = auctionStates.get(l.id);
-    const w = nextWindow.get(l.id);
-    return {
-      ...l,
+  return rows.map((l) =>
+    deriveCardFields({
+      listing: l,
       coverPhotoUrl: cover.get(l.id) ?? null,
-      seller: toPublicUser(sellerById.get(l.sellerId)!),
-      hasAvailabilityToday: hasToday.has(l.id),
-      nextPickup: w
-        ? { startsAt: w.startsAt, endsAt: w.endsAt, spotName: spotNameFor.get(l.id) ?? null }
-        : null,
-      currentPriceCents: auction?.currentPriceCents ?? l.priceCents,
-      bidCount: auction?.bidCount ?? 0,
-    };
-  });
+      seller: sellerById.get(l.sellerId)!,
+      upcomingWindows: windowsByListing.get(l.id) ?? [],
+      spotName: spotNameFor.get(l.id) ?? null,
+      auction: auctionStates.get(l.id),
+      todayEnd: end,
+    }),
+  );
 }
 
 export type ListingDetail = ListingCard & {
@@ -570,9 +601,11 @@ export async function toListingDetail(
   listing: Listing,
   viewerId: string | null,
 ): Promise<ListingDetail> {
-  const [card] = await toListingCards(db, [listing]);
-
-  const [photos, spots, windows, active] = await Promise.all([
+  // This used to call toListingCards first and then load photos, spots and
+  // windows again — the card's queries are a strict subset of the detail
+  // screen's, so three of them ran twice on 22% of all traffic. The fuller
+  // rows are loaded once here and the card is derived from them.
+  const [photos, spots, windows, active, sellerRows, campusRows, auctionStates] = await Promise.all([
     db
       .select()
       .from(listingPhotos)
@@ -593,7 +626,24 @@ export async function toListingDetail(
       .from(reservations)
       .where(and(eq(reservations.listingId, listing.id), eq(reservations.status, 'accepted')))
       .limit(1),
+    db.select().from(users).where(eq(users.id, listing.sellerId)).limit(1),
+    db.select().from(campuses).where(eq(campuses.id, listing.campusId)).limit(1),
+    auctionStateFor(db, [listing]),
   ]);
+
+  const now = new Date();
+  const { end: todayEnd } = localDayBounds(campusRows[0]?.timezone ?? 'America/Phoenix');
+  const card = deriveCardFields({
+    listing,
+    coverPhotoUrl: photos[0]?.url ?? null,
+    seller: sellerRows[0]!,
+    // `windows` is every window ever set, oldest first; the card wants only
+    // the ones still open, in the same order.
+    upcomingWindows: windows.filter((w) => w.endsAt >= now),
+    spotName: spots[0]?.spot.name ?? null,
+    auction: auctionStates.get(listing.id),
+    todayEnd,
+  });
 
   let viewerRole: 'seller' | 'buyer' | 'guest' = 'guest';
   if (viewerId) {
@@ -612,7 +662,7 @@ export async function toListingDetail(
   }
 
   return {
-    ...card!,
+    ...card,
     photos: photos.map((p) => ({
       id: p.id,
       url: p.url,
