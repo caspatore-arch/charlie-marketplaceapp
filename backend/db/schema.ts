@@ -84,6 +84,34 @@ export const paymentStatusEnum = pgEnum('payment_status', [
   'refunded',
 ]);
 
+/** Structured offers (docs/CONTRACT.md "Offers"). Replaces bidding. */
+export const offerStatusEnum = pgEnum('offer_status', [
+  'pending', // waiting on the seller
+  'accepted', // price agreed; the buyer holds the item until holdExpiresAt to book
+  'declined',
+  'withdrawn',
+  'expired',
+  'booked', // used by a confirmed booking (reservationId set)
+]);
+
+/** Community interest checks: "Anyone selling a mini fridge?" */
+export const communityPostKindEnum = pgEnum('community_post_kind', ['buying', 'selling']);
+
+export const smsKindEnum = pgEnum('sms_kind', [
+  'listing_posted',
+  'booking_confirmed',
+  'meetup_reminder',
+]);
+
+export const smsStatusEnum = pgEnum('sms_status', [
+  'scheduled',
+  'sending',
+  'sent',
+  'failed',
+  'cancelled',
+  'skipped',
+]);
+
 /* ----------------------------------------------------------------- tables */
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -109,8 +137,10 @@ export const campuses = pgTable('campuses', {
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  // private — never included in public output shapes
-  email: text('email').notNull().unique(),
+  // private — never included in public output shapes. Nullable since phone
+  // sign-in: a phone-first account has no email until it verifies a campus
+  // address (Postgres allows many NULLs under a UNIQUE constraint).
+  email: text('email').unique(),
   displayName: text('display_name').notNull(),
   avatarUrl: text('avatar_url'),
   campusId: uuid('campus_id')
@@ -122,6 +152,17 @@ export const users = pgTable('users', {
   createdAt: ts('created_at').notNull().defaultNow(),
   /** Set by user.deleteAccount. Anonymized, not erased — the row stays. */
   deletedAt: ts('deleted_at'),
+  /** E.164 (+15205551234). Private. Verified by SMS code — NOT a campus/student check. */
+  phone: text('phone').unique(),
+  phoneVerifiedAt: ts('phone_verified_at'),
+  /**
+   * Transactional SMS consent (listing posted, booking confirmed, meetup
+   * reminder). Off until the user opts in. Verification codes are sent
+   * regardless — they are requested by the user and are not notifications.
+   */
+  smsOptIn: boolean('sms_opt_in').notNull().default(false),
+  smsOptInAt: ts('sms_opt_in_at'),
+  smsOptOutAt: ts('sms_opt_out_at'),
 });
 
 export const sessions = pgTable('sessions', {
@@ -365,8 +406,10 @@ export const reservations = pgTable(
     proposedById: uuid('proposed_by_id')
       .notNull()
       .references(() => users.id),
-    /** Price snapshot at the time of the request. */
+    /** Price snapshot: the asking price, or the accepted offer's amount. */
     priceCents: integer('price_cents').notNull(),
+    /** Set when this booking used an accepted offer's price. */
+    offerId: uuid('offer_id'),
     /** 4 digits, generated on accept; only the buyer may read it. */
     handoffCode: text('handoff_code'),
     buyerConfirmedAt: ts('buyer_confirmed_at'),
@@ -381,6 +424,15 @@ export const reservations = pgTable(
     // Last line of defence behind the SELECT ... FOR UPDATE in reservation.accept.
     uniqueIndex('reservations_one_accepted_per_listing')
       .on(t.listingId)
+      .where(sql`${t.status} = 'accepted'`),
+    // Seller/buyer double-booking backstop. New bookings start on a 30-minute
+    // boundary and last one slot (MEETUP_SLOT_MINUTES), so "overlap" is
+    // exactly "same start" and a plain unique index is a full guarantee.
+    uniqueIndex('reservations_seller_slot_uq')
+      .on(t.sellerId, t.startsAt)
+      .where(sql`${t.status} = 'accepted'`),
+    uniqueIndex('reservations_buyer_slot_uq')
+      .on(t.buyerId, t.startsAt)
       .where(sql`${t.status} = 'accepted'`),
     index('reservations_listing_idx').on(t.listingId),
     index('reservations_buyer_idx').on(t.buyerId),
@@ -432,6 +484,9 @@ export const reports = pgTable('reports', {
     .references(() => users.id, { onDelete: 'cascade' }),
   targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'cascade' }),
   targetListingId: uuid('target_listing_id').references(() => listings.id, {
+    onDelete: 'cascade',
+  }),
+  targetPostId: uuid('target_post_id').references(() => communityPosts.id, {
     onDelete: 'cascade',
   }),
   reason: reportReasonEnum('reason').notNull(),
@@ -504,7 +559,9 @@ export const notificationPreferences = pgTable('notification_preferences', {
     .references(() => users.id, { onDelete: 'cascade' }),
   messages: boolean('messages').notNull().default(true),
   meetups: boolean('meetups').notNull().default(true),
+  /** Legacy (auctions were retired); kept so old rows and old clients still parse. */
   auctions: boolean('auctions').notNull().default(true),
+  offers: boolean('offers').notNull().default(true),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
@@ -580,6 +637,159 @@ export const stripeEvents = pgTable('stripe_events', {
   receivedAt: ts('received_at').notNull().defaultNow(),
 });
 
+/* ---------------------------------------------------------------- offers */
+
+export const offers = pgTable(
+  'offers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    buyerId: uuid('buyer_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sellerId: uuid('seller_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    amountCents: integer('amount_cents').notNull(),
+    /** Asking price when the offer was made, so a later price edit is visible. */
+    askingPriceCents: integer('asking_price_cents').notNull(),
+    message: text('message'),
+    status: offerStatusEnum('status').notNull().default('pending'),
+    /** Why it closed: 'item_reserved' | 'listing_expired' | 'listing_removed' | 'hold_lapsed' | … */
+    closeReason: text('close_reason'),
+    /** Pending offers lapse with the listing. */
+    expiresAt: ts('expires_at').notNull(),
+    /** Accepted offers hold the item for the buyer until this time. */
+    holdExpiresAt: ts('hold_expires_at'),
+    respondedAt: ts('responded_at'),
+    reservationId: uuid('reservation_id').references(() => reservations.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    // One accepted (price-agreed, unbooked) offer per item at a time.
+    uniqueIndex('offers_one_accepted_per_listing')
+      .on(t.listingId)
+      .where(sql`${t.status} = 'accepted'`),
+    // A buyer has at most one open offer per item.
+    uniqueIndex('offers_one_open_per_buyer')
+      .on(t.listingId, t.buyerId)
+      .where(sql`${t.status} in ('pending', 'accepted')`),
+    index('offers_seller_idx').on(t.sellerId, t.status),
+    index('offers_buyer_idx').on(t.buyerId, t.status),
+    check('offers_amount_positive', sql`${t.amountCents} > 0`),
+  ],
+);
+
+/**
+ * Append-only history of a reservation. `reservations.status` is overwritten
+ * in place; this keeps the durable record (booked → rescheduled → cancelled /
+ * completed) that confirmed meetups need after their listing expires.
+ */
+export const reservationEvents = pgTable(
+  'reservation_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reservationId: uuid('reservation_id')
+      .notNull()
+      .references(() => reservations.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id').references(() => users.id),
+    /** 'requested' | 'booked' | 'accepted' | 'rescheduled' | 'declined' | 'cancelled' | 'completed' | 'expired' */
+    kind: text('kind').notNull(),
+    status: reservationStatusEnum('status').notNull(),
+    startsAt: ts('starts_at').notNull(),
+    spotId: uuid('spot_id'),
+    priceCents: integer('price_cents').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('reservation_events_reservation_idx').on(t.reservationId, t.createdAt)],
+);
+
+/* ------------------------------------------------------------- community */
+
+export const communityPosts = pgTable(
+  'community_posts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campusId: uuid('campus_id')
+      .notNull()
+      .references(() => campuses.id),
+    authorId: uuid('author_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: communityPostKindEnum('kind').notNull(),
+    body: text('body').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    /** Exactly createdAt + 24h. Enforced on every read, not just swept. */
+    expiresAt: ts('expires_at').notNull(),
+    removedAt: ts('removed_at'),
+    removedById: uuid('removed_by_id').references(() => users.id),
+  },
+  (t) => [
+    index('community_posts_feed_idx').on(
+      t.campusId,
+      t.createdAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
+    ),
+    index('community_posts_author_idx').on(t.authorId),
+  ],
+);
+
+/* -------------------------------------------------------- phone + SMS */
+
+/** One-time sign-in codes. Only a sha256 hash is stored, never the code. */
+export const phoneCodes = pgTable(
+  'phone_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    phone: text('phone').notNull(),
+    codeHash: text('code_hash').notNull(),
+    /** 'sign_in' (signed out) or 'link' (attach to the signed-in account). */
+    purpose: text('purpose').notNull(),
+    /** For purpose 'link': who asked. A link code can't be redeemed by anyone else. */
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: ts('expires_at').notNull(),
+    consumedAt: ts('consumed_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('phone_codes_phone_idx').on(t.phone, t.createdAt)],
+);
+
+/**
+ * Durable transactional-SMS outbox. Rows are written in the same request as
+ * the event; a dispatcher (backend/sms/outbox.ts) sends due rows with retries.
+ * `dedupeKey` is unique, so retries and double submits can't send twice.
+ */
+export const smsMessages = pgTable(
+  'sms_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    kind: smsKindEnum('kind').notNull(),
+    dedupeKey: text('dedupe_key').notNull().unique(),
+    body: text('body').notNull(),
+    status: smsStatusEnum('status').notNull().default('scheduled'),
+    sendAfter: ts('send_after').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    providerMessageId: text('provider_message_id'),
+    reservationId: uuid('reservation_id').references(() => reservations.id, { onDelete: 'cascade' }),
+    listingId: uuid('listing_id').references(() => listings.id, { onDelete: 'cascade' }),
+    /** For reminders: the meetup time the message was written for. */
+    meetupStartsAt: ts('meetup_starts_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    sentAt: ts('sent_at'),
+  },
+  (t) => [
+    index('sms_messages_due_idx').on(t.status, t.sendAfter),
+    index('sms_messages_reservation_idx').on(t.reservationId),
+  ],
+);
+
 /* ------------------------------------------------------------ row types */
 
 export type Campus = typeof campuses.$inferSelect;
@@ -601,3 +811,8 @@ export type Payment = typeof payments.$inferSelect;
 export type PaymentStatus = Payment['status'];
 export type DeviceToken = typeof deviceTokens.$inferSelect;
 export type NotificationPreferences = typeof notificationPreferences.$inferSelect;
+export type Offer = typeof offers.$inferSelect;
+export type OfferStatus = Offer['status'];
+export type CommunityPost = typeof communityPosts.$inferSelect;
+export type SmsMessage = typeof smsMessages.$inferSelect;
+export type ReservationEvent = typeof reservationEvents.$inferSelect;

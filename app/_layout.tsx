@@ -48,7 +48,11 @@ export default function RootLayout() {
                   contentStyle: { backgroundColor: colors.bg },
                 }}
               >
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                {/* `title` is what the browser tab says on the web build —
+                    expo-router maps it to document.title. The tabs screen
+                    hides its header but still needs the title, or the web
+                    MVP opens in a tab labelled "index". */}
+                <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Dibbs' }} />
                 <Stack.Screen name="listing/[id]" options={{ title: '' }} />
                 <Stack.Screen
                   name="listing/new"

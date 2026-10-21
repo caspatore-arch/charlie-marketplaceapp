@@ -17,6 +17,7 @@
  * `lastSeenAt` fresh).
  */
 import { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
@@ -24,15 +25,19 @@ import { usePushNotificationRegistration } from '@/hooks/useNotifications';
 import { useAuth } from '@/hooks/useAuth';
 
 // Foreground behavior: still show an alert/sound while the app is open.
-// Safe to call at module scope — it just registers a handler.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Guarded to native only — expo-notifications ships a web stub that would
+// otherwise run harmlessly, but there is no foreground notification concept
+// in a browser and this call should simply not happen there.
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 /** tRPC paths whose first successful call should prompt for permission. */
 const TRIGGER_PATHS = new Set(['bid.place', 'bid.buyout', 'conversation.send', 'reservation.request']);

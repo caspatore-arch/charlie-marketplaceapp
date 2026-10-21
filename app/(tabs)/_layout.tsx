@@ -9,10 +9,10 @@
  * polled every ~15s while signed in (never while signed out).
  */
 import React from 'react';
-import { StyleSheet, Text as RNText, View } from 'react-native';
+import { StyleSheet, Text as RNText, View, useWindowDimensions } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Search, PlusCircle, MessageCircle, User } from 'lucide-react-native';
-import { colors } from '@/constants/theme';
+import { colors, breakpoints, maxContentWidth } from '@/constants/theme';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -22,6 +22,8 @@ export default function TabsLayout() {
   const router = useRouter();
   const { status } = useAuth();
   const signedIn = status === 'signedIn';
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= breakpoints.lg;
 
   const unreadTotalQuery = trpc.conversation.unreadTotal.useQuery(undefined, {
     refetchInterval: signedIn ? UNREAD_POLL_MS : false,
@@ -38,7 +40,24 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.inkFaint,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.line },
+        // On desktop the bar is capped to the content column's width so it
+        // lines up with the grid above it. It stays a bottom bar — turning it
+        // into a sidebar is a design decision nobody has made.
+        //
+        // Centred with `marginHorizontal: 'auto'`, NOT `alignSelf`. React
+        // Navigation positions the tab bar absolutely with left and right
+        // pinned, and CSS ignores `align-self` on an absolutely-positioned
+        // element — so alignSelf did nothing and the bar stayed full width.
+        // Auto horizontal margins against a maxWidth DO centre a positioned
+        // element that has both left and right set, which is the case here.
+        tabBarStyle: isDesktop
+          ? {
+              backgroundColor: colors.surface,
+              borderTopColor: colors.line,
+              maxWidth: maxContentWidth,
+              marginHorizontal: 'auto',
+            }
+          : { backgroundColor: colors.surface, borderTopColor: colors.line },
       }}
     >
       <Tabs.Screen

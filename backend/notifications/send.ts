@@ -21,7 +21,7 @@ import type { Db } from '../db/client';
 import { deviceTokens, notificationPreferences } from '../db/schema';
 import { chunk, sendExpoPushBatch, type ExpoPushMessage, type PushFetch } from './expoPush';
 
-export type NotificationCategory = 'messages' | 'meetups' | 'auctions';
+export type NotificationCategory = 'messages' | 'meetups' | 'auctions' | 'offers';
 
 export interface NotifyInput {
   /** Recipients, already filtered by the caller for anything not preference-related
@@ -53,7 +53,7 @@ const EMPTY_RESULT: NotifyResult = { sent: 0, removedTokens: [], suppressedForPr
 /** True when `category` is enabled for `pref` — a missing row means everything is on. */
 function categoryEnabled(
   category: NotificationCategory,
-  pref: { messages: boolean; meetups: boolean; auctions: boolean } | undefined,
+  pref: { messages: boolean; meetups: boolean; auctions: boolean; offers: boolean } | undefined,
 ): boolean {
   if (!pref) return true;
   return pref[category];

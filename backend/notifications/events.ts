@@ -52,12 +52,16 @@ export async function notifyNewMessage(
 
 /* ------------------------------------------------------------- meetups */
 
-export type MeetupEventKind = 'requested' | 'accepted' | 'declined' | 'countered' | 'cancelled';
+export type MeetupEventKind = 'requested' | 'booked' | 'accepted' | 'declined' | 'countered' | 'cancelled';
 
 const MEETUP_COPY: Record<MeetupEventKind, (listingTitle: string, otherName: string) => { title: string; body: string }> = {
   requested: (listingTitle, otherName) => ({
     title: 'Meetup requested',
     body: `${otherName} wants to meet up for "${listingTitle}".`,
+  }),
+  booked: (listingTitle, otherName) => ({
+    title: 'New booking',
+    body: `${otherName} booked a meetup for "${listingTitle}". Check the time and place in the app.`,
   }),
   accepted: (listingTitle) => ({
     title: 'Meetup accepted',
@@ -160,6 +164,34 @@ export async function notifyAuctionEndedNoBids(
       title: 'Auction ended',
       body: `Your auction for "${args.listingTitle}" ended with no bids.`,
       data: { path: `/listing/${args.listingId}`, type: 'auction_ended_no_bids', listingId: args.listingId },
+    },
+    deps,
+  );
+}
+
+/* --------------------------------------------------------------- offers */
+
+export type OfferEventKind = 'received' | 'accepted' | 'declined';
+
+export async function notifyOfferEvent(
+  db: Db,
+  args: { recipientId: string; listingId: string; listingTitle: string; amountCents: number; kind: OfferEventKind },
+  deps?: NotifyDeps,
+): Promise<NotifyResult> {
+  const amount = money(args.amountCents);
+  const copy =
+    args.kind === 'received'
+      ? { title: 'New offer', body: `Someone offered ${amount} for "${args.listingTitle}".` }
+      : args.kind === 'accepted'
+        ? { title: 'Offer accepted', body: `Your ${amount} offer for "${args.listingTitle}" was accepted. Pick a meetup time within the hour.` }
+        : { title: 'Offer declined', body: `Your ${amount} offer for "${args.listingTitle}" was declined.` };
+  return notifyUsers(
+    db,
+    {
+      userIds: [args.recipientId],
+      category: 'offers',
+      ...copy,
+      data: { path: `/listing/${args.listingId}`, type: `offer_${args.kind}`, listingId: args.listingId },
     },
     deps,
   );

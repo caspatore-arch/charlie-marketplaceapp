@@ -71,6 +71,43 @@ export const env = {
       .map((id) => id.trim())
       .filter(Boolean);
   },
+  /* ----------------------------------------------------------------- sms */
+
+  /**
+   * Raw SMS_MODE. Never read for a decision — use `resolveSmsMode()` in
+   * backend/sms/provider.ts, which forces `simulated` unless every live
+   * credential AND SMS_LIVE_ACK=1 are present, and always in tests.
+   */
+  get smsModeRaw(): string {
+    return (process.env.SMS_MODE ?? 'simulated').trim().toLowerCase();
+  },
+  get twilioAccountSid(): string | undefined {
+    const v = process.env.TWILIO_ACCOUNT_SID?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  get twilioAuthToken(): string | undefined {
+    const v = process.env.TWILIO_AUTH_TOKEN?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  /** Sending number (E.164) or Messaging Service SID (MG…). */
+  get twilioFrom(): string | undefined {
+    const v = process.env.TWILIO_FROM?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  /** Second switch for real sends, so one variable can't text real phones. */
+  get smsLiveAck(): boolean {
+    return process.env.SMS_LIVE_ACK === '1';
+  },
+  /** How often the outbox dispatcher runs in backend/server.ts. 0 disables it. */
+  get smsDispatchIntervalMs(): number {
+    const n = Number(process.env.SMS_DISPATCH_INTERVAL_MS ?? 30_000);
+    return Number.isFinite(n) && n >= 0 ? n : 30_000;
+  },
+  /** Public link put in texts (the website). Falls back to the dibbs:// scheme. */
+  get smsAppLinkBase(): string {
+    return (process.env.SMS_APP_LINK_BASE ?? process.env.EXPO_PUBLIC_WEB_BASE_URL ?? '').replace(/\/$/, '');
+  },
+
   /* ------------------------------------------------------------ payments */
 
   /**
@@ -186,6 +223,12 @@ export const env = {
   },
   get rateLimitAuthVerifyCodePerMinute(): number {
     return Number(process.env.RATE_LIMIT_AUTH_VERIFY_CODE_PER_MIN ?? 10);
+  },
+  get rateLimitPhoneRequestPerMinute(): number {
+    return Number(process.env.RATE_LIMIT_PHONE_REQUEST_PER_MIN ?? 5);
+  },
+  get rateLimitPhoneVerifyPerMinute(): number {
+    return Number(process.env.RATE_LIMIT_PHONE_VERIFY_PER_MIN ?? 10);
   },
   get rateLimitCheckAddressPerMinute(): number {
     return Number(process.env.RATE_LIMIT_CHECK_ADDRESS_PER_MIN ?? 12);

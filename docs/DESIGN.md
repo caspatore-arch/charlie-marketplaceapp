@@ -93,3 +93,31 @@ rules below before touching this component's text.
   blur into it (e.g. never say "verified" about a handoff count).
 - State counts as plain facts ("12 handoffs completed", "Member since Sep 2026"), never as praise or
   a warning.
+
+## Responsive layout (added when the MVP became web-first; nothing earlier was rewritten)
+
+The app is designed phone-first at 390px. It now also ships as a website that must hold up in
+mobile Safari and in a desktop browser, so `constants/theme.ts` carries two more tokens.
+
+`breakpoints` — `sm: 390` (standard phone), `md: 600` (large phone / split-view tablet pane),
+`lg: 768` (tablet portrait / small laptop window), `xl: 1024` (laptop / wide browser). Only `lg`
+is load-bearing today: it is the single line between "phone layout" and "desktop layout".
+
+`maxContentWidth` — `860`. Above `breakpoints.lg`, content sits in a centred column capped at this
+width instead of stretching. 860px fits a three-column product grid at roughly 260px per card plus
+`space.lg` gutters, and keeps text-heavy screens at a readable line length. Without the cap, a
+1440px monitor rendered the two-column grid as two 720px columns each holding one small photo.
+
+Rules:
+
+- **Below `lg`, the rendered output must be identical to the phone layout.** A phone must never gain
+  a margin, a wrapper that breaks the `flex: 1` scroll chain, or a changed safe-area edge because of
+  a desktop style. Desktop styles are added conditionally, never applied and then overridden.
+- **Read width from `useWindowDimensions`, never `Dimensions.get()`.** A desktop user resizes the
+  window; `Dimensions.get()` freezes the width the app started at (see the note in
+  `components/PhotoGallery.tsx`).
+- **A `FlatList` whose `numColumns` can change needs a `key` containing the column count.** React
+  Native cannot change `numColumns` on a mounted list; the key forces a clean remount on resize.
+- **Centring an absolutely-positioned bar needs `marginHorizontal: 'auto'`, not `alignSelf`.** CSS
+  ignores `align-self` on an absolutely-positioned element. The bottom tab bar is positioned, so it
+  is centred with auto horizontal margins against its `maxWidth`.

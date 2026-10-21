@@ -58,6 +58,7 @@
     "start": "expo start",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "web:build": "expo export --platform web",
     "backend": "tsx watch backend/server.ts",
     "backend:once": "tsx backend/server.ts",
     "db:seed": "tsx backend/db/seed.ts",

@@ -64,6 +64,13 @@
       "when": 1789895290965,
       "tag": "0008_clever_pretty_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792554217954,
+      "tag": "0009_offers_booking_community_sms",
+      "breakpoints": true
     }
   ]
 }

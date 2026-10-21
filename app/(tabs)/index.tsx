@@ -5,7 +5,7 @@
  * `listing.feed` (public) plus `campus.list` (public).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LayoutGrid, Layers, Search } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
@@ -21,7 +21,7 @@ import { BrowseGridSkeleton } from '@/components/browse/BrowseGridSkeleton';
 import { SwipeDeck } from '@/components/browse/SwipeDeck';
 import { trpc } from '@/lib/trpc';
 import { useRequireAuth } from '@/hooks/useAuth';
-import { colors, minTouchHeight, radius, space } from '@/constants/theme';
+import { breakpoints, colors, maxContentWidth, minTouchHeight, radius, space } from '@/constants/theme';
 import { DEFAULT_CAMPUS_SLUG, CLOTHING_SIZE_OPTIONS, SHOE_SIZE_OPTIONS } from '@/constants/campus';
 import { formatPrice } from '@/utils/format';
 import type { ListingCard as ListingCardType } from '@/types';
@@ -33,6 +33,20 @@ export default function BrowseScreen() {
   const requireAuth = useRequireAuth();
   const utils = trpc.useUtils();
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
+
+  // Use useWindowDimensions (not Dimensions.get) so resizing a desktop
+  // browser window updates the column count. Dimensions.get freezes at the
+  // width the app started at (see components/PhotoGallery.tsx ~line 31).
+  // The available grid width is capped at maxContentWidth when the viewport
+  // exceeds breakpoints.lg, matching the centred column in Screen.tsx.
+  const { width: windowWidth } = useWindowDimensions();
+  const gridWidth = windowWidth >= breakpoints.lg
+    ? Math.min(windowWidth, maxContentWidth)
+    : windowWidth;
+  // 2 columns up to lg breakpoint; 3 columns from lg upward (≥768px).
+  // A 3rd column at 768px gives ~240px per card — wide enough for a photo
+  // and price, and still comfortable in a half-screen laptop window.
+  const numColumns = gridWidth >= breakpoints.lg ? 3 : 2;
 
   const campusQuery = trpc.campus.list.useQuery();
   const campus = useMemo(() => {
@@ -261,16 +275,25 @@ export default function BrowseScreen() {
       />
     );
   } else {
+    // gridCell maxWidth is 1/numColumns so a lone item in the last row never
+    // stretches to full width. It must be recalculated alongside numColumns.
+    const cellMaxWidth = `${(100 / numColumns).toFixed(4)}%` as `${number}%`;
+
     body = (
       <FlatList
+        // key includes numColumns: FlatList cannot change numColumns without
+        // remounting — React Native throws a warning and renders incorrectly
+        // if numColumns changes on an existing instance. The key forces a
+        // clean remount when the window is resized across a breakpoint.
+        key={`grid-${numColumns}`}
         data={items}
         keyExtractor={(item) => item.id}
-        numColumns={2}
+        numColumns={numColumns}
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={styles.gridContent}
         ListHeaderComponent={headerBlock}
         renderItem={({ item }) => (
-          <View style={styles.gridCell}>
+          <View style={[styles.gridCell, { maxWidth: cellMaxWidth }]}>
             <ListingCard listing={item} onPress={() => goToListing(item.id)} />
           </View>
         )}
@@ -376,9 +399,9 @@ const styles = StyleSheet.create({
   viewTogglePressed: { opacity: 0.85 },
   gridRow: { gap: space.md, paddingHorizontal: space.lg },
   gridContent: { gap: space.md, paddingBottom: space.xxl },
-  // maxWidth pins a lone cell to half the row. With numColumns={2} a flex:1
-  // cell stretches to the full width whenever a row is short — one search
-  // result rendered as a single giant card.
-  gridCell: { flex: 1, maxWidth: '50%' },
+  // flex:1 lets cells share the row equally. maxWidth is applied inline as
+  // `1/numColumns %` so a lone last-row cell never stretches to full width.
+  // The static 50% is gone — see the renderItem inline style above.
+  gridCell: { flex: 1 },
   footerLoading: { paddingHorizontal: space.lg, paddingTop: space.md },
 });

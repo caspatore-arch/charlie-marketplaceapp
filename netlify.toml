@@ -1,0 +1,37 @@
+# Netlify configuration for Dibbs web.
+#
+# expo export --platform web produces a single-page application: one index.html
+# plus a JS bundle. expo-router handles all client-side navigation (e.g.
+# /listing/:id). If a user opens a shared link directly or hard-refreshes, the
+# static host must serve index.html rather than a 404 — otherwise every shared
+# listing URL is broken.
+#
+# The redirects below are evaluated in order. Asset directories are passed
+# through first so a JS or image file never gets HTML in response (that causes
+# a MIME-type console error and a blank white page).
+# status = 200 is a "rewrite" (URL stays the same); status = 301 would change
+# the URL and break the router.
+
+[build]
+  publish = "dist"
+  command = "npm run web:build"
+
+# Pass real static asset directories straight through (no redirect needed —
+# Netlify serves existing files before redirect rules, but being explicit is
+# safer and self-documenting).
+[[redirects]]
+  from   = "/_expo/*"
+  to     = "/_expo/:splat"
+  status = 200
+
+[[redirects]]
+  from   = "/assets/*"
+  to     = "/assets/:splat"
+  status = 200
+
+# Catch-all: any path that is not a real file gets index.html.
+# The JS router then handles the route on the client.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

@@ -28,3 +28,18 @@ export const moderatorProcedure = protectedProcedure.use(({ ctx, next }) => {
   }
   return next({ ctx });
 });
+
+/**
+ * Protected + the caller has verified a campus email. Phone verification
+ * proves control of a phone number only — it is NOT campus or student
+ * verification — so buying, selling and posting stay behind this gate.
+ */
+export const campusVerifiedProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (!ctx.user.campusEmailVerifiedAt) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Verify your campus email to buy, sell, or post. Phone sign-in alone does not confirm you are a student.',
+    });
+  }
+  return next({ ctx });
+});

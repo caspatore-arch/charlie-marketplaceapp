@@ -79,5 +79,27 @@ export const shadow: ViewStyle = Platform.select({
 /** Minimum touch target size per DESIGN.md accessibility rules. */
 export const minTouchHeight = 48;
 
-export const theme = { colors, radius, space, type, shadow, minTouchHeight };
+/**
+ * Responsive breakpoints. Source of truth: docs/DESIGN.md § Responsive layout.
+ * Only `lg` is load-bearing today: it is the single line between the phone
+ * layout and the desktop layout. Read width from `useWindowDimensions`, never
+ * `Dimensions.get()`, or a desktop window resize is never picked up.
+ */
+export const breakpoints = {
+  sm: 390,   // iPhone 14 Pro / standard phone
+  md: 600,   // large phone / split-view tablet pane
+  lg: 768,   // tablet portrait / small laptop window
+  xl: 1024,  // laptop / wide browser
+} as const;
+
+/**
+ * Maximum content column width for desktop breakpoints. Source of truth: docs/DESIGN.md.
+ * 860px fits a 3-column product grid (≈ 3 × 260px card + gutters) without
+ * feeling cavernous on a 1440px monitor. It is wide enough that the two-column
+ * phone grid also looks intentional if the window is narrow-desktop, yet
+ * narrow enough to keep reading lines comfortable in text-heavy screens.
+ */
+export const maxContentWidth = 860;
+
+export const theme = { colors, radius, space, type, shadow, minTouchHeight, breakpoints, maxContentWidth };
 export default theme;

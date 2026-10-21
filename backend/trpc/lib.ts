@@ -14,6 +14,8 @@ import {
   listingSpots,
   listings,
   meetupSpots,
+  offers,
+  reservationEvents,
   reservations,
   savedListings,
   users,
@@ -24,6 +26,7 @@ import {
   type User,
 } from '../db/schema';
 import { notifyAuctionEndedNoBids, notifyAuctionWon } from '../notifications/events';
+import { cancelBookingSms } from '../sms/outbox';
 
 /* --------------------------------------------------------------- timezone */
 
@@ -55,9 +58,100 @@ export function localDayBounds(timeZone: string, at: Date = new Date()): { start
   return { start: new Date(startUtcMs), end: new Date(startUtcMs + 24 * 60 * 60 * 1000) };
 }
 
-/* ------------------------------------------------------------- auctions */
+/* ------------------------------------------------------- booking rules */
 
-/** Every auction runs for 24 hours (docs/AUCTIONS.md §1). */
+/**
+ * Meetup length, and the grid every booked start time sits on. This was the
+ * existing 30-minute slot of components/TimeSlotPicker.tsx — made explicit and
+ * enforced server-side instead of only implied by the picker.
+ */
+export const MEETUP_SLOT_MINUTES = 30;
+export const MEETUP_SLOT_MS = MEETUP_SLOT_MINUTES * 60 * 1000;
+
+/** Sellers publish availability for "today and the next rolling 24 hours". */
+export const AVAILABILITY_HORIZON_MS = 24 * 60 * 60 * 1000;
+
+/** How long an accepted offer holds the item for the buyer to pick a time. */
+export const OFFER_HOLD_MS = 60 * 60 * 1000;
+
+/** True when `at` is exactly on a 30-minute boundary (UTC epoch, so any whole/half-hour zone). */
+export function isSlotAligned(at: Date): boolean {
+  return at.getTime() % MEETUP_SLOT_MS === 0;
+}
+
+/** Every slot start inside the windows, in the future, before `until`. Sorted, de-duplicated. */
+export function slotStartsFor(
+  windows: { startsAt: Date; endsAt: Date }[],
+  opts: { now: Date; until: Date },
+): Date[] {
+  const out = new Set<number>();
+  for (const w of windows) {
+    const first = Math.ceil(Math.max(w.startsAt.getTime(), opts.now.getTime()) / MEETUP_SLOT_MS) * MEETUP_SLOT_MS;
+    // A slot must fit inside the window: start + slot <= window end.
+    for (let t = first; t + MEETUP_SLOT_MS <= w.endsAt.getTime() && t < opts.until.getTime(); t += MEETUP_SLOT_MS) {
+      out.add(t);
+    }
+  }
+  return [...out].sort((a, b) => a - b).map((t) => new Date(t));
+}
+
+/**
+ * Accepted meetups that would overlap a slot at `startsAt` for either person.
+ * App-level check (any overlap, including legacy unaligned rows); the partial
+ * unique indexes reservations_{seller,buyer}_slot_uq are the DB backstop.
+ */
+export async function slotConflicts(
+  db: Db,
+  args: { sellerId: string; buyerId: string; startsAt: Date; excludeReservationId?: string },
+): Promise<{ seller: boolean; buyer: boolean }> {
+  const lo = new Date(args.startsAt.getTime() - MEETUP_SLOT_MS);
+  const hi = new Date(args.startsAt.getTime() + MEETUP_SLOT_MS);
+  const rows = await db
+    .select({ id: reservations.id, sellerId: reservations.sellerId, buyerId: reservations.buyerId })
+    .from(reservations)
+    .where(
+      and(
+        eq(reservations.status, 'accepted'),
+        sql`${reservations.startsAt} > ${lo.toISOString()} and ${reservations.startsAt} < ${hi.toISOString()}`,
+        or(
+          inArray(reservations.sellerId, [args.sellerId, args.buyerId]),
+          inArray(reservations.buyerId, [args.sellerId, args.buyerId]),
+        ),
+      ),
+    );
+  const others = rows.filter((r) => r.id !== args.excludeReservationId);
+  const busy = (uid: string) => others.some((r) => r.sellerId === uid || r.buyerId === uid);
+  return { seller: busy(args.sellerId), buyer: busy(args.buyerId) };
+}
+
+/** Appends one row to the durable reservation history. */
+export async function recordReservationEvent(
+  db: Db,
+  res: Pick<Reservation, 'id' | 'status' | 'startsAt' | 'spotId' | 'priceCents'>,
+  kind: string,
+  actorId: string | null,
+): Promise<void> {
+  await db.insert(reservationEvents).values({
+    reservationId: res.id,
+    actorId,
+    kind,
+    status: res.status,
+    startsAt: res.startsAt,
+    spotId: res.spotId,
+    priceCents: res.priceCents,
+  });
+}
+
+/* ---------------------------------------------- legacy auctions (retired) */
+
+/*
+ * Auctions were replaced by asking prices + offers. Nothing below can create
+ * an auction or a bid any more; it only settles listings that were ALREADY
+ * auctions when the change shipped, at their original end time, so commitments
+ * made to existing bidders are honoured. See docs/CONTRACT.md "Auctions retired".
+ */
+
+/** Every auction ran for 24 hours (docs/AUCTIONS.md §1). */
 export const AUCTION_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Every listing (fixed-price or auction) expires 24 hours after it was created. */
@@ -370,7 +464,12 @@ export async function applyExpiry(db: Db): Promise<void> {
         lt(reservations.startsAt, new Date(now.getTime() - ACCEPTED_GRACE_MS)),
       ),
     )
-    .returning({ listingId: reservations.listingId });
+    .returning();
+
+  for (const r of staleAccepted) {
+    await recordReservationEvent(db, r, 'expired', null);
+    await cancelBookingSms(db, r.id);
+  }
 
   if (staleAccepted.length > 0) {
     await db
@@ -410,6 +509,34 @@ export async function applyExpiry(db: Db): Promise<void> {
         eq(listings.status, 'active'),
         eq(listings.saleType, 'fixed'),
         lt(listings.expiresAt, now),
+      ),
+    );
+
+  await expireOffers(db, now);
+}
+
+/**
+ * Offers lapse when: a pending offer passes its expiresAt (the listing's own
+ * expiry); an accepted offer's booking hold passes; or the listing is no
+ * longer active for anyone else (expired/removed/sold). An accepted offer on a
+ * listing that is 'reserved' by THAT buyer's booking is already 'booked'.
+ */
+export async function expireOffers(db: Db, now: Date = new Date()): Promise<void> {
+  await db
+    .update(offers)
+    .set({ status: 'expired', closeReason: 'offer_expired', updatedAt: now })
+    .where(and(eq(offers.status, 'pending'), lt(offers.expiresAt, now)));
+  await db
+    .update(offers)
+    .set({ status: 'expired', closeReason: 'hold_lapsed', updatedAt: now })
+    .where(and(eq(offers.status, 'accepted'), lt(offers.holdExpiresAt, now)));
+  await db
+    .update(offers)
+    .set({ status: 'expired', closeReason: 'listing_closed', updatedAt: now })
+    .where(
+      and(
+        inArray(offers.status, ['pending', 'accepted']),
+        sql`exists (select 1 from ${listings} l where l.id = ${offers.listingId} and l.status in ('expired','removed','sold'))`,
       ),
     );
 }

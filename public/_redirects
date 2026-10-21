@@ -1,0 +1,22 @@
+# SPA fallback for Netlify and Cloudflare Pages.
+#
+# expo export --platform web with expo-router's default "single" output mode
+# produces one index.html and a JS bundle. All client-side routing (e.g.
+# /listing/:id) is handled by JavaScript. If a user opens a direct link or
+# hard-refreshes any sub-path, the static host must serve index.html rather
+# than returning a 404 — otherwise every shared listing link is broken.
+#
+# Asset paths are served before these rules ever run (the host always serves
+# a real file if it exists), but the explicit negative patterns below make
+# the intent clear and guard against any host-specific ordering edge cases.
+#
+# Rules are evaluated top-to-bottom; the first match wins.
+
+# Pass real static asset directories straight through (200 = serve as-is).
+/_expo/*   /_expo/:splat  200
+/assets/*  /assets/:splat 200
+
+# Everything else — including /listing/abc, /conversation/xyz, hard-refreshed
+# tab paths, etc. — gets index.html with a 200 (not a 301 redirect, so the
+# browser URL stays correct and the JS router takes over).
+/*         /index.html    200

@@ -11,7 +11,6 @@ import {
   FlatList,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -40,6 +39,7 @@ import { ReportSheet } from '@/components/browse/ReportSheet';
 import { trpc } from '@/lib/trpc';
 import { useRequireAuth } from '@/hooks/useAuth';
 import { confirmAction } from '@/utils/confirm';
+import { shareListing } from '@/utils/shareListing';
 import { colors, space } from '@/constants/theme';
 import { conditionLabel, categoryLabel, formatMeetupTime, formatPrice } from '@/utils/format';
 import type { ReportReason } from '@/types';
@@ -159,16 +159,7 @@ export default function ListingDetailScreen() {
 
   const onShare = useCallback(async () => {
     if (!listing) return;
-    const link = `dibbs://listing/${listing.id}`;
-    try {
-      await Share.share({
-        title: listing.title,
-        message: `${listing.title}\n${link}`,
-        url: link,
-      });
-    } catch {
-      // user cancelled or share unavailable; nothing to do
-    }
+    await shareListing({ id: listing.id, title: listing.title });
   }, [listing]);
 
   const onMessage = useCallback(() => {
