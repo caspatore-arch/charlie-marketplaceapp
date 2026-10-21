@@ -5,9 +5,9 @@
  * `listing.feed` (public) plus `campus.list` (public).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search } from 'lucide-react-native';
+import { LayoutGrid, Layers, Search } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -18,14 +18,21 @@ import { SearchBar } from '@/components/browse/SearchBar';
 import { PriceFilterSheet } from '@/components/browse/PriceFilterSheet';
 import { SizeFilterSheet } from '@/components/browse/SizeFilterSheet';
 import { BrowseGridSkeleton } from '@/components/browse/BrowseGridSkeleton';
+import { SwipeDeck } from '@/components/browse/SwipeDeck';
 import { trpc } from '@/lib/trpc';
-import { colors, space } from '@/constants/theme';
+import { useRequireAuth } from '@/hooks/useAuth';
+import { colors, minTouchHeight, radius, space } from '@/constants/theme';
 import { DEFAULT_CAMPUS_SLUG, CLOTHING_SIZE_OPTIONS, SHOE_SIZE_OPTIONS } from '@/constants/campus';
 import { formatPrice } from '@/utils/format';
 import type { ListingCard as ListingCardType } from '@/types';
 
+type ViewMode = 'grid' | 'swipe';
+
 export default function BrowseScreen() {
   const router = useRouter();
+  const requireAuth = useRequireAuth();
+  const utils = trpc.useUtils();
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
 
   const campusQuery = trpc.campus.list.useQuery();
   const campus = useMemo(() => {
@@ -112,13 +119,72 @@ export default function BrowseScreen() {
 
   const goToListing = useCallback((id: string) => router.push(`/listing/${id}`), [router]);
 
+  // Right-swipe/save mutation for swipe mode. Mirrors listing/[id].tsx's
+  // toggleSave usage, but always `saved: true` — a swipe-right never unsaves.
+  const toggleSaveMutation = trpc.listing.toggleSave.useMutation({
+    onSettled: (_data, _err, vars) => {
+      utils.listing.saved.invalidate();
+      utils.listing.byId.invalidate({ id: vars.id });
+    },
+    onError: (err) => Alert.alert('Could not save', err.message),
+  });
+
+  const onSwipeSave = useCallback(
+    (item: ListingCardType) => {
+      if (!requireAuth('/')) return false;
+      toggleSaveMutation.mutate({ id: item.id, saved: true });
+      return true;
+    },
+    [requireAuth, toggleSaveMutation],
+  );
+
+  // Keyed on the feed's inputs: any change remounts the deck at its first
+  // card rather than leaving it at a stale index into a different list.
+  const deckResetKey = useMemo(
+    () =>
+      JSON.stringify({
+        campusId: campus?.id,
+        q: hasSearch ? debouncedSearch : undefined,
+        category,
+        minCents,
+        maxCents,
+        size: sizeVisible ? size : undefined,
+        pickupToday,
+      }),
+    [campus?.id, hasSearch, debouncedSearch, category, minCents, maxCents, sizeVisible, size, pickupToday],
+  );
+
   // The campus name is identity, so it scrolls away with the content. Search
   // and the filter row are controls: they stay pinned above the grid, because
   // in an infinite feed a filter you have to scroll back up to reach is a
   // filter people stop using.
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = feedQuery;
+  // Stable so the deck's near-end effect doesn't re-fire (and re-request a
+  // page that just failed) on every render.
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   const controlsBlock = (
     <View style={styles.controls}>
-      <SearchBar value={searchInput} onChangeText={setSearchInput} />
+      <View style={styles.searchRow}>
+        <View style={styles.searchBarFlex}>
+          <SearchBar value={searchInput} onChangeText={setSearchInput} />
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={viewMode === 'grid' ? 'Switch to swipe view' : 'Switch to grid view'}
+          onPress={() => setViewMode((m) => (m === 'grid' ? 'swipe' : 'grid'))}
+          hitSlop={8}
+          style={({ pressed }) => [styles.viewToggle, pressed && styles.viewTogglePressed]}
+        >
+          {viewMode === 'grid' ? (
+            <Layers size={20} color={colors.ink} />
+          ) : (
+            <LayoutGrid size={20} color={colors.ink} />
+          )}
+        </Pressable>
+      </View>
       <View style={styles.filterWrap}>
         <FilterBar
           category={category}
@@ -139,7 +205,7 @@ export default function BrowseScreen() {
 
   const headerBlock = (
     <View style={styles.header}>
-      <Text variant="title">{campus?.name ?? 'Campus Swap'}</Text>
+      <Text variant="title">{campus?.name ?? 'Dibbs'}</Text>
       {campus?.isDemo ? (
         <Text variant="caption" color="inkFaint" style={styles.demoNote}>
           Demo campus — listings and locations are for demonstration only.
@@ -180,6 +246,19 @@ export default function BrowseScreen() {
         {headerBlock}
         <ErrorState message={feedQuery.error.message} onRetry={() => feedQuery.refetch()} />
       </View>
+    );
+  } else if (viewMode === 'swipe') {
+    body = (
+      <SwipeDeck
+        key={deckResetKey}
+        items={items}
+        onOpen={goToListing}
+        onSave={onSwipeSave}
+        onNearEnd={loadMore}
+        hasMore={!!feedQuery.hasNextPage}
+        isFetchingMore={feedQuery.isFetchingNextPage}
+        onSwitchToGrid={() => setViewMode('grid')}
+      />
     );
   } else {
     body = (
@@ -282,6 +361,19 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   filterWrap: { marginTop: space.md },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  searchBarFlex: { flex: 1 },
+  viewToggle: {
+    width: minTouchHeight,
+    height: minTouchHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  viewTogglePressed: { opacity: 0.85 },
   gridRow: { gap: space.md, paddingHorizontal: space.lg },
   gridContent: { gap: space.md, paddingBottom: space.xxl },
   // maxWidth pins a lone cell to half the row. With numColumns={2} a flex:1
