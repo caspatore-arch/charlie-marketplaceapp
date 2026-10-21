@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dibbs — the UArizona student marketplace</title>
+  <meta name="description" content="Buy and sell clothes, shoes, dorm stuff, books and tech with other University of Arizona students. Join the waitlist." />
+  <style>
+    :root {
+      --bg: #FAF8F5; --surface: #FFFFFF; --ink: #161513; --muted: #6F6A62;
+      --line: #E6E1DA; --accent: #C8442B; --accent-soft: #FBE9E4; --success: #2E7D4F;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 1040px; margin: 0 auto; padding: 48px 16px 64px; display: grid; gap: 40px; }
+    @media (min-width: 800px) { main { grid-template-columns: 1.1fr 0.9fr; align-items: start; padding-top: 96px; } }
+    .brand { font-weight: 800; font-size: 22px; color: var(--accent); letter-spacing: -0.3px; }
+    .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--accent); margin: 24px 0 8px; }
+    h1 { font-size: clamp(34px, 6vw, 52px); line-height: 1.05; letter-spacing: -1px; margin: 0 0 16px; }
+    .lede { color: var(--muted); font-size: 18px; margin: 0 0 28px; max-width: 34ch; }
+    ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
+    ol li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; }
+    ol li span { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+      font-weight: 700; font-size: 14px; display: grid; place-items: center; }
+    ol b { display: block; }
+    ol p { margin: 2px 0 0; color: var(--muted); font-size: 15px; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 28px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.06); }
+    .card h2 { margin: 0 0 6px; font-size: 22px; }
+    .card p { margin: 0 0 20px; color: var(--muted); font-size: 15px; }
+    label { display: block; font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+    input[type=email], input[type=text] { width: 100%; min-height: 48px; padding: 12px 14px; font-size: 16px;
+      border: 1px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--ink); margin-bottom: 16px; }
+    input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button { width: 100%; min-height: 52px; border: 0; border-radius: 14px; background: var(--accent); color: #fff;
+      font-size: 17px; font-weight: 700; cursor: pointer; }
+    button:hover { filter: brightness(0.95); }
+    .fine { font-size: 13px; color: var(--muted); margin: 14px 0 0; }
+    .hidden { display: none; }
+    footer { grid-column: 1 / -1; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <div class="brand">Dibbs</div>
+      <div class="eyebrow">University of Arizona · coming soon</div>
+      <h1>Buy and sell on campus, one day at a time.</h1>
+      <p class="lede">A marketplace just for UArizona students — clothes, shoes, dorm stuff, books and tech, handed off in person on campus.</p>
+      <ol>
+        <li><span>1</span><div><b>List it for 24 hours</b><p>A photo, a price, and when you can meet. Listings don't linger.</p></div></li>
+        <li><span>2</span><div><b>Buyers book an exact time and spot</b><p>No "is this still available?" — pick a 30-minute slot at a campus meetup spot.</p></div></li>
+        <li><span>3</span><div><b>Make an offer</b><p>Price too high? Offer less. The seller accepts or declines.</p></div></li>
+      </ol>
+    </section>
+
+    <section class="card" aria-labelledby="join">
+      <h2 id="join">Get early access</h2>
+      <p>We'll email you when Dibbs opens for UArizona students. Nothing else.</p>
+      <!-- Netlify Forms: submissions appear in the Netlify dashboard under Forms. -->
+      <form name="waitlist" method="POST" data-netlify="true" netlify-honeypot="company" action="/thanks.html">
+        <input type="hidden" name="form-name" value="waitlist" />
+        <p class="hidden"><label>Leave this empty <input name="company" /></label></p>
+        <label for="email">Email (your @arizona.edu works best)</label>
+        <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@arizona.edu" />
+        <label for="interest">What would you buy or sell? (optional)</label>
+        <input id="interest" name="interest" type="text" maxlength="200" placeholder="e.g. mini fridge, textbooks, sneakers" />
+        <button type="submit">Join the waitlist</button>
+        <p class="fine">We only use your email to tell you when Dibbs launches. Unsubscribe anytime by replying "stop".</p>
+      </form>
+    </section>
+
+    <footer>Dibbs is an independent student project and is not affiliated with or endorsed by the University of Arizona.</footer>
+  </main>
+</body>
+</html>

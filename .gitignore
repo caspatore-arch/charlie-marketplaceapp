@@ -42,4 +42,8 @@ yarn-error.*
 
 # local data
 backend/data/
+
+# secrets: every .env variant except the committed template
 .env
+.env.*
+!.env.example

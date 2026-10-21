@@ -23,7 +23,7 @@ import {
   reservations,
   users,
 } from './schema';
-import { LocalDiskStorage } from '../storage';
+import { storage as configuredStorage } from '../storage';
 import { refuseIfBackendRunning } from './guard';
 import { LISTING_LIFETIME_MS, localDayBounds } from '../trpc/lib';
 
@@ -81,7 +81,10 @@ function demoSvg(art: DemoArt): string {
 
 /** Writes the 8 demo SVGs to disk and returns slug → served URL. */
 async function writeDemoPhotos(): Promise<Record<string, string>> {
-  const storage = new LocalDiskStorage();
+  // The configured adapter: local disk in dev, S3 when S3_BUCKET is set — so
+  // seeding a hosted database from your Mac also uploads the demo photos to
+  // the bucket the deployed backend reads from.
+  const storage = configuredStorage;
   const urls: Record<string, string> = {};
   for (const art of DEMO_ART) {
     const { url } = await storage.put(
