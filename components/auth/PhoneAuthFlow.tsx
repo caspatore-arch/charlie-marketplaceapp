@@ -21,10 +21,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { MINIMUM_AGE } from '@/constants/legal';
 import { colors, radius, space } from '@/constants/theme';
+import type { AuthFinish } from '@/components/auth/EmailAuthFlow';
 
 type Step = 'phone' | 'code' | 'profile' | 'campusEmail';
-
-import type { AuthFinish } from '@/components/auth/EmailAuthFlow';
 
 export interface PhoneAuthFlowProps {
   /** Called when the flow is complete (signed in, and verified or skipped). */

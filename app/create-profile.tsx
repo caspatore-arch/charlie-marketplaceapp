@@ -8,7 +8,7 @@
  * now" goes straight into the app. Signed-out visitors are sent back to the
  * front door, since there is no account to set up.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -41,14 +41,14 @@ export default function CreateProfileScreen() {
   const [seeded, setSeeded] = useState(false);
 
   // Start from what the account already has (the name typed at sign-up).
-  useEffect(() => {
-    if (meQuery.data && !seeded) {
-      setDisplayName(meQuery.data.displayName ?? '');
-      setBio(meQuery.data.bio ?? '');
-      setAvatarUrl(meQuery.data.avatarUrl ?? null);
-      setSeeded(true);
-    }
-  }, [meQuery.data, seeded]);
+  // Done during render, once, rather than in an effect: React re-runs this
+  // render with the new values straight away, with no extra paint.
+  if (meQuery.data && !seeded) {
+    setSeeded(true);
+    setDisplayName(meQuery.data.displayName ?? '');
+    setBio(meQuery.data.bio ?? '');
+    setAvatarUrl(meQuery.data.avatarUrl ?? null);
+  }
 
   const save = trpc.user.updateMe.useMutation({
     onSuccess: async () => {
