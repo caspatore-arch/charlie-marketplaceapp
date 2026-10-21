@@ -85,6 +85,13 @@
       "when": 1792618433172,
       "tag": "0011_contact_sharing",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792618660149,
+      "tag": "0012_follows",
+      "breakpoints": true
     }
   ]
 }

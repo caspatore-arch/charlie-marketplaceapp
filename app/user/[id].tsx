@@ -1,21 +1,20 @@
 /**
- * Public profile screen: user.byId + listing.bySeller, with Report and Block
- * actions (each behind a confirm dialog).
+ * Someone's profile: picture, bio, follow button and counts, trust block, then
+ * Listings / Posts tabs. Report and Block live at the bottom. Conversations
+ * are never shown here, for anyone: they are private between two people.
  */
-import React, { useCallback } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
-import { Text } from '@/components/ui/Text';
-import { Avatar } from '@/components/ui/Avatar';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { ListingCard } from '@/components/ListingCard';
-import { DemoBadge } from '@/components/DemoBadge';
 import { TrustBlock } from '@/components/TrustSignals';
+import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { ProfileContent } from '@/components/profile/ProfileContent';
+import { FollowButton } from '@/components/profile/FollowButton';
+import { FollowListPanel, type FollowDirection } from '@/components/profile/FollowListPanel';
 import { trpc } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { space } from '@/constants/theme';
@@ -23,15 +22,20 @@ import { confirmAction } from '@/utils/confirm';
 
 export default function PublicProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
   const { user } = useAuth();
   const requireAuth = useRequireAuth();
 
   const profileQuery = trpc.user.byId.useQuery({ id }, { enabled: !!id });
   const trustQuery = trpc.user.trustSummary.useQuery({ id }, { enabled: !!id });
-  const listingsQuery = trpc.listing.bySeller.useQuery({ sellerId: id }, { enabled: !!id });
+  const [openList, setOpenList] = useState<FollowDirection | null>(null);
 
-  const blockMutation = trpc.user.block.useMutation();
+  const utils = trpc.useUtils();
+  const blockMutation = trpc.user.block.useMutation({
+    onSuccess: () => {
+      void utils.user.byId.invalidate({ id });
+      void utils.user.followList.invalidate();
+    },
+  });
   const reportMutation = trpc.user.report.useMutation();
 
   const confirmBlock = useCallback(() => {
@@ -57,8 +61,8 @@ export default function PublicProfileScreen() {
   if (profileQuery.isPending) {
     return (
       <Screen>
-        <View style={styles.header}>
-          <Skeleton width={72} height={72} radius={36} />
+        <View style={styles.loading}>
+          <Skeleton width={96} height={96} radius={48} />
           <Skeleton width={140} height={20} />
         </View>
       </Screen>
@@ -76,45 +80,31 @@ export default function PublicProfileScreen() {
   const profile = profileQuery.data;
   const isSelf = user?.id === profile.id;
 
+  const firstName = profile.displayName.split(' ')[0] || profile.displayName;
+
   return (
     <Screen scroll>
-      <View style={styles.header}>
-        <Avatar uri={profile.avatarUrl} name={profile.displayName} size={72} />
-        <Text variant="title">{profile.displayName}</Text>
-        {/* Member-since lives in the trust block below, to the month. Repeating
-            a vaguer year here read as two different facts about one person. */}
-        <Text variant="body" color="inkMuted">
-          {profile.campus?.name}
-        </Text>
-        <View style={styles.badgeRow}>
-          {profile.campusEmailVerified ? <Badge kind="verified" /> : null}
-          <DemoBadge visible={profile.isDemo} />
-        </View>
-        {profile.bio ? (
-          <Text variant="body" style={styles.bio}>
-            {profile.bio}
-          </Text>
-        ) : null}
-        {profile.instagramHandle || profile.contactPhone ? (
-          <View style={styles.contactBlock} accessibilityLabel="Contact details this student chose to share">
-            {profile.instagramHandle ? (
-              <Text variant="body" selectable>
-                Instagram: @{profile.instagramHandle}
-              </Text>
-            ) : null}
-            {profile.contactPhone ? (
-              <View style={styles.contactBlock}>
-                <Text variant="body" selectable>
-                  Phone: {profile.contactPhone}
-                </Text>
-                <Text variant="caption" color="inkMuted">
-                  Unverified. This is a number they typed in; Dibbs has not checked it.
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
+      <ProfileHeader
+        displayName={profile.displayName}
+        avatarUrl={profile.avatarUrl}
+        campusName={profile.campus?.name}
+        bio={profile.bio}
+        campusEmailVerified={profile.campusEmailVerified}
+        isDemo={profile.isDemo}
+        instagramHandle={profile.instagramHandle}
+        contactPhone={profile.contactPhone}
+        followerCount={profile.followerCount}
+        followingCount={profile.followingCount}
+        openList={openList}
+        onToggleList={(d) => setOpenList((cur) => (cur === d ? null : d))}
+        action={
+          !isSelf && !profile.isClosed ? (
+            <FollowButton userId={profile.id} viewerFollows={profile.viewerFollows} displayName={profile.displayName} />
+          ) : null
+        }
+      />
+
+      {openList ? <FollowListPanel userId={profile.id} direction={openList} isSelf={isSelf} /> : null}
 
       {trustQuery.isPending ? (
         <Skeleton height={140} radius={20} style={styles.trustBlock} />
@@ -122,56 +112,21 @@ export default function PublicProfileScreen() {
         <TrustBlock summary={trustQuery.data} style={styles.trustBlock} />
       ) : null}
 
+      <ProfileContent userId={profile.id} isSelf={isSelf} firstName={firstName} />
+
       {!isSelf ? (
         <View style={styles.actions}>
           <Button title="Report" variant="secondary" onPress={confirmReport} style={styles.actionBtn} />
           <Button title="Block" variant="danger" onPress={confirmBlock} style={styles.actionBtn} />
         </View>
       ) : null}
-
-      <Text variant="heading" style={styles.listingsTitle}>
-        Listings
-      </Text>
-      {listingsQuery.isPending ? (
-        <Skeleton height={180} />
-      ) : listingsQuery.isError ? (
-        <ErrorState message={listingsQuery.error.message} onRetry={() => listingsQuery.refetch()} />
-      ) : (listingsQuery.data ?? []).length === 0 ? (
-        <EmptyState title="No listings yet" />
-      ) : (
-        <FlatList
-          data={listingsQuery.data}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          scrollEnabled={false}
-          columnWrapperStyle={styles.gridRow}
-          renderItem={({ item }) => (
-            <View style={styles.gridCell}>
-              <ListingCard
-                listing={item}
-                onPress={() => router.push(`/listing/${item.id}`)}
-                showSeller={false}
-              />
-            </View>
-          )}
-        />
-      )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
-  badgeRow: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
-  contactBlock: { alignItems: 'center', gap: space.xs, marginTop: space.md },
-  bio: { textAlign: 'center', marginTop: space.md, paddingHorizontal: space.lg },
-  trustBlock: { marginTop: space.lg, marginBottom: space.lg },
-  actions: { flexDirection: 'row', gap: space.md, marginBottom: space.xl },
+  loading: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
+  trustBlock: { marginBottom: space.xl },
+  actions: { flexDirection: 'row', gap: space.md, marginTop: space.xxxl, marginBottom: space.xl },
   actionBtn: { flex: 1 },
-  listingsTitle: { marginBottom: space.md },
-  gridRow: { gap: space.md },
-  // maxWidth pins a lone cell to half the row. With numColumns={2} a flex:1
-  // cell stretches to the full width whenever a row is short — one search
-  // result rendered as a single giant card.
-  gridCell: { flex: 1, maxWidth: '50%' },
 });

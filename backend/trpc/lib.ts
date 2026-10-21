@@ -2,7 +2,7 @@
  * Shared server helpers: lazy expiry, timezone maths, block checks and the
  * output shapes described in docs/CONTRACT.md.
  */
-import { and, asc, desc, eq, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import type { Db } from '../db/client';
 import {
@@ -10,6 +10,7 @@ import {
   bids,
   blocks,
   campuses,
+  follows,
   listingPhotos,
   listingSpots,
   listings,
@@ -568,6 +569,88 @@ export async function blockedUserIds(db: Db, viewerId: string): Promise<string[]
     .from(blocks)
     .where(or(eq(blocks.blockerId, viewerId), eq(blocks.blockedId, viewerId)));
   return rows.map((r) => (r.blockerId === viewerId ? r.blockedId : r.blockerId));
+}
+
+/* ---------------------------------------------------------------- follows */
+
+/*
+ * The follow graph is popularity only. Every read below follows the feed's
+ * block precedent: anyone the viewer has blocked, or who has blocked the
+ * viewer, is left out of counts and lists, so the numbers a viewer sees always
+ * equal the people they can see. Closed accounts (`deletedAt` set) never count
+ * and never appear. Counts are always derived with COUNT(*).
+ */
+
+/** Follower / following totals for `userId` as `viewerId` (null = signed out) may see them. */
+export async function followCounts(
+  db: Db,
+  userId: string,
+  viewerId: string | null,
+): Promise<{ followerCount: number; followingCount: number }> {
+  const hidden = viewerId ? await blockedUserIds(db, viewerId) : [];
+  const [followers, following] = await Promise.all([
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(follows)
+      .innerJoin(users, eq(users.id, follows.followerId))
+      .where(
+        and(
+          eq(follows.followeeId, userId),
+          isNull(users.deletedAt),
+          hidden.length > 0 ? notInArray(follows.followerId, hidden) : undefined,
+        ),
+      ),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(follows)
+      .innerJoin(users, eq(users.id, follows.followeeId))
+      .where(
+        and(
+          eq(follows.followerId, userId),
+          isNull(users.deletedAt),
+          hidden.length > 0 ? notInArray(follows.followeeId, hidden) : undefined,
+        ),
+      ),
+  ]);
+  return { followerCount: Number(followers[0]?.n ?? 0), followingCount: Number(following[0]?.n ?? 0) };
+}
+
+/** Whether `viewerId` currently follows `userId`. */
+export async function viewerFollows(db: Db, viewerId: string | null, userId: string): Promise<boolean> {
+  if (!viewerId || viewerId === userId) return false;
+  const rows = await db
+    .select({ f: follows.followerId })
+    .from(follows)
+    .where(and(eq(follows.followerId, viewerId), eq(follows.followeeId, userId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** People who follow `userId` (`followers`) or whom `userId` follows (`following`), newest first. */
+export async function followList(
+  db: Db,
+  userId: string,
+  direction: 'followers' | 'following',
+  viewerId: string,
+  limit: number,
+): Promise<PublicUser[]> {
+  const hidden = await blockedUserIds(db, viewerId);
+  const otherCol = direction === 'followers' ? follows.followerId : follows.followeeId;
+  const ownCol = direction === 'followers' ? follows.followeeId : follows.followerId;
+  const rows = await db
+    .select({ user: users })
+    .from(follows)
+    .innerJoin(users, eq(users.id, otherCol))
+    .where(
+      and(
+        eq(ownCol, userId),
+        isNull(users.deletedAt),
+        hidden.length > 0 ? notInArray(otherCol, hidden) : undefined,
+      ),
+    )
+    .orderBy(desc(follows.createdAt))
+    .limit(limit);
+  return rows.map((r) => toPublicUser(r.user));
 }
 
 /* ----------------------------------------------------------------- shapes */

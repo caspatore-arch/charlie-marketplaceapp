@@ -1,23 +1,27 @@
 /**
- * Profile tab. Signed-out: sign-in CTA. Signed-in: identity, active listings
- * grid, saved listings, a link to Settings (account details, blocked users,
+ * Profile tab. Signed-out: sign-in CTA. Signed-in: your picture (upload),
+ * bio, follower counts, trust block, Listings / Posts tabs, your private chats
+ * link, saved listings, a link to Settings (account details, blocked users,
  * sign out, close account), and (dev builds only) a "Switch test user"
  * panel for the three seeded identities in CONTRACT.md.
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
-import { Avatar } from '@/components/ui/Avatar';
-import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Divider } from '@/components/ui/Divider';
 import { InboxLinkRow } from '@/components/inbox/InboxLinkRow';
 import { ListingCard } from '@/components/ListingCard';
+import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { ProfileContent } from '@/components/profile/ProfileContent';
+import { FollowListPanel, type FollowDirection } from '@/components/profile/FollowListPanel';
+import { useAvatarUpload } from '@/components/profile/useAvatarUpload';
+import { TrustBlock } from '@/components/TrustSignals';
 import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { space } from '@/constants/theme';
@@ -75,44 +79,57 @@ function SignedInProfile({
 }) {
   const router = useRouter();
   const meQuery = trpc.auth.me.useQuery();
-  const mineQuery = trpc.listing.mine.useQuery();
+  const selfQuery = trpc.user.byId.useQuery({ id: userId });
+  const trustQuery = trpc.user.trustSummary.useQuery({ id: userId });
   const savedQuery = trpc.listing.saved.useQuery();
   const isModeratorQuery = trpc.moderation.isModerator.useQuery();
+  const avatar = useAvatarUpload();
+  const [openList, setOpenList] = useState<FollowDirection | null>(null);
 
   const goToListing = useCallback((id: string) => router.push(`/listing/${id}`), [router]);
-
-  const activeListings = (mineQuery.data ?? []).filter((l: ListingCardType) => l.status === 'active');
+  const me = selfQuery.data;
+  const firstName = displayName.split(' ')[0] || displayName;
 
   return (
     <Screen scroll>
-      <View style={styles.header}>
-        <Avatar uri={meQuery.data?.avatarUrl} name={displayName} size={72} />
-        <Text variant="title" style={styles.name}>
-          {displayName}
-        </Text>
-        {meQuery.data?.campus?.name ? (
-          <Text variant="body" color="inkMuted">
-            {meQuery.data.campus.name}
-          </Text>
-        ) : null}
-        {meQuery.data?.campusEmailVerifiedAt ? <Badge kind="verified" /> : null}
-      </View>
+      <ProfileHeader
+        displayName={displayName}
+        avatarUrl={meQuery.data?.avatarUrl}
+        campusName={meQuery.data?.campus?.name}
+        bio={meQuery.data?.bio}
+        campusEmailVerified={!!meQuery.data?.campusEmailVerifiedAt}
+        isDemo={!!meQuery.data?.isDemo}
+        instagramHandle={me?.instagramHandle}
+        contactPhone={me?.contactPhone}
+        followerCount={me?.followerCount ?? 0}
+        followingCount={me?.followingCount ?? 0}
+        openList={openList}
+        onToggleList={(d) => setOpenList((cur) => (cur === d ? null : d))}
+        onChangePhoto={avatar.pick}
+        uploading={avatar.uploading}
+        uploadError={avatar.error}
+        action={
+          <Button
+            title="Edit name & bio"
+            variant="secondary"
+            onPress={() => router.push('/settings')}
+            accessibilityLabel="Edit your name and bio in settings"
+          />
+        }
+      />
+
+      {openList ? <FollowListPanel userId={userId} direction={openList} isSelf /> : null}
+
+      {trustQuery.data ? <TrustBlock summary={trustQuery.data} style={styles.trustBlock} /> : null}
+
+      <ProfileContent userId={userId} isSelf firstName={firstName} />
 
       <View style={styles.inboxLink}>
         <InboxLinkRow />
+        <Text variant="caption" color="inkMuted" style={styles.privateNote}>
+          Your chats and meetups are private. Only you and the other person can see them.
+        </Text>
       </View>
-
-      <Section title="My listings">
-        {mineQuery.isPending ? (
-          <GridSkeleton />
-        ) : mineQuery.isError ? (
-          <ErrorState message={mineQuery.error.message} onRetry={() => mineQuery.refetch()} />
-        ) : activeListings.length === 0 ? (
-          <EmptyState title="No active listings" body="Items you list will show up here." />
-        ) : (
-          <ListingGrid listings={activeListings} onPress={goToListing} showSeller={false} />
-        )}
-      </Section>
 
       <Section title="Saved">
         {savedQuery.isPending ? (
@@ -233,7 +250,9 @@ const styles = StyleSheet.create({
   loadingWrap: { alignItems: 'center', gap: space.sm, paddingTop: space.huge },
   header: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
   name: { marginTop: space.sm },
-  inboxLink: { marginBottom: space.sm },
+  inboxLink: { marginTop: space.xl, marginBottom: space.sm },
+  privateNote: { marginTop: space.sm, paddingHorizontal: space.xs },
+  trustBlock: { marginBottom: space.xl },
   section: { marginTop: space.md },
   sectionTitle: { marginBottom: space.md },
   sectionDivider: { marginTop: space.xl },

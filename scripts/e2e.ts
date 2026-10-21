@@ -1059,6 +1059,9 @@ async function main(): Promise<number> {
       });
       const throwaway: Client = clientFor(url, verified.token);
       const throwawayId = verified.user.id;
+      // The front door sends a brand-new account to profile setup, so the
+      // server must say when this sign-in created the account.
+      assert(verified.isNewAccount === true, 'first verifyCode for a new email should report isNewAccount');
 
       const closureWindow = stdWindow();
       // Distinct aligned times: an accepted meetup blocks the same slot for
@@ -1358,6 +1361,195 @@ async function main(): Promise<number> {
       row!.instagramHandle === null && row!.contactPhone === null && !row!.shareInstagram && !row!.sharePhone,
       'deleteAccount must clear all four contact-sharing columns',
     );
+  });
+
+  await criterion('14. Follow graph: no self-follow, no duplicates, honest counts, blocks respected', async () => {
+    // Signed-in only.
+    await expectTrpcError('UNAUTHORIZED', () => guest.user.follow.mutate({ userId: MAYA_ID }));
+
+    // Jordan blocked Maya in criterion 9; lift it for this test and restore it after.
+    const jordanBlocked = (await jordan.user.blocked.query()).some((u) => u.id === MAYA_ID);
+    if (jordanBlocked) await jordan.user.unblock.mutate({ userId: MAYA_ID });
+
+    // Following yourself is refused by the server (not just a hidden button)...
+    await expectTrpcError('BAD_REQUEST', () => maya.user.follow.mutate({ userId: MAYA_ID }));
+    if (!external) {
+      // ...and by the database itself, if something bypassed the API.
+      const { db } = await import('../backend/db/client');
+      const schema = await import('../backend/db/schema');
+      let rejected = false;
+      try {
+        await db.insert(schema.follows).values({ followerId: MAYA_ID, followeeId: MAYA_ID });
+      } catch {
+        rejected = true;
+      }
+      assert(rejected, 'the follows_no_self CHECK must reject a self-follow row');
+    }
+
+    // Following twice (even concurrently) is still one follow.
+    const before = await guest.user.byId.query({ id: MAYA_ID });
+    const base = before.followerCount;
+    await Promise.all([
+      jordan.user.follow.mutate({ userId: MAYA_ID }),
+      jordan.user.follow.mutate({ userId: MAYA_ID }),
+      jordan.user.follow.mutate({ userId: MAYA_ID }),
+    ]);
+    if (!external) {
+      const { db } = await import('../backend/db/client');
+      const schema = await import('../backend/db/schema');
+      const { and: andOp, eq: eqOp } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(schema.follows)
+        .where(andOp(eqOp(schema.follows.followerId, JORDAN_ID), eqOp(schema.follows.followeeId, MAYA_ID)));
+      assertEqual(rows.length, 1, 'three follows leave exactly one row');
+    }
+
+    // Counts and the viewer flag, from three different viewers.
+    const jView = await jordan.user.byId.query({ id: MAYA_ID });
+    assertEqual(jView.followerCount, base + 1, 'Maya gains one follower');
+    assertEqual(jView.viewerFollows, true, 'Jordan sees that he follows Maya');
+    const gView = await guest.user.byId.query({ id: MAYA_ID });
+    assertEqual(gView.viewerFollows, false, 'a signed-out viewer follows nobody');
+    assertEqual(gView.followerCount, base + 1, 'counts are public');
+    const jSelf = await jordan.user.byId.query({ id: JORDAN_ID });
+    assertEqual(jSelf.followingCount >= 1, true, 'Jordan is following someone');
+    assertEqual(jSelf.viewerFollows, false, 'you never "follow" yourself on your own profile');
+
+    await sam.user.follow.mutate({ userId: MAYA_ID });
+    assertEqual((await guest.user.byId.query({ id: MAYA_ID })).followerCount, base + 2, 'two followers');
+    const followers = await maya.user.followList.query({ userId: MAYA_ID, direction: 'followers' });
+    assert(
+      followers.some((u) => u.id === JORDAN_ID) && followers.some((u) => u.id === SAM_ID),
+      'the follower list names both',
+    );
+    const jFollowing = await jordan.user.followList.query({ userId: JORDAN_ID, direction: 'following' });
+    assert(jFollowing.some((u) => u.id === MAYA_ID), 'the following list names Maya');
+    assert(
+      jFollowing.every((u) => !('email' in u)),
+      'list entries are public users only',
+    );
+
+    // Unfollow is idempotent and counts return.
+    await jordan.user.unfollow.mutate({ userId: MAYA_ID });
+    const again = await jordan.user.unfollow.mutate({ userId: MAYA_ID });
+    assertEqual(again.followerCount, base + 1, 'unfollowing twice only removes one');
+    assertEqual((await jordan.user.byId.query({ id: MAYA_ID })).viewerFollows, false, 'no longer following');
+
+    // Blocks: a block ends the follow, hides the person from lists and counts, and prevents a new follow.
+    await maya.user.block.mutate({ userId: SAM_ID });
+    await expectTrpcError('NOT_FOUND', () => sam.user.follow.mutate({ userId: MAYA_ID }));
+    await expectTrpcError('NOT_FOUND', () => maya.user.follow.mutate({ userId: SAM_ID }));
+    const afterBlock = await maya.user.followList.query({ userId: MAYA_ID, direction: 'followers' });
+    assert(!afterBlock.some((u) => u.id === SAM_ID), 'a blocked person is not in the follower list');
+    assertEqual((await maya.user.byId.query({ id: MAYA_ID })).followerCount, base, 'and not in the count Maya sees');
+    assertEqual(
+      (await sam.user.followList.query({ userId: MAYA_ID, direction: 'followers' })).length,
+      0,
+      'the person who is blocked cannot browse the blocker\'s lists',
+    );
+    await maya.user.unblock.mutate({ userId: SAM_ID });
+    if (jordanBlocked) await jordan.user.block.mutate({ userId: MAYA_ID });
+
+    // Profile pictures only come from the upload path.
+    await expectTrpcError('BAD_REQUEST', () => maya.user.updateMe.mutate({ avatarUrl: 'javascript:alert(1)' }));
+    await expectTrpcError('BAD_REQUEST', () => maya.user.updateMe.mutate({ avatarUrl: 'http://tracker.example/p.png' }));
+    const origAvatar = (await maya.auth.me.query()).avatarUrl;
+    await maya.user.updateMe.mutate({ avatarUrl: '/api/uploads/e2e-avatar.png' });
+    assertEqual((await guest.user.byId.query({ id: MAYA_ID })).avatarUrl, '/api/uploads/e2e-avatar.png', 'avatar saved');
+    await maya.user.updateMe.mutate({ avatarUrl: origAvatar ?? '' });
+  });
+
+  await criterion('15. A stranger gets no conversation data from someone else\'s profile', async () => {
+    // Positive control: Maya has real conversations, and can see them herself.
+    const mine = await maya.conversation.list.query();
+    assert(mine.length > 0, 'Maya has conversations to protect');
+    const ids = mine.map((c) => c.id);
+    const bodies = mine.map((c) => (c as { lastMessage?: { body?: string } }).lastMessage?.body).filter(Boolean) as string[];
+
+    // Make sure there is at least one follower so the lists are not trivially empty.
+    await sam.user.follow.mutate({ userId: MAYA_ID });
+
+    // Everything a visitor can pull about Maya from the profile surface.
+    const surfaces: Record<string, unknown> = {
+      byId: await sam.user.byId.query({ id: MAYA_ID }),
+      trust: await sam.user.trustSummary.query({ id: MAYA_ID }),
+      followers: await sam.user.followList.query({ userId: MAYA_ID, direction: 'followers' }),
+      following: await sam.user.followList.query({ userId: MAYA_ID, direction: 'following' }),
+      posts: await sam.user.posts.query({ userId: MAYA_ID }),
+      listings: await sam.listing.bySeller.query({ sellerId: MAYA_ID }),
+      guestById: await guest.user.byId.query({ id: MAYA_ID }),
+    };
+
+    const keys = new Set<string>();
+    const walk = (v: unknown) => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') {
+        for (const [k, child] of Object.entries(v)) {
+          keys.add(k);
+          walk(child);
+        }
+      }
+    };
+    walk(surfaces);
+    for (const k of keys) {
+      assert(!/conversation|chat|thread|message|inbox/i.test(k), `profile payload must not carry a "${k}" field`);
+    }
+    const json = JSON.stringify(surfaces);
+    for (const id of ids) assert(!json.includes(id), 'no conversation id may appear in a profile payload');
+    for (const b of bodies) assert(!json.includes(b), 'no message text may appear in a profile payload');
+
+    // The only conversation endpoints are scoped to the caller: a stranger sees none of Maya's.
+    const strangerList = await sam.conversation.list.query();
+    assert(strangerList.every((c) => !ids.includes(c.id)), "Sam's list never includes Maya's conversations");
+    await expectTrpcError('FORBIDDEN', () => sam.conversation.messages.query({ conversationId: ids[0]! }));
+    // A client-supplied user id changes nothing: the endpoint takes no such input.
+    const spoofed = await (sam.conversation.list as unknown as { query: (i: unknown) => Promise<{ id: string }[]> }).query({
+      userId: MAYA_ID,
+    });
+    assert(spoofed.every((c) => !ids.includes(c.id)), 'a spoofed userId does not widen conversation.list');
+
+    await sam.user.unfollow.mutate({ userId: MAYA_ID });
+  });
+
+  await criterion('16. A closed account cannot be followed, shows no counts, and leaves no follows behind', async () => {
+    if (external) return; // needs a fresh account and DB access
+    const { db } = await import('../backend/db/client');
+    const { or: orOp, eq: eqOp } = await import('drizzle-orm');
+    const schema = await import('../backend/db/schema');
+
+    const email = 'closing-e2e@demo.campus.test';
+    await guest.auth.requestCode.mutate({ email });
+    const [codeRow] = await db.select().from(schema.emailCodes).where(eqOp(schema.emailCodes.email, email)).limit(1);
+    const v = await guest.auth.verifyCode.mutate({ email, code: codeRow!.code, displayName: 'Closing E2E' });
+    const closer = clientFor(url, v.token);
+    const CLOSER_ID = v.user.id;
+
+    await jordan.user.follow.mutate({ userId: CLOSER_ID });
+    await closer.user.follow.mutate({ userId: JORDAN_ID });
+    assertEqual((await sam.user.byId.query({ id: CLOSER_ID })).followerCount, 1, 'one follower while open (Jordan has blocked Maya, so Sam looks)');
+
+    await closer.user.deleteAccount.mutate({ confirmText: 'DELETE' });
+
+    const edges = await db
+      .select()
+      .from(schema.follows)
+      .where(orOp(eqOp(schema.follows.followerId, CLOSER_ID), eqOp(schema.follows.followeeId, CLOSER_ID)));
+    assertEqual(edges.length, 0, 'closing the account removes every follow in both directions');
+
+    await expectTrpcError('NOT_FOUND', () => jordan.user.follow.mutate({ userId: CLOSER_ID }));
+    const gone = await sam.user.byId.query({ id: CLOSER_ID });
+    assertEqual(gone.followerCount, 0, 'no follower count on a closed account');
+    assertEqual(gone.followingCount, 0, 'no following count on a closed account');
+    assertEqual(gone.viewerFollows, false, 'a closed account is never followed');
+    assertEqual(gone.isClosed, true, 'the profile says it is closed');
+    assertEqual(
+      (await sam.user.followList.query({ userId: CLOSER_ID, direction: 'followers' })).length,
+      0,
+      'a closed account has no lists',
+    );
+    const jordanFollowing = await jordan.user.followList.query({ userId: JORDAN_ID, direction: 'following' });
+    assert(!jordanFollowing.some((u) => u.id === CLOSER_ID), 'a closed account is not in anyone\'s following list');
   });
 
   stop?.();

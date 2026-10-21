@@ -773,6 +773,32 @@ export const communityPostVotes = pgTable(
   ],
 );
 
+/**
+ * Follow graph: follower -> followee. Popularity only; a follow is never an
+ * endorsement and says nothing about safety. The composite primary key is the
+ * UNIQUE constraint (a double-tap hits ON CONFLICT DO NOTHING and stays one
+ * row), the CHECK forbids following yourself even if a caller bypasses the
+ * API, and both foreign keys cascade so a hard-deleted user leaves no edges.
+ */
+export const follows = pgTable(
+  'follows',
+  {
+    followerId: uuid('follower_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    followeeId: uuid('followee_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.followerId, t.followeeId] }),
+    // "Who follows X" and X's follower count.
+    index('follows_followee_idx').on(t.followeeId, t.createdAt),
+    check('follows_no_self', sql`${t.followerId} <> ${t.followeeId}`),
+  ],
+);
+
 /* -------------------------------------------------------- phone + SMS */
 
 /** One-time sign-in codes. Only a sha256 hash is stored, never the code. */
@@ -851,5 +877,6 @@ export type Offer = typeof offers.$inferSelect;
 export type OfferStatus = Offer['status'];
 export type CommunityPost = typeof communityPosts.$inferSelect;
 export type CommunityPostVote = typeof communityPostVotes.$inferSelect;
+export type Follow = typeof follows.$inferSelect;
 export type SmsMessage = typeof smsMessages.$inferSelect;
 export type ReservationEvent = typeof reservationEvents.$inferSelect;

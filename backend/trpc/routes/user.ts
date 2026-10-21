@@ -1,12 +1,14 @@
 import { TRPCError } from '@trpc/server';
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import {
   blocks,
   campuses,
+  communityPostVotes,
   emailCodes,
   communityPosts,
+  follows,
   listings,
   offers,
   phoneCodes,
@@ -18,8 +20,16 @@ import {
 } from '../../db/schema';
 import { cancelUserSms } from '../../sms/outbox';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
-import { applyExpiry,
-  applyExpiryForRead, toPublicUser, type PublicUser } from '../lib';
+import {
+  applyExpiryForRead,
+  blockedUserIds,
+  followCounts,
+  followList,
+  isBlockedBetween,
+  toPublicUser,
+  viewerFollows,
+  type PublicUser,
+} from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
 export type PublicProfile = PublicUser & {
@@ -27,6 +37,16 @@ export type PublicProfile = PublicUser & {
   bio: string | null;
   activeListingCount: number;
   memberSince: Date;
+};
+
+/** `user.byId`: the public profile plus the follow graph, as this viewer may see it. */
+export type ProfileWithSocial = PublicProfile & {
+  followerCount: number;
+  followingCount: number;
+  /** False for a signed-out viewer, for yourself, and for a closed account. */
+  viewerFollows: boolean;
+  /** True for a closed account: no counts, cannot be followed. */
+  isClosed: boolean;
 };
 
 /**
@@ -120,15 +140,133 @@ export const userRouter = router({
       .from(listings)
       .where(and(eq(listings.sellerId, user.id), eq(listings.status, 'active')));
 
-    const profile: PublicProfile = {
+    // A closed account shows no counts and cannot be followed; it must not
+    // leak its old graph through the numbers.
+    const closed = user.deletedAt != null;
+    const viewerId = ctx.user?.id ?? null;
+    const counts = closed
+      ? { followerCount: 0, followingCount: 0 }
+      : await followCounts(ctx.db, user.id, viewerId);
+
+    const profile: ProfileWithSocial = {
       ...toPublicUser(user),
       campus: campus!,
       bio: user.bio,
       activeListingCount: active.length,
       memberSince: user.createdAt,
+      ...counts,
+      viewerFollows: closed ? false : await viewerFollows(ctx.db, viewerId, user.id),
+      isClosed: closed,
     };
     return profile;
   }),
+
+  /**
+   * Follow someone. Idempotent: the composite primary key plus ON CONFLICT DO
+   * NOTHING means a double-tap leaves exactly one row. Self-follows are refused
+   * here AND by the follows_no_self CHECK. A blocked pair (either direction),
+   * a missing user and a closed account all read as "no such profile" so the
+   * response does not reveal who blocked whom.
+   */
+  follow: protectedProcedure
+    .input(z.object({ userId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.userId === ctx.user.id) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'You cannot follow yourself.' });
+      }
+      const [target] = await ctx.db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+      if (!target || target.deletedAt != null || (await isBlockedBetween(ctx.db, ctx.user.id, target.id))) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That profile does not exist.' });
+      }
+      await ctx.db
+        .insert(follows)
+        .values({ followerId: ctx.user.id, followeeId: target.id })
+        .onConflictDoNothing();
+      return {
+        ok: true as const,
+        viewerFollows: true as const,
+        ...(await followCounts(ctx.db, target.id, ctx.user.id)),
+      };
+    }),
+
+  /** Stop following. Idempotent, and always allowed (even after a block or a closure). */
+  unfollow: protectedProcedure
+    .input(z.object({ userId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .delete(follows)
+        .where(and(eq(follows.followerId, ctx.user.id), eq(follows.followeeId, input.userId)));
+      return {
+        ok: true as const,
+        viewerFollows: false as const,
+        ...(await followCounts(ctx.db, input.userId, ctx.user.id)),
+      };
+    }),
+
+  /** Who follows `userId`, or whom they follow. Blocked people and closed accounts are left out. */
+  followList: protectedProcedure
+    .input(
+      z.object({
+        userId: z.uuid(),
+        direction: z.enum(['followers', 'following']),
+        limit: z.number().int().min(1).max(100).default(50),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const [target] = await ctx.db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+      if (!target || target.deletedAt != null) return [] as PublicUser[];
+      if (input.userId !== ctx.user.id && (await isBlockedBetween(ctx.db, ctx.user.id, input.userId))) {
+        return [] as PublicUser[];
+      }
+      return followList(ctx.db, input.userId, input.direction, ctx.user.id, input.limit);
+    }),
+
+  /**
+   * A person's live community posts (same 24h / removal / campus / block rules
+   * as community.feed; the shape matches a feed item). Posts are campus-only,
+   * so this is signed-in only.
+   */
+  posts: protectedProcedure
+    .input(z.object({ userId: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      if (input.userId !== ctx.user.id) {
+        const hidden = await blockedUserIds(ctx.db, ctx.user.id);
+        if (hidden.includes(input.userId)) return [];
+      }
+      const rows = await ctx.db
+        .select()
+        .from(communityPosts)
+        .where(
+          and(
+            eq(communityPosts.authorId, input.userId),
+            eq(communityPosts.campusId, ctx.user.campusId),
+            gt(communityPosts.expiresAt, new Date()),
+            isNull(communityPosts.removedAt),
+          ),
+        )
+        .orderBy(desc(communityPosts.createdAt))
+        .limit(50);
+      if (rows.length === 0) return [];
+      const [author] = await ctx.db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+      if (!author || author.deletedAt != null) return [];
+      const totals = await ctx.db
+        .select({ postId: communityPostVotes.postId, total: count() })
+        .from(communityPostVotes)
+        .where(inArray(communityPostVotes.postId, rows.map((r) => r.id)))
+        .groupBy(communityPostVotes.postId);
+      const totalById = new Map(totals.map((t) => [t.postId, Number(t.total)]));
+      return rows.map((p) => ({
+        id: p.id,
+        kind: p.kind,
+        body: p.body,
+        createdAt: p.createdAt,
+        expiresAt: p.expiresAt,
+        author: toPublicUser(author),
+        isMine: p.authorId === ctx.user.id,
+        /** Popularity only. Never an endorsement, and not a safety signal. */
+        voteCount: totalById.get(p.id) ?? 0,
+      }));
+    }),
 
   /**
    * Derived reputation summary (docs/CONTRACT.md "Trust summary"). Public,
@@ -205,7 +343,15 @@ export const userRouter = router({
     .input(
       z.object({
         displayName: z.string().min(1).max(60).optional(),
-        avatarUrl: z.string().max(500).optional(),
+        // Only an image that came from POST /api/uploads (relative path, or the
+        // configured public https base). Empty string removes the picture.
+        avatarUrl: z
+          .string()
+          .max(500)
+          .refine((v) => v === '' || v.startsWith('/api/uploads/') || /^https:\/\//.test(v), {
+            message: 'Use a photo uploaded through Dibbs.',
+          })
+          .optional(),
         bio: z.string().max(400).optional(),
         // Optional contact details. Empty string clears. Never verified.
         instagramHandle: z.string().max(100).optional(),
@@ -244,7 +390,7 @@ export const userRouter = router({
         .update(users)
         .set({
           ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
-          ...(input.avatarUrl !== undefined ? { avatarUrl: input.avatarUrl } : {}),
+          ...(input.avatarUrl !== undefined ? { avatarUrl: input.avatarUrl === '' ? null : input.avatarUrl } : {}),
           ...(input.bio !== undefined ? { bio: input.bio } : {}),
           ...(instagram !== undefined ? { instagramHandle: instagram } : {}),
           ...(phone !== undefined ? { contactPhone: phone } : {}),
@@ -266,6 +412,15 @@ export const userRouter = router({
         .insert(blocks)
         .values({ blockerId: ctx.user.id, blockedId: input.userId })
         .onConflictDoNothing();
+      // A block ends any follow between the two, in both directions.
+      await ctx.db
+        .delete(follows)
+        .where(
+          or(
+            and(eq(follows.followerId, ctx.user.id), eq(follows.followeeId, input.userId)),
+            and(eq(follows.followerId, input.userId), eq(follows.followeeId, ctx.user.id)),
+          ),
+        );
       return { ok: true as const };
     }),
 
@@ -283,7 +438,7 @@ export const userRouter = router({
       .select({ blockedId: blocks.blockedId })
       .from(blocks)
       .where(eq(blocks.blockerId, ctx.user.id));
-    if (rows.length === 0) return [] as PublicProfile[];
+    if (rows.length === 0) return [] as ProfileWithSocial[];
 
     const blockedUsers = await ctx.db
       .select()
@@ -297,12 +452,17 @@ export const userRouter = router({
     const campusRows = await ctx.db.select().from(campuses);
     const campusById = new Map(campusRows.map((c) => [c.id, c]));
 
-    return blockedUsers.map<PublicProfile>((u) => ({
+    // Counts are not shown on this list; zeros keep the shape identical to byId.
+    return blockedUsers.map<ProfileWithSocial>((u) => ({
       ...toPublicUser(u),
       campus: campusById.get(u.campusId)!,
       bio: u.bio,
       activeListingCount: 0,
       memberSince: u.createdAt,
+      followerCount: 0,
+      followingCount: 0,
+      viewerFollows: false,
+      isClosed: u.deletedAt != null,
     }));
   }),
 
@@ -377,7 +537,7 @@ export const userRouter = router({
    *     listings (mine)  → active|reserved|expired → removed (sold/removed untouched)
    *     reservations     → requested|countered (mine) → cancelled, 'account_closed'
    *                        (completed reservations are never touched)
-   *     sessions, saved_listings, blocks (both directions), email_codes → deleted
+   *     sessions, saved_listings, follows + blocks (both directions), email_codes → deleted
    *     messages, reports, completed reservations → kept as-is
    */
   deleteAccount: protectedProcedure
@@ -467,6 +627,9 @@ export const userRouter = router({
             ),
           );
 
+        await tx
+          .delete(follows)
+          .where(or(eq(follows.followerId, userId), eq(follows.followeeId, userId)));
         await tx.delete(sessions).where(eq(sessions.userId, userId));
         await tx.delete(savedListings).where(eq(savedListings.userId, userId));
         await tx
