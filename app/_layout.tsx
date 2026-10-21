@@ -20,6 +20,7 @@ import { trpc, trpcClient } from '@/lib/trpc';
 import { AuthProvider } from '@/components/AuthProvider';
 import { colors } from '@/constants/theme';
 import { ConnectionBanner } from '@/components/ui/ConnectionBanner';
+import { Logo } from '@/components/ui/Logo';
 import { NotificationPermissionGate } from '@/components/notifications/NotificationPermissionGate';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -65,6 +66,17 @@ export default function RootLayout() {
                   headerTintColor: colors.ink,
                   headerShadowVisible: false,
                   contentStyle: { backgroundColor: colors.bg },
+                  // The logo goes in the TITLE slot, left-aligned — not in
+                  // headerLeft. headerLeft is where React Navigation puts the
+                  // back button, so putting the mark there would have silently
+                  // removed back navigation from every pushed screen.
+                  //
+                  // Each screen keeps its `title` string below: on web that is
+                  // what expo-router maps to document.title, so the browser tab
+                  // still reads "Payment" or "Settings" even though the header
+                  // itself now shows the logo.
+                  headerTitleAlign: 'left',
+                  headerTitle: () => <Logo variant="wordmark" width={64} />,
                 }}
               >
                 {/* `title` is what the browser tab says on the web build —
