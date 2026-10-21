@@ -1,6 +1,6 @@
 /**
  * Website landing / onboarding. Desktop (>= breakpoints.lg): two-column hero —
- * how Dibbs works on the left, the sign-up card (same phone flow as
+ * how Dibbs works on the left, the sign-up card (same flow as
  * /auth/sign-in) on the right. Mobile: stacks, card first under the headline.
  * Copy is deliberately plain: payments are simulated, a campus email proves
  * you are a student there (not who you are), nothing is guaranteed.
@@ -12,7 +12,7 @@ import { Image } from 'expo-image';
 import { Stack, useRouter } from 'expo-router';
 import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
-import { PhoneAuthFlow } from '@/components/auth/PhoneAuthFlow';
+import { AuthMethods } from '@/components/auth/AuthMethods';
 import { useAuth } from '@/hooks/useAuth';
 import { breakpoints, colors, radius, shadow, space } from '@/constants/theme';
 
@@ -83,15 +83,7 @@ export default function WelcomeScreen() {
           <Text variant="title" accessibilityRole="header">
             Get started
           </Text>
-          <Text variant="body" color="inkMuted">
-            Enter your mobile number. We’ll text you a 6-digit code — no password to remember.
-          </Text>
-          <PhoneAuthFlow
-            hideFirstHeading
-            submitLabel="Text me a code"
-            onFinished={browse}
-            onUseEmail={() => router.push('/auth/email')}
-          />
+          <AuthMethods hideFirstHeading cardIntro onFinished={browse} />
         </View>
       )}
     </View>

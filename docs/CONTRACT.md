@@ -85,7 +85,8 @@ Namespaced routers. `P` = protected, `pub` = public. Inputs are zod; outputs are
 
 ```
 auth.requestPhoneCode / verifyPhoneCode / requestPhoneLinkCode / confirmPhoneLink / requestEmailLinkCode / confirmEmailLink — see "Phone sign-in & account linking"
-auth.requestCode      pub  { email }                → { ok: true, simulated: true }   (code logged to server console; email domain must be in ALLOWED_EMAIL_DOMAINS or a campus's emailDomains)
+auth.requestCode      pub  { email }                → { ok: true, simulated, resendAfterSeconds: 30 }   (email domain must be in ALLOWED_EMAIL_DOMAINS or a campus's emailDomains. Delivery is real when email is configured (`EMAIL_MODE=live` + `RESEND_API_KEY` + `EMAIL_FROM`), otherwise `simulated: true` and the code is in the server log. See "Sign-in email" below.)
+auth.methods          pub  –                        → { primary: 'email' | 'phone', phone: { available, simulated }, email: { available, simulated } }   (which sign-in methods deliver codes now. `primary` is 'phone' only when SMS is live; otherwise 'email'. Clients lead with `primary` and offer the other as secondary.)
 auth.verifyCode       pub  { email, code, displayName? } → { token, user }   (user includes `campus`, same shape as auth.me)
 auth.devSignIn        pub  { userId }               → { token, user }   (only if DEV_LOGIN=1; user includes `campus`)
 auth.me               P    –                        → User (with campus)
@@ -431,6 +432,16 @@ community.moderatorRemove M { id }                     → { ok }   takedown fro
 
 ---
 
+## Sign-in email (Resend)
+
+Email sign-in codes (`auth.requestCode`, `auth.verifyCode`, `auth.requestEmailLinkCode`, `auth.confirmEmailLink`) are sent through `backend/email/provider.ts`.
+
+- **Delivery.** Real email goes out through Resend only when `EMAIL_MODE=live` AND `RESEND_API_KEY` AND `EMAIL_FROM` are all set. Otherwise the provider is simulated: nothing is sent and the code is printed to the server log. Tests always simulate. In live mode codes are never written to the log, and a send error message never includes the code.
+- **Rules.** Same as phone codes: 6 digits, 10-minute expiry, 5 wrong guesses, 30-second resend cooldown (`resendAfterSeconds: 30`), and at most 5 codes per email per rolling hour (TOO_MANY_REQUESTS with how long to wait). If the send fails, the code is consumed immediately and the client gets INTERNAL_SERVER_ERROR "We couldn't send the code. Try again."
+- **Return shape.** `requestCode` and `requestEmailLinkCode` return `{ ok: true, simulated: boolean, resendAfterSeconds: 30 }`. `simulated: true` means no email was sent, so the UI can show the honest development note.
+- **Sign-in order.** `auth.methods` decides the lead method. Email is primary until SMS is live; phone becomes primary automatically once `SMS_MODE=live` and the Twilio settings are in place. No client change is needed for that switch.
+- **Health.** `GET /api/health` includes `email: { mode: 'simulated' | 'live', simulated: boolean }`, next to `sms` and `payments`. Use it to confirm a deployment is live before testing sign-in.
+
 ## Phone sign-in & account linking (added after the sections above)
 
 Phone + SMS code is the primary sign-in. Campus email + code (`auth.requestCode`/`verifyCode`) still works ("Use campus email instead") and is how existing email accounts sign in.
@@ -442,7 +453,7 @@ Phone + SMS code is the primary sign-in. Campus email + code (`auth.requestCode`
 - Max 5 wrong guesses per code (the 5th burns it): "That code is wrong. N tries left."
 - 30-second resend cooldown (`resendAfterSeconds: 30`) and at most 5 codes per number per rolling hour -> TOO_MANY_REQUESTS with how long to wait. Plus the per-minute IP/session limiters `RATE_LIMIT_PHONE_REQUEST_PER_MIN` (default 5) and `RATE_LIMIT_PHONE_VERIFY_PER_MIN` (default 10).
 - If the text fails to send, the new code is consumed immediately so no usable code is left behind.
-- Delivery is **simulated** unless live SMS is configured (see "Transactional SMS"): the code is printed to the server log. Email codes are always simulated.
+- Delivery is **simulated** unless live SMS is configured (see "Transactional SMS"): the code is printed to the server log. Email codes follow their own delivery mode (see "Sign-in email" below).
 
 ```
 auth.requestPhoneCode     pub { phone }                    → { ok, simulated, resendAfterSeconds: 30, expiresInSeconds: 600 }
@@ -451,7 +462,7 @@ auth.verifyPhoneCode      pub { phone, code, displayName?, campusId?, smsOptIn? 
       → { status: 'signed_in', token, isNewAccount, user }  (user includes `campus`)
 auth.requestPhoneLinkCode P   { phone }                    → same shape as requestPhoneCode (attach a phone to the signed-in account)
 auth.confirmPhoneLink     P   { phone, code, smsOptIn? }   → { ok, user }
-auth.requestEmailLinkCode P   { email }                    → { ok, simulated: true }   (campus email domain required)
+auth.requestEmailLinkCode P   { email }                    → { ok, simulated, resendAfterSeconds: 30 }   (campus email domain required; same cooldown and cap as sign-in email)
 auth.confirmEmailLink     P   { email, code }              → { switchedAccount: boolean, token: string|null, user }
 ```
 A new phone account is created with `email = null`, `phoneVerifiedAt = now`, `campusEmailVerifiedAt = null`, `smsOptIn` false unless the client passes `smsOptIn: true` (the consent checkbox must be unchecked by default).

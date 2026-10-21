@@ -13,8 +13,9 @@ import { Button } from '@/components/ui/Button';
 import { Field } from '@/components/auth/Field';
 import { Notice } from '@/components/auth/Notice';
 import { trpc } from '@/lib/trpc';
+import { useCooldown } from '@/components/auth/useCooldown';
 import { useAuth } from '@/hooks/useAuth';
-import { describeError } from '@/components/auth/helpers';
+import { describeError, secondsFromMessage } from '@/components/auth/helpers';
 import { space } from '@/constants/theme';
 
 export const CAMPUS_EXPLAINER =
@@ -52,6 +53,8 @@ export function CampusEmailVerify({
   const [info, setInfo] = useState<string | undefined>();
   const [switched, setSwitched] = useState(false);
   const [network, setNetwork] = useState(false);
+  const [simulated, setSimulated] = useState(false);
+  const cooldown = useCooldown();
 
   async function sendCode(isResend = false) {
     const trimmed = email.trim();
@@ -62,14 +65,20 @@ export function CampusEmailVerify({
     setError(undefined);
     setInfo(undefined);
     try {
-      await requestMutation.mutateAsync({ email: trimmed });
+      const res = await requestMutation.mutateAsync({ email: trimmed });
       setNetwork(false);
+      setSimulated(res.simulated);
+      cooldown.start(res.resendAfterSeconds);
       setStep('code');
       if (isResend) setInfo('New code sent.');
     } catch (e) {
       const d = describeError(e, 'Could not send a code. Try again.');
       setNetwork(d.network);
       setError(d.message);
+      if (d.code === 'TOO_MANY_REQUESTS') {
+        const secs = secondsFromMessage(d.message);
+        if (secs && step === 'code') cooldown.start(Math.min(secs, 3600));
+      }
     }
   }
 
@@ -149,9 +158,11 @@ export function CampusEmailVerify({
       ) : (
         <>
           <Text variant="body" color="inkMuted">
-            We sent a 6-digit code to {email.trim()}. Development mode: no email is sent — the code is printed in
-            the server log.
+            We sent a 6-digit code to {email.trim()}.
           </Text>
+          {simulated ? (
+            <Notice tone="dev">Development mode: no email is sent — the code is printed in the server log.</Notice>
+          ) : null}
           <Field
             label="Email code"
             placeholder="123456"
@@ -165,12 +176,12 @@ export function CampusEmailVerify({
             maxLength={6}
             autoComplete="one-time-code"
             textContentType="oneTimeCode"
-            error={error}
             onSubmitEditing={confirm}
             returnKeyType="done"
             editable={!confirmMutation.isPending}
             autoFocus
           />
+          {error ? <Notice tone="error">{error}</Notice> : null}
           {info ? <Notice tone="success">{info}</Notice> : null}
           <Button
             title={network ? 'Try again' : 'Verify email'}
@@ -180,10 +191,11 @@ export function CampusEmailVerify({
           />
           <View style={styles.linkRow}>
             <Button
-              title="Send a new code"
+              title={cooldown.secondsLeft > 0 ? `Resend code in ${cooldown.secondsLeft}s` : 'Send a new code'}
               variant="ghost"
               onPress={() => sendCode(true)}
               loading={requestMutation.isPending}
+              disabled={cooldown.secondsLeft > 0}
             />
             <Button
               title="Change email"

@@ -1,17 +1,16 @@
 /**
- * Phone-first sign-in. The whole flow (number -> code -> profile for new
- * numbers -> optional campus email) lives in <PhoneAuthFlow>; this screen is
- * the page chrome plus the `returnTo` handling.
+ * Sign-in. <AuthMethods> leads with campus email (or phone once SMS is live);
+ * this screen is the page chrome plus the `returnTo` / `method` handling.
  */
 import React from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
-import { PhoneAuthFlow } from '@/components/auth/PhoneAuthFlow';
+import { AuthMethods } from '@/components/auth/AuthMethods';
 import { space } from '@/constants/theme';
 
 export default function SignInScreen() {
-  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
+  const { returnTo, method } = useLocalSearchParams<{ returnTo?: string; method?: string }>();
   const router = useRouter();
 
   const finish = () => router.replace((returnTo || '/') as never);
@@ -19,9 +18,9 @@ export default function SignInScreen() {
   return (
     <Screen scroll>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
-        <PhoneAuthFlow
+        <AuthMethods
           onFinished={finish}
-          onUseEmail={() => router.push({ pathname: '/auth/email', params: { returnTo: returnTo ?? '' } })}
+          initialMethod={method === 'phone' || method === 'email' ? method : undefined}
         />
       </KeyboardAvoidingView>
     </Screen>

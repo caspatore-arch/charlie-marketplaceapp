@@ -8,11 +8,17 @@ import type { AuthUser, PhoneVerifyResult } from '@/types';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
 
+export interface EmailCodeResult {
+  ok: boolean;
+  simulated: boolean;
+  resendAfterSeconds: number;
+}
+
 export interface AuthContextValue {
   status: AuthStatus;
   user: AuthUser | null;
-  /** Step 1 of email sign-in: server prints a 6-digit code to its log (simulated email). */
-  requestCode: (email: string) => Promise<void>;
+  /** Step 1 of email sign-in: emails a 6-digit code (printed to the server log when `simulated`). */
+  requestCode: (email: string) => Promise<EmailCodeResult>;
   /** Step 2: verify the code (and optionally set a display name on first sign-in). */
   signInWithCode: (email: string, code: string, displayName?: string) => Promise<void>;
   /** Phone step 1: text a 6-digit code (printed to the server log when simulated). */

@@ -14,7 +14,7 @@ The founder builds and publishes through **Rork** (rork.com), so this repo mirro
 | Backend | Hono (`backend/hono.ts`) + tRPC v11 (`backend/trpc/`) | Served under `/api/trpc/*`, port 3000. `@hono/node-server` for local. |
 | DB | Drizzle ORM, **PostgreSQL SQL**. Local driver = PGlite (Postgres compiled to WASM, persisted in `backend/data/pg/`). | `DATABASE_URL` is a one-variable switch: set it (e.g. to a Neon connection string) and `backend/db/client.ts` uses `drizzle-orm/node-postgres` with a `pg.Pool` instead — same schema, same code elsewhere. Verify a hosted URL with `npm run db:check` (connects, runs migrations, prints the table count) before pointing the app at it. |
 | Images | Multipart upload to `POST /api/uploads`, stored locally by default | `backend/storage.ts` is an adapter interface: `LocalDiskStorage` (default, `backend/data/uploads/`, served at `GET /api/uploads/:file`) or `S3Storage` (any S3-compatible provider — AWS S3, Cloudflare R2, Backblaze B2, Wasabi — selected by setting `S3_BUCKET`). See `docs/DEPLOY.md`. |
-| Auth | **Phone + SMS code (primary)**, or campus-email code; bearer session token in `expo-secure-store` | Both code deliveries are **simulated** by default (printed to the server log); live SMS needs Twilio, see `docs/DEPLOY.md`. A phone proves a number only: campus-verified actions (sell, offer, book, post) additionally need a verified campus email. Dev-only `auth.devSignIn` switches between seeded test identities. |
+| Auth | **Email-first until SMS is live, then phone-first**: campus-email code (`backend/email/`, Resend) or phone + SMS code; bearer session token in `expo-secure-store` | **Email-first rule:** `auth.methods` returns `primary: 'email'` until live SMS is configured, then `'phone'` automatically, so the client leads with whatever actually delivers. Both deliveries are **simulated** by default (codes printed to the server log). Live email needs `EMAIL_MODE=live` + `RESEND_API_KEY` + `EMAIL_FROM`; live SMS needs Twilio. See `docs/DEPLOY.md` §0a (email) and §6b (SMS). A phone proves a number only: campus-verified actions (sell, offer, book, post) additionally need a verified campus email. Dev-only `auth.devSignIn` switches between seeded test identities. |
 | Transactional SMS | Outbox table + in-process dispatcher (`backend/sms/`) | Three event texts (listing posted, booking confirmed, 30-min reminder). Twilio adapter exists but has never run against a real account. |
 
 ## Folder layout
@@ -44,6 +44,7 @@ backend/
   db/                     schema.ts, client.ts, seed.ts, migrate.ts
   storage.ts              upload adapter
   sms/                    phone.ts (E.164), provider.ts (simulated/Twilio), outbox.ts (queue + dispatcher)
+  email/                  provider.ts (simulated/Resend) for sign-in and campus-verification codes
   auth/                   accounts.ts (phone/email account linking, code hashing)
   notifications/          Expo push (messages, meetups, offers)
   data/                   gitignored: pg/ and uploads/

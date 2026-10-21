@@ -554,6 +554,48 @@ async function main() {
     eq((await userRow(phoneUserId)).phone, '+15205550177', 'number stays with its owner');
   });
 
+  /* ============================================================ email */
+
+  const { SimulatedEmailProvider, setEmailProviderForTests } = await import('../backend/email/provider');
+  const mail = new SimulatedEmailProvider();
+  setEmailProviderForTests(mail);
+
+  await check('email: sign-in code is delivered through the provider; cooldown; failed send burns the code', async () => {
+    const methods = await anon.auth.methods();
+    eq(methods.primary, 'email', 'email-first while SMS is not live');
+    eq(methods.email.simulated, true, 'email simulated in tests');
+    const addr = 'casey@demo.campus.test';
+    const r = await anon.auth.requestCode({ email: addr });
+    eq(r.simulated, true, 'reports simulated delivery');
+    const msg = mail.sent.find((m) => m.to === addr);
+    assert(msg && /\b\d{6}\b/.test(msg.subject) && msg.text.includes('expires in 10 minutes'), 'code email sent');
+    const code = /(\d{6})/.exec(msg!.subject)![1]!;
+    await expectCode('TOO_MANY_REQUESTS', () => anon.auth.requestCode({ email: addr }));
+    const done = await anon.auth.verifyCode({ email: addr, code, displayName: 'Casey' });
+    assert(done.token, 'code from the email signs in');
+
+    const addr2 = 'drew@demo.campus.test';
+    mail.failNext = 1;
+    await expectCode('INTERNAL_SERVER_ERROR', () => anon.auth.requestCode({ email: addr2 }));
+    const rows = await db.select().from(schema.emailCodes).where(d.eq(schema.emailCodes.email, addr2));
+    assert(rows.length === 1 && rows[0]!.consumedAt != null, 'unsent code is burned');
+    // Ageing the burned code past the cooldown allows a retry that works.
+    await db
+      .update(schema.emailCodes)
+      .set({ expiresAt: new Date(Date.now() + 10 * 60_000 - 31_000) })
+      .where(d.eq(schema.emailCodes.email, addr2));
+    await anon.auth.requestCode({ email: addr2 });
+    assert(mail.sent.some((m) => m.to === addr2), 'retry delivered');
+  });
+
+  await check('email: campus-verification code for a signed-in phone account goes by email', async () => {
+    const before = mail.sent.length;
+    const caller = await as(phoneUserId);
+    await caller.auth.requestEmailLinkCode({ email: 'riley@demo.campus.test' });
+    const m = mail.sent.slice(before).find((x) => x.to === 'riley@demo.campus.test');
+    assert(m && m.text.includes('verify your campus email'), 'verification email sent');
+  });
+
   /* ============================================================== SMS */
 
   const MAYA_PHONE = '+15205550101';

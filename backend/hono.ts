@@ -7,6 +7,7 @@ import { env } from './env';
 import { callerKey, rateLimit } from './ratelimit';
 import { paymentsMode } from './stripe/client';
 import { resolveSmsMode } from './sms/provider';
+import { resolveEmailMode } from './email/provider';
 import {
   processSimulatedEvent,
   processWebhook,
@@ -63,6 +64,7 @@ app.get('/api/health', (c) => {
       banner: mode === 'simulated' ? 'Simulated — no money moves.' : '',
     },
     sms: { mode: resolveSmsMode().mode, simulated: resolveSmsMode().mode === 'simulated' },
+    email: { mode: resolveEmailMode().mode, simulated: resolveEmailMode().mode === 'simulated' },
   });
 });
 

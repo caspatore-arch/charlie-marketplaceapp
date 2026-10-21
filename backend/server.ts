@@ -5,6 +5,7 @@ import { serve } from '@hono/node-server';
 import { runMigrations } from './db/migrate';
 import { db, dbKind } from './db/client';
 import { resolveSmsMode } from './sms/provider';
+import { resolveEmailMode } from './email/provider';
 import { startSmsDispatcher } from './sms/outbox';
 import { env } from './env';
 import app from './hono';
@@ -29,6 +30,8 @@ async function main() {
     console.log(`  health: http://localhost:${port}/api/health`);
     const sms = resolveSmsMode();
     console.log(`  sms: ${sms.mode} (${sms.reason})`);
+    const email = resolveEmailMode();
+    console.log(`  email: ${email.mode} (${email.reason})`);
     if (lan) {
       console.log(`  on your phone, set EXPO_PUBLIC_RORK_API_BASE_URL=http://${lan}:${port}`);
     }

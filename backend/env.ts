@@ -71,6 +71,22 @@ export const env = {
       .map((id) => id.trim())
       .filter(Boolean);
   },
+  /* --------------------------------------------------------------- email */
+
+  /** Raw EMAIL_MODE. Decisions go through resolveEmailMode() (backend/email/provider.ts). */
+  get emailModeRaw(): string {
+    return (process.env.EMAIL_MODE ?? 'simulated').trim().toLowerCase();
+  },
+  get resendApiKey(): string | undefined {
+    const v = process.env.RESEND_API_KEY?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+  /** e.g. "Dibbs <codes@trydibbs.com>" — the domain must be verified in Resend. */
+  get emailFrom(): string | undefined {
+    const v = process.env.EMAIL_FROM?.trim();
+    return v && v.length > 0 ? v : undefined;
+  },
+
   /* ----------------------------------------------------------------- sms */
 
   /**

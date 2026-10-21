@@ -22,6 +22,27 @@ None of these are the same company necessarily, and none of them need to be. Pic
 
 ---
 
+## 0a. Sign-in email (Resend) — set up first
+
+Sign-in codes are emailed through **Resend**. Until this is done, email codes are only printed to the server log and nobody receives them. Do this before the Postgres and storage steps, because a real email is how you prove the backend can send codes at all.
+
+1. **Create a Resend account** at resend.com.
+2. **Add and verify your sending domain, `trydibbs.com`.** In Resend, go to Domains, add `trydibbs.com`, and copy the DNS records Resend shows you (SPF and DKIM, plus any extra records it lists). Add them at your DNS host exactly as shown, then wait until Resend marks the domain **Verified**. Until it is verified, Resend will refuse to send from that domain.
+3. **Create an API key** in Resend (API Keys, then Create). Give it sending access only. Copy it once; Resend will not show it again.
+4. **Set three variables on the deployed backend** (Railway, Variables), and nowhere else:
+   - `EMAIL_MODE=live`
+   - `RESEND_API_KEY=` the key from step 3 (secret)
+   - `EMAIL_FROM=Dibbs <codes@trydibbs.com>` (the sender; its domain must be the one you verified)
+   All three are needed. If any one is missing, the backend quietly stays simulated and says why. Never set these on a laptop.
+5. **Check the mode.** Redeploy, then open `/api/health` on the deployed URL. The `email` field should read `"mode": "live"` and `"simulated": false`. If it still says `simulated`, one of the three variables is missing or misspelled.
+6. **Send yourself a code.** In the app, request a sign-in code to a campus email address you own (the domain must be in `ALLOWED_EMAIL_DOMAINS`). The email should arrive from `codes@trydibbs.com` within a minute. Check the spam folder once; if it lands there, the DNS records in step 2 are the usual cause.
+
+**How sign-in chooses a method.** The app asks the backend which methods deliver codes right now (`auth.methods`). Until SMS is live (see §6b, which needs carrier registration that can take weeks), email is the primary way in and phone is offered as a secondary option. Once SMS is live (`SMS_MODE=live` with the Twilio settings), phone becomes primary automatically. You do not need to change the app to switch.
+
+**Rules that apply to email codes** (same as phone codes): 6 digits, expire in 10 minutes, 5 wrong guesses, a 30-second resend cooldown, and at most 5 codes per address per hour. A failed send uses up the code, so the user just asks again after the cooldown.
+
+---
+
 ## 1. Choose a Postgres host
 
 The repo already speaks real Postgres (`backend/db/client.ts`) — it's a single environment variable (`DATABASE_URL`) away from working. You don't need to change any code.
@@ -162,6 +183,7 @@ Go through this before letting anyone outside your test group use the app.
   ```
   (The migration's own header only lists the seller query; the buyer index needs the second one.) Nothing else in 0009 is destructive: no auction, bid, reservation or payment row is changed.
 - [ ] **SMS** (only if turning on real texting): the Transactional SMS section below is done end to end — Twilio account, A2P 10DLC (or toll-free) registration approved, all four of `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, `SMS_LIVE_ACK=1` set with `SMS_MODE=live`, `SMS_APP_LINK_BASE` set, and a test text received on a real phone. Until then the app signs people in with simulated codes that nobody receives, so **phone sign-in is not usable by real students without it**.
+- [ ] **Sign-in email** (§0a): `EMAIL_MODE=live`, `RESEND_API_KEY` and `EMAIL_FROM` set on the host; `trydibbs.com` shows Verified in Resend; `/api/health` reports `email.mode` as `live`; and a sign-in code arrived in a real inbox. Until then, email sign-in codes are printed to the server log only.
 - [ ] If you expect more than a handful of concurrent users, re-read the rate-limiting note below — the built-in limiter is intentionally simple and has a real limitation once you scale.
 
 ---
@@ -236,7 +258,7 @@ Phone sign-in codes and three event texts (listing posted, booking confirmed, 30
 
 **How sending works (and its limit)**: events write rows to the `sms_messages` table; a dispatcher **inside the backend process** wakes every 30 seconds (`SMS_DISPATCH_INTERVAL_MS`) and sends what is due, retrying failures after 1, 2, 4 and 8 minutes and giving up after 5 attempts. Rows are claimed with `FOR UPDATE SKIP LOCKED`, so two copies would not double-send, but like the rate limiter (§7) this is designed and tested for a **single instance**. A restart loses nothing (reminders are rows with a future send time). Check `failed` and long-`scheduled` rows in `sms_messages` after launch; there is no dashboard yet.
 
-**Not covered**: verification codes are texted directly (not through the table) and are not retried; international numbers beyond a plain `+` number are not handled specially; the campus-email code is still simulated (see §8).
+**Not covered**: verification codes are texted directly (not through the table) and are not retried; international numbers beyond a plain `+` number are not handled specially; the email sign-in code is live only when §0a is done (otherwise it is simulated).
 
 ---
 
@@ -258,5 +280,5 @@ To be precise about scope, so nothing here is mistaken for having been checked:
 
 - The Expo/iPhone app itself is unchanged — this is entirely a backend deploy story.
 - Real Stripe payments are untouched; see `docs/HANDOFF.md` §3a for that separate checklist.
-- Real email delivery for sign-in codes is still simulated (printed to the server's logs, which you can view in your host's dashboard) — nobody receives an actual email yet. That's a separate piece of work (an email-sending provider, another signup) not covered here.
+- Real email delivery for sign-in codes is **off until you configure Resend** (§0a). With those three variables set it is live; without them, codes are printed to the server's logs, which you can view in your host's dashboard.
 - The free geocoding service used for custom meetup addresses (`backend/geocode.ts`, OpenStreetMap Nominatim) is unchanged — this pass added rate limiting in front of it to reduce the chance of tripping its usage policy, but did **not** replace it with a paid provider. Still fine for pilot volume; revisit before real traffic, per `docs/HANDOFF.md`.

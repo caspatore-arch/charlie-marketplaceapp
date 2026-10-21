@@ -8,8 +8,9 @@
  *  - Campus email + code (original). Still works; it is also how existing
  *    email accounts sign in and then add a phone (`linkPhone*`).
  *
- * Delivery is SIMULATED unless SMS is configured for live sends (see
- * backend/sms/provider.ts); email is always simulated. Codes are 6 digits,
+ * Delivery is SIMULATED unless configured for live sends: SMS via
+ * backend/sms/provider.ts (Twilio), email via backend/email/provider.ts
+ * (Resend). Email codes share the phone rules for cooldown and hourly cap. Codes are 6 digits,
  * expire in 10 minutes, allow 5 guesses, have a 30-second resend cooldown and
  * at most 5 sends per number per hour. Phone codes are stored only as hashes.
  * Sessions are bearer tokens stored as sha256 hashes.
@@ -25,6 +26,7 @@ import { campuses, emailCodes, phoneCodes, sessions, users, type User } from '..
 import { codesMatch, hasActivity, hashPhoneCode, newPhoneCode, retireEmptyAccount } from '../../auth/accounts';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
 import { resolveSmsMode, smsProvider } from '../../sms/provider';
+import { codeEmail, emailProvider, resolveEmailMode } from '../../email/provider';
 import { hashToken, newSessionToken } from '../create-context';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
@@ -165,6 +167,49 @@ async function issueSession(db: typeof import('../../db/client').db, userId: str
   return token;
 }
 
+export const EMAIL_RESEND_COOLDOWN_MS = 30 * 1000;
+export const EMAIL_MAX_CODES_PER_HOUR = 5;
+
+/**
+ * Issues an email code and sends it, with the same cooldown and hourly cap as
+ * phone codes. `email_codes` has no created_at, so issue time is derived from
+ * expires_at - CODE_TTL_MS. A failed send burns the code.
+ */
+async function sendEmailCode(db: Db, email: string, purpose: 'sign_in' | 'verify_campus') {
+  const now = Date.now();
+  const recent = await db
+    .select({ expiresAt: emailCodes.expiresAt })
+    .from(emailCodes)
+    .where(and(eq(emailCodes.email, email), gte(emailCodes.expiresAt, new Date(now - 60 * 60 * 1000 + CODE_TTL_MS))))
+    .orderBy(desc(emailCodes.expiresAt));
+  const lastIssued = recent[0] ? recent[0].expiresAt.getTime() - CODE_TTL_MS : null;
+  if (lastIssued && now - lastIssued < EMAIL_RESEND_COOLDOWN_MS) {
+    const wait = Math.ceil((EMAIL_RESEND_COOLDOWN_MS - (now - lastIssued)) / 1000);
+    throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: `Wait ${wait}s before requesting another code.` });
+  }
+  if (recent.length >= EMAIL_MAX_CODES_PER_HOUR) {
+    throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'Too many codes for this email. Try again in an hour.' });
+  }
+
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const [row] = await db
+    .insert(emailCodes)
+    .values({ email, code, expiresAt: new Date(now + CODE_TTL_MS) })
+    .returning({ id: emailCodes.id });
+  try {
+    await emailProvider().send(codeEmail(email, code, purpose));
+  } catch (err) {
+    await db.update(emailCodes).set({ consumedAt: new Date() }).where(eq(emailCodes.id, row!.id));
+    console.error('[email] code send failed:', err instanceof Error ? err.message : err);
+    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: "We couldn't send the code. Try again." });
+  }
+  return {
+    ok: true as const,
+    simulated: resolveEmailMode().mode === 'simulated',
+    resendAfterSeconds: EMAIL_RESEND_COOLDOWN_MS / 1000,
+  };
+}
+
 export const authRouter = router({
   requestCode: publicProcedure
     .input(z.object({ email: z.email() }))
@@ -178,18 +223,24 @@ export const authRouter = router({
         });
       }
 
-      const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
-      await ctx.db.insert(emailCodes).values({
-        email,
-        code,
-        expiresAt: new Date(Date.now() + CODE_TTL_MS),
-      });
-
-      // Simulated delivery — this is the only place the code appears.
-      console.log(`[SIMULATED EMAIL] code for ${email}: ${code}`);
-
-      return { ok: true as const, simulated: true as const };
+      return sendEmailCode(ctx.db, email, 'sign_in');
     }),
+
+  /**
+   * Which sign-in methods actually deliver codes right now. The client leads
+   * with email until SMS is live (carrier registration takes weeks); phone
+   * stays available as a secondary option. Simulated flags let the UI show
+   * the "development: code is in the server log" note honestly.
+   */
+  methods: publicProcedure.query(() => {
+    const sms = resolveSmsMode().mode;
+    const email = resolveEmailMode().mode;
+    return {
+      primary: sms === 'live' ? ('phone' as const) : ('email' as const),
+      phone: { available: true, simulated: sms === 'simulated' },
+      email: { available: true, simulated: email === 'simulated' },
+    };
+  }),
 
   verifyCode: publicProcedure
     .input(
@@ -405,10 +456,7 @@ export const authRouter = router({
       if (!campus) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Use your campus email address.' });
       }
-      const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
-      await ctx.db.insert(emailCodes).values({ email, code, expiresAt: new Date(Date.now() + CODE_TTL_MS) });
-      console.log(`[SIMULATED EMAIL] campus-verification code for ${email}: ${code}`);
-      return { ok: true as const, simulated: true as const };
+      return sendEmailCode(ctx.db, email, 'verify_campus');
     }),
 
   /**

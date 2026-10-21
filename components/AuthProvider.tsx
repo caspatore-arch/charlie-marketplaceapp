@@ -28,9 +28,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOutMutation = trpc.auth.signOut.useMutation();
 
   const requestCode = useCallback(
-    async (email: string) => {
-      await requestCodeMutation.mutateAsync({ email });
-    },
+    (email: string) => requestCodeMutation.mutateAsync({ email }),
     [requestCodeMutation],
   );
 
