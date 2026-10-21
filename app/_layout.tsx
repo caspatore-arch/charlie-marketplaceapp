@@ -95,6 +95,13 @@ export default function RootLayout() {
                   name="auth/sign-in"
                   options={{ presentation: 'modal', title: 'Sign in' }}
                 />
+                {/* auth/email was added after this list and never registered,
+                    so expo-router fell back to the route path and the modal
+                    header literally read "auth/email". */}
+                <Stack.Screen
+                  name="auth/email"
+                  options={{ presentation: 'modal', title: 'Sign in' }}
+                />
                 <Stack.Screen
                   name="auth/verify"
                   options={{ presentation: 'modal', title: 'Verify code' }}

@@ -1,32 +1,29 @@
 /**
  * Campus-email sign-in as its own route (kept for old links). The flow lives in
  * <EmailAuthFlow>; "Use your phone number instead" goes to /auth/sign-in?method=phone.
+ *
+ * Shares <AuthScreenShell> with /auth/sign-in so an old link does not land on a
+ * differently-branded page than the current one.
  */
 import React from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Screen } from '@/components/ui/Screen';
+import { AuthScreenShell } from '@/components/auth/AuthScreenShell';
 import { EmailAuthFlow } from '@/components/auth/EmailAuthFlow';
-import { space } from '@/constants/theme';
 
 export default function EmailSignInScreen() {
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const router = useRouter();
 
   return (
-    <Screen scroll>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
-        <EmailAuthFlow
-          onFinished={() => router.replace((returnTo || '/') as never)}
-          onUsePhone={() =>
-            router.replace({ pathname: '/auth/sign-in', params: { returnTo: returnTo ?? '', method: 'phone' } })
-          }
-        />
-      </KeyboardAvoidingView>
-    </Screen>
+    <AuthScreenShell title="Sign in or sign up">
+      <EmailAuthFlow
+        hideFirstHeading
+        submitLabel="Email me a code"
+        onFinished={() => router.replace((returnTo || '/') as never)}
+        onUsePhone={() =>
+          router.replace({ pathname: '/auth/sign-in', params: { returnTo: returnTo ?? '', method: 'phone' } })
+        }
+      />
+    </AuthScreenShell>
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1, paddingTop: space.xl, paddingBottom: space.huge },
-});

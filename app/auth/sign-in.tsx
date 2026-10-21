@@ -1,13 +1,16 @@
 /**
  * Sign-in. <AuthMethods> leads with campus email (or phone once SMS is live);
  * this screen is the page chrome plus the `returnTo` / `method` handling.
+ *
+ * The chrome lives in <AuthScreenShell> so this route and /auth/email stay
+ * identical. `hideFirstHeading` + `cardIntro` hand the heading to the shell and
+ * let the flow supply only its one-line explainer — the same pairing the
+ * welcome screen uses, so the card reads the same wherever it appears.
  */
 import React from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Screen } from '@/components/ui/Screen';
+import { AuthScreenShell } from '@/components/auth/AuthScreenShell';
 import { AuthMethods } from '@/components/auth/AuthMethods';
-import { space } from '@/constants/theme';
 
 export default function SignInScreen() {
   const { returnTo, method } = useLocalSearchParams<{ returnTo?: string; method?: string }>();
@@ -16,17 +19,13 @@ export default function SignInScreen() {
   const finish = () => router.replace((returnTo || '/') as never);
 
   return (
-    <Screen scroll>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
-        <AuthMethods
-          onFinished={finish}
-          initialMethod={method === 'phone' || method === 'email' ? method : undefined}
-        />
-      </KeyboardAvoidingView>
-    </Screen>
+    <AuthScreenShell title="Sign in or sign up">
+      <AuthMethods
+        hideFirstHeading
+        cardIntro
+        onFinished={finish}
+        initialMethod={method === 'phone' || method === 'email' ? method : undefined}
+      />
+    </AuthScreenShell>
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1, paddingTop: space.xl, paddingBottom: space.huge },
-});

@@ -10,14 +10,19 @@ import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { colors, radius } from '@/constants/theme';
 
+// Ratios must match the shipped files exactly, or expo-image letterboxes the
+// art inside the brand-red box and the mark drifts off-centre. The artwork
+// carries its own margin (regenerated at 17%/12% so the script is not pressed
+// against the tile edge at the small sizes it is actually used), so nothing
+// here should add padding on top of it.
 const ASSETS = {
   wordmark: {
     source: require('../../assets/branding/dibbs-wordmark-red.png'),
-    ratio: 900 / 376,
+    ratio: 900 / 375,
   },
   lockup: {
     source: require('../../assets/branding/dibbs-lockup-white.png'),
-    ratio: 1100 / 565,
+    ratio: 1100 / 566,
   },
 } as const;
 

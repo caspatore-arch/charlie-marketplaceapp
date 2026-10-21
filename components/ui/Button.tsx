@@ -70,7 +70,13 @@ export function Button({
             variant="heading"
             weight="600"
             color={variant === 'secondary' || variant === 'ghost' ? 'ink' : 'white'}
-            numberOfLines={1}
+            // A solid button clamps to one line: a wrapped filled button reads
+            // as a broken box. A ghost button is really a text link, and its
+            // labels are sentences ("Use your phone number instead"), which at
+            // 375px clipped to "Use your phone number ins…" — losing the only
+            // route to the other sign-in method. Links wrap; buttons don't.
+            numberOfLines={variant === 'ghost' ? 2 : 1}
+            style={styles.label}
           >
             {title}
           </Text>
@@ -90,6 +96,10 @@ const styles = StyleSheet.create({
     minHeight: minTouchHeight,
     paddingHorizontal: space.xl,
   },
+  // flexShrink lets a long label wrap inside the row instead of overflowing it
+  // (the row is flexDirection: 'row', so without this the Text refuses to
+  // narrow). textAlign keeps a wrapped second line centred under the first.
+  label: { flexShrink: 1, textAlign: 'center' },
   md: { minHeight: minTouchHeight, paddingVertical: space.md },
   lg: { minHeight: minTouchHeight + 6, paddingVertical: space.lg },
   disabled: { opacity: 0.5 },
