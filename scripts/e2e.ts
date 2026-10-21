@@ -1223,6 +1223,143 @@ async function main(): Promise<number> {
     }
   });
 
+  /* ----------------------------------------------------------------- 12 */
+
+  await criterion('12. Community upvotes are unique, and every sort respects expiry and removal', async () => {
+    // Sam authors (Jordan blocked Maya in criterion 9); Jordan and Maya vote.
+    const mk = (kind: 'buying' | 'selling', body: string) => sam.community.create.mutate({ kind, body });
+    const a = await mk('buying', 'Vote test A: anyone have a desk lamp?');
+    const b = await mk('buying', 'Vote test B: anyone have a bike lock?');
+    const c = await mk('selling', 'Vote test C: selling a desk chair');
+
+    // Signed-out viewers cannot vote.
+    await expectTrpcError('UNAUTHORIZED', () => guest.community.setVote.mutate({ id: a.id, voted: true }));
+
+    // Concurrent double-tap from one user -> exactly one vote.
+    await Promise.all([
+      jordan.community.setVote.mutate({ id: a.id, voted: true }),
+      jordan.community.setVote.mutate({ id: a.id, voted: true }),
+      jordan.community.setVote.mutate({ id: a.id, voted: true }),
+    ]);
+    let feed = await jordan.community.feed.query({ kind: 'buying', sort: 'top', limit: 50 });
+    const aRow = feed.items.find((i) => i.id === a.id)!;
+    assertEqual(aRow.voteCount, 1, 'three concurrent votes by one user must count once');
+    assert(aRow.viewerVoted, 'the voter sees their own vote state');
+    const mayaView = await maya.community.feed.query({ kind: 'buying', sort: 'top', limit: 50 });
+    assert(!mayaView.items.find((i) => i.id === a.id)!.viewerVoted, "another viewer's state is their own");
+
+    // A second user adds a second vote; un-vote twice never goes below zero.
+    await maya.community.setVote.mutate({ id: a.id, voted: true });
+    await maya.community.setVote.mutate({ id: b.id, voted: true });
+    const off1 = await maya.community.setVote.mutate({ id: b.id, voted: false });
+    const off2 = await maya.community.setVote.mutate({ id: b.id, voted: false });
+    assertEqual(off1.voteCount, 0, 'un-vote removes the vote');
+    assertEqual(off2.voteCount, 0, 'a repeated un-vote stays at zero');
+
+    // Category + sort are real queries: top ranks A (2) above B (0); selling excludes buying.
+    feed = await jordan.community.feed.query({ kind: 'buying', sort: 'top', limit: 50 });
+    const ids = feed.items.map((i) => i.id);
+    assert(ids.indexOf(a.id) < ids.indexOf(b.id), 'top: more votes first');
+    assert(!ids.includes(c.id), 'buying category excludes selling posts');
+    const newest = await jordan.community.feed.query({ kind: 'buying', sort: 'new', limit: 50 });
+    assert(newest.items.findIndex((i) => i.id === b.id) < newest.items.findIndex((i) => i.id === a.id), 'new: latest first');
+    const hot = await jordan.community.feed.query({ kind: 'buying', sort: 'hot', limit: 50 });
+    assertEqual(hot.items[0]!.id, a.id, 'hot: freshest votes first');
+
+    // Pagination holds across pages in every sort (no dupes, no gaps).
+    for (const sort of ['new', 'top', 'hot'] as const) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await jordan.community.feed.query({ kind: 'buying', sort, limit: 1, cursor });
+        seen.push(...page.items.map((i) => i.id));
+        cursor = page.nextCursor;
+      } while (cursor && seen.length < 100);
+      const all = await jordan.community.feed.query({ kind: 'buying', sort, limit: 50 });
+      assertEqual(seen.join(','), all.items.map((i) => i.id).join(','), `${sort}: paged order equals single-page order`);
+    }
+
+    // Removed and expired posts never appear in any sort, even with votes.
+    await maya.community.setVote.mutate({ id: c.id, voted: true });
+    await sam.community.remove.mutate({ id: b.id });
+    await expectTrpcError('NOT_FOUND', () => jordan.community.setVote.mutate({ id: b.id, voted: true }));
+    if (!external) {
+      const { db } = await import('../backend/db/client');
+      const { eq: eqOp } = await import('drizzle-orm');
+      const { communityPosts: postsTable, communityPostVotes: votesTable } = await import('../backend/db/schema');
+      await db.update(postsTable).set({ expiresAt: new Date(Date.now() - 1000) }).where(eqOp(postsTable.id, a.id));
+      for (const sort of ['new', 'top', 'hot'] as const) {
+        for (const kind of ['buying', 'selling'] as const) {
+          const f = await jordan.community.feed.query({ kind, sort, limit: 50 });
+          assert(!f.items.some((i) => i.id === a.id || i.id === b.id), `${sort}/${kind} must not show expired or removed posts`);
+        }
+      }
+      // Deleting a post cascades to its votes.
+      await db.delete(postsTable).where(eqOp(postsTable.id, c.id));
+      const orphans = await db.select().from(votesTable).where(eqOp(votesTable.postId, c.id));
+      assertEqual(orphans.length, 0, 'votes are deleted with their post');
+    }
+  });
+
+  await criterion('13. Contact details are absent from other students unless the owner opted in', async () => {
+    if (external) return; // needs DB access to read the emailed code and inspect the row
+    const { db } = await import('../backend/db/client');
+    const { eq: eqOp } = await import('drizzle-orm');
+    const schema = await import('../backend/db/schema');
+
+    // A fresh student (no open meetups, so the account can be closed at the end).
+    const email = 'contact-e2e@demo.campus.test';
+    await guest.auth.requestCode.mutate({ email });
+    const [codeRow] = await db.select().from(schema.emailCodes).where(eqOp(schema.emailCodes.email, email)).limit(1);
+    const verified = await guest.auth.verifyCode.mutate({ email, code: codeRow!.code, displayName: 'Contact E2E' });
+    const sam: Client = clientFor(url, verified.token);
+    const SAM_ID = verified.user.id;
+
+    // They save an Instagram handle and a phone number but opts in to NEITHER.
+    const saved = await sam.user.updateMe.mutate({
+      instagramHandle: '@sam.on.campus',
+      contactPhone: '(520) 555-0142',
+    });
+    assertEqual(saved.shareInstagram, false, 'sharing defaults to off');
+    assertEqual(saved.sharePhone, false, 'sharing defaults to off');
+    assertEqual(saved.instagramHandle, 'sam.on.campus', 'leading @ stripped on save');
+
+    // Another student's view: the keys and the values are not in the payload at all.
+    const hidden = await jordan.user.byId.query({ id: SAM_ID });
+    const hiddenJson = JSON.stringify(hidden);
+    assert(!('instagramHandle' in hidden) && !('contactPhone' in hidden), 'unshared fields must be absent keys');
+    assert(!hiddenJson.includes('sam.on.campus'), 'handle must not appear anywhere in the payload');
+    assert(!hiddenJson.includes('5550142'), 'number must not appear anywhere in the payload');
+
+    // Sharing an empty field is rejected; so is a pasted URL; a typed number is not touching sign-in.
+    await expectTrpcError('BAD_REQUEST', () => jordan.user.updateMe.mutate({ shareInstagram: true }));
+    await expectTrpcError('BAD_REQUEST', () =>
+      sam.user.updateMe.mutate({ instagramHandle: 'https://instagram.com/sam' }),
+    );
+    const me = await sam.auth.me.query();
+    assert(me.phone !== '+15205550142', 'contact number must never be written to users.phone');
+
+    // Opt in to the Instagram handle only: it appears, the phone still does not.
+    await sam.user.updateMe.mutate({ shareInstagram: true });
+    const partial = await jordan.user.byId.query({ id: SAM_ID });
+    assertEqual(partial.instagramHandle, 'sam.on.campus', 'shared handle visible');
+    assert(!('contactPhone' in partial), 'phone stays absent while only Instagram is shared');
+
+    await sam.user.updateMe.mutate({ sharePhone: true });
+    const both = await jordan.user.byId.query({ id: SAM_ID });
+    assertEqual(both.contactPhone, '+15205550142', 'shared number visible, normalised');
+
+    // Closing the account wipes both values and both opt-ins.
+    await sam.user.deleteAccount.mutate({ confirmText: 'DELETE' });
+    const gone = await jordan.user.byId.query({ id: SAM_ID });
+    assert(!('instagramHandle' in gone) && !('contactPhone' in gone), 'deleted account shares nothing');
+    const [row] = await db.select().from(schema.users).where(eqOp(schema.users.id, SAM_ID));
+    assert(
+      row!.instagramHandle === null && row!.contactPhone === null && !row!.shareInstagram && !row!.sharePhone,
+      'deleteAccount must clear all four contact-sharing columns',
+    );
+  });
+
   stop?.();
 
   const failed = results.filter((r) => !r.ok);

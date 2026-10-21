@@ -95,6 +95,25 @@ export default function PublicProfileScreen() {
             {profile.bio}
           </Text>
         ) : null}
+        {profile.instagramHandle || profile.contactPhone ? (
+          <View style={styles.contactBlock} accessibilityLabel="Contact details this student chose to share">
+            {profile.instagramHandle ? (
+              <Text variant="body" selectable>
+                Instagram: @{profile.instagramHandle}
+              </Text>
+            ) : null}
+            {profile.contactPhone ? (
+              <View style={styles.contactBlock}>
+                <Text variant="body" selectable>
+                  Phone: {profile.contactPhone}
+                </Text>
+                <Text variant="caption" color="inkMuted">
+                  Unverified. This is a number they typed in; Dibbs has not checked it.
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
       </View>
 
       {trustQuery.isPending ? (
@@ -144,6 +163,7 @@ export default function PublicProfileScreen() {
 const styles = StyleSheet.create({
   header: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
   badgeRow: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
+  contactBlock: { alignItems: 'center', gap: space.xs, marginTop: space.md },
   bio: { textAlign: 'center', marginTop: space.md, paddingHorizontal: space.lg },
   trustBlock: { marginTop: space.lg, marginBottom: space.lg },
   actions: { flexDirection: 'row', gap: space.md, marginBottom: space.xl },

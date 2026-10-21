@@ -20,6 +20,7 @@ import { PayoutsSection } from '@/components/settings/PayoutsSection';
 import { AboutPrototypeSection } from '@/components/settings/AboutPrototypeSection';
 import { LegalSection } from '@/components/settings/LegalSection';
 import { CloseAccountSection } from '@/components/settings/CloseAccountSection';
+import { ContactSharingSection } from '@/components/profile/ContactSharingSection';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { useAuth } from '@/hooks/useAuth';
 import { space } from '@/constants/theme';
@@ -64,6 +65,10 @@ export default function SettingsScreen() {
       >
         <SettingsSection title="Account">
           <AccountSection />
+        </SettingsSection>
+
+        <SettingsSection title="Contact sharing">
+          <ContactSharingSection />
         </SettingsSection>
 
         <SettingsSection title="Account & phone">

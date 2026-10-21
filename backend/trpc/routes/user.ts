@@ -17,6 +17,7 @@ import {
   users,
 } from '../../db/schema';
 import { cancelUserSms } from '../../sms/outbox';
+import { normalizePhone, PhoneFormatError } from '../../sms/phone';
 import { applyExpiry,
   applyExpiryForRead, toPublicUser, type PublicUser } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
@@ -65,6 +66,41 @@ export type TrustSummary = {
   /** Reservations this user cancelled, at any stage — see the note above. */
   cancelledByUser: number;
 };
+
+/**
+ * Instagram handle: leading "@" stripped, letters/digits/"."/"_" only, max 30.
+ * Returns null for empty input (= clear the field). A pasted URL is rejected
+ * with a hint rather than silently parsed.
+ */
+function parseInstagramHandle(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  if (/[/:]|instagram\.com/i.test(trimmed)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Enter just your Instagram handle (like campus.kid), not a link.',
+    });
+  }
+  const handle = trimmed.replace(/^@/, '');
+  if (handle.length === 0 || handle.length > 30 || !/^[A-Za-z0-9._]+$/.test(handle)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Instagram handles use only letters, numbers, periods and underscores, up to 30 characters.',
+    });
+  }
+  return handle;
+}
+
+/** Contact number as typed (spaces, dashes, parens, +) -> E.164. Unverified. */
+function parseContactPhone(raw: string): string | null {
+  if (raw.trim() === '') return null;
+  try {
+    return normalizePhone(raw);
+  } catch (err) {
+    if (err instanceof PhoneFormatError) throw new TRPCError({ code: 'BAD_REQUEST', message: err.message });
+    throw err;
+  }
+}
 
 export const userRouter = router({
   byId: publicProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
@@ -171,15 +207,49 @@ export const userRouter = router({
         displayName: z.string().min(1).max(60).optional(),
         avatarUrl: z.string().max(500).optional(),
         bio: z.string().max(400).optional(),
+        // Optional contact details. Empty string clears. Never verified.
+        instagramHandle: z.string().max(100).optional(),
+        contactPhone: z.string().max(40).optional(),
+        // Explicit opt-in to show each field to other students. Off by default.
+        shareInstagram: z.boolean().optional(),
+        sharePhone: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const instagram =
+        input.instagramHandle !== undefined ? parseInstagramHandle(input.instagramHandle) : undefined;
+      const phone =
+        input.contactPhone !== undefined ? parseContactPhone(input.contactPhone) : undefined;
+
+      // Validate the state the row would be in AFTER this save: sharing a
+      // field that is empty is a bug, not a state.
+      const nextInstagram = instagram !== undefined ? instagram : ctx.user.instagramHandle;
+      const nextPhone = phone !== undefined ? phone : ctx.user.contactPhone;
+      const nextShareInstagram = input.shareInstagram ?? ctx.user.shareInstagram;
+      const nextSharePhone = input.sharePhone ?? ctx.user.sharePhone;
+      if (nextShareInstagram && !nextInstagram) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Add your Instagram handle before turning on sharing, or turn sharing off.',
+        });
+      }
+      if (nextSharePhone && !nextPhone) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Add your phone number before turning on sharing, or turn sharing off.',
+        });
+      }
+
       const [updated] = await ctx.db
         .update(users)
         .set({
           ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
           ...(input.avatarUrl !== undefined ? { avatarUrl: input.avatarUrl } : {}),
           ...(input.bio !== undefined ? { bio: input.bio } : {}),
+          ...(instagram !== undefined ? { instagramHandle: instagram } : {}),
+          ...(phone !== undefined ? { contactPhone: phone } : {}),
+          ...(input.shareInstagram !== undefined ? { shareInstagram: input.shareInstagram } : {}),
+          ...(input.sharePhone !== undefined ? { sharePhone: input.sharePhone } : {}),
         })
         .where(eq(users.id, ctx.user.id))
         .returning();
@@ -302,7 +372,8 @@ export const userRouter = router({
    *
    *   any accepted reservation (buyer or seller) ──▶ CONFLICT, nothing changes
    *   otherwise, in one transaction:
-   *     users            → deletedAt set, displayName/email/avatar/bio wiped
+   *     users            → deletedAt set, displayName/email/avatar/bio and
+   *                        instagram/contact phone + share flags wiped
    *     listings (mine)  → active|reserved|expired → removed (sold/removed untouched)
    *     reservations     → requested|countered (mine) → cancelled, 'account_closed'
    *                        (completed reservations are never touched)
@@ -350,6 +421,11 @@ export const userRouter = router({
             phoneVerifiedAt: null,
             smsOptIn: false,
             smsOptOutAt: now,
+            // Contact sharing: wipe the values AND the opt-ins.
+            instagramHandle: null,
+            contactPhone: null,
+            shareInstagram: false,
+            sharePhone: false,
           })
           .where(eq(users.id, userId));
 

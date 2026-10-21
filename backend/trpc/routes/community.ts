@@ -12,10 +12,10 @@
  *  - Posting needs a verified campus email; reading needs a signed-in account.
  */
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gt, inArray, isNull, lt, notInArray, or } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { communityPosts, reports, users, type CommunityPost } from '../../db/schema';
+import { communityPostVotes, communityPosts, reports, users, type CommunityPost } from '../../db/schema';
 import type { Db } from '../../db/client';
 import { blockedUserIds, toPublicUser } from '../lib';
 import { campusVerifiedProcedure, moderatorProcedure, protectedProcedure, router } from '../trpc';
@@ -31,11 +31,23 @@ function liveFilter(now: Date) {
 
 async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
   if (rows.length === 0) return [];
+  const postIds = rows.map((r) => r.id);
   const authors = await db
     .select()
     .from(users)
     .where(inArray(users.id, [...new Set(rows.map((r) => r.authorId))]));
   const byId = new Map(authors.map((u) => [u.id, u]));
+  const totals = await db
+    .select({ postId: communityPostVotes.postId, total: count() })
+    .from(communityPostVotes)
+    .where(inArray(communityPostVotes.postId, postIds))
+    .groupBy(communityPostVotes.postId);
+  const totalById = new Map(totals.map((t) => [t.postId, Number(t.total)]));
+  const mine = await db
+    .select({ postId: communityPostVotes.postId })
+    .from(communityPostVotes)
+    .where(and(eq(communityPostVotes.userId, viewerId), inArray(communityPostVotes.postId, postIds)));
+  const votedIds = new Set(mine.map((m) => m.postId));
   return rows.map((p) => ({
     id: p.id,
     kind: p.kind,
@@ -44,8 +56,39 @@ async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
     expiresAt: p.expiresAt,
     author: toPublicUser(byId.get(p.authorId)!),
     isMine: p.authorId === viewerId,
+    /** Popularity only. Never an endorsement, and not a safety signal. */
+    voteCount: totalById.get(p.id) ?? 0,
+    viewerVoted: votedIds.has(p.id),
   }));
 }
+
+/**
+ * Feed ranking. Every sort goes through the same `liveFilter` + campus +
+ * block conditions in `feed`, so no sort can resurface an expired or removed
+ * post. Sorts:
+ *  - new: createdAt desc.
+ *  - top: total upvotes desc, then newest.
+ *  - hot: recent vote velocity with time decay. Each upvote is worth
+ *    0.5^(ageMinutes / HOT_HALF_LIFE_MIN), so a vote from the last few
+ *    minutes counts ~1, one from an hour ago ~0.25, and votes older than
+ *    HOT_WINDOW_HOURS count 0. An old post with many old votes therefore
+ *    scores ~0 and sinks; ties fall back to newest.
+ *    Community posts have NO comments yet, so "hot" ranks on vote activity
+ *    only. If comments are added, add their decayed count into the same sum.
+ * The hot score depends on the clock, so the cursor freezes `asOf` from the
+ * first page and later pages are scored at that same instant.
+ */
+export const HOT_HALF_LIFE_MIN = 30;
+export const HOT_WINDOW_HOURS = 6;
+
+export const communitySorts = ['new', 'top', 'hot'] as const;
+
+const cursorSchema = z.object({
+  score: z.number().finite(),
+  asOf: z.number().int(),
+  createdAt: z.number().int(),
+  id: z.uuid(),
+});
 
 /** Loads a live post on the viewer's campus, or NOT_FOUND (expired, removed, other campus, blocked). */
 async function loadVisible(db: Db, id: string, viewer: { id: string; campusId: string }) {
@@ -70,40 +113,114 @@ export const communityRouter = router({
       z
         .object({
           kind: z.enum(['buying', 'selling']).optional(),
-          cursor: z.string().optional(),
+          sort: z.enum(communitySorts).default('new'),
+          cursor: z.string().max(300).optional(),
           limit: z.number().int().min(1).max(50).default(20),
         })
-        .default({ limit: 20 }),
+        .default({ limit: 20, sort: 'new' }),
     )
     .query(async ({ ctx, input }) => {
-      const now = new Date();
-      const conditions = [eq(communityPosts.campusId, ctx.user.campusId), liveFilter(now)!];
+      let cursor: z.infer<typeof cursorSchema> | null = null;
+      if (input.cursor) {
+        try {
+          cursor = cursorSchema.parse(JSON.parse(input.cursor));
+        } catch {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid cursor.' });
+        }
+      }
+      const now = cursor ? new Date(cursor.asOf) : new Date();
+      // Expiry/removal are judged at the real current time, never the frozen one.
+      const conditions = [eq(communityPosts.campusId, ctx.user.campusId), liveFilter(new Date())!];
       if (input.kind) conditions.push(eq(communityPosts.kind, input.kind));
       const hidden = await blockedUserIds(ctx.db, ctx.user.id);
       if (hidden.length > 0) conditions.push(notInArray(communityPosts.authorId, hidden));
-      if (input.cursor) {
-        const [createdAtRaw, id] = input.cursor.split('|');
-        const createdAt = new Date(createdAtRaw!);
+
+      // Per-post vote aggregates (total + time-decayed recent score).
+      const asOfIso = now.toISOString();
+      const v = ctx.db
+        .select({
+          postId: communityPostVotes.postId,
+          total: count().as('total'),
+          hot: sql<number>`coalesce(sum(power(0.5, extract(epoch from (${asOfIso}::timestamptz - ${communityPostVotes.createdAt})) / ${HOT_HALF_LIFE_MIN * 60}::float8)) filter (where ${communityPostVotes.createdAt} <= ${asOfIso}::timestamptz and ${communityPostVotes.createdAt} > ${asOfIso}::timestamptz - make_interval(hours => ${HOT_WINDOW_HOURS})), 0)::float8`.as('hot'),
+        })
+        .from(communityPostVotes)
+        .groupBy(communityPostVotes.postId)
+        .as('v');
+
+      const totalExpr = sql<number>`coalesce(${v.total}, 0)::float8`;
+      const hotExpr = sql<number>`coalesce(${v.hot}, 0)::float8`;
+      const scoreExpr = input.sort === 'top' ? totalExpr : input.sort === 'hot' ? hotExpr : sql<number>`0::float8`;
+
+      if (cursor) {
+        const cAt = new Date(cursor.createdAt);
+        const tie = or(
+          lt(communityPosts.createdAt, cAt),
+          and(eq(communityPosts.createdAt, cAt), lt(communityPosts.id, cursor.id)),
+        )!;
         conditions.push(
-          or(
-            lt(communityPosts.createdAt, createdAt),
-            and(eq(communityPosts.createdAt, createdAt), lt(communityPosts.id, id!)),
-          )!,
+          input.sort === 'new'
+            ? tie
+            : or(sql`${scoreExpr} < ${cursor.score}::float8`, and(sql`${scoreExpr} = ${cursor.score}::float8`, tie)!)!,
         );
       }
+
+      const ordering =
+        input.sort === 'new'
+          ? [desc(communityPosts.createdAt), desc(communityPosts.id)]
+          : [sql`${scoreExpr} desc`, desc(communityPosts.createdAt), desc(communityPosts.id)];
+
       const rows = await ctx.db
-        .select()
+        .select({ post: communityPosts, score: scoreExpr })
         .from(communityPosts)
+        .leftJoin(v, eq(v.postId, communityPosts.id))
         .where(and(...conditions))
-        .orderBy(desc(communityPosts.createdAt), desc(communityPosts.id))
+        .orderBy(...ordering)
         .limit(input.limit + 1);
-      const page = rows.slice(0, input.limit);
-      const next = rows.length > input.limit ? page[page.length - 1] : undefined;
+      const pageRows = rows.slice(0, input.limit);
+      const last = rows.length > input.limit ? pageRows[pageRows.length - 1] : undefined;
       return {
-        items: await shape(ctx.db, page, ctx.user.id),
-        nextCursor: next ? `${next.createdAt.toISOString()}|${next.id}` : undefined,
+        items: await shape(
+          ctx.db,
+          pageRows.map((r) => r.post),
+          ctx.user.id,
+        ),
+        nextCursor: last
+          ? JSON.stringify({
+              score: Number(last.score),
+              asOf: now.getTime(),
+              createdAt: last.post.createdAt.getTime(),
+              id: last.post.id,
+            })
+          : undefined,
         serverNow: now,
       };
+    }),
+
+  /**
+   * Set (not toggle) the viewer's upvote. Idempotent by design: a double-tap
+   * or a retry sends the same target state and cannot flip it back. The
+   * (post_id, user_id) primary key makes a duplicate insert a no-op even under
+   * concurrency. Only live posts on the viewer's campus can be voted on.
+   */
+  setVote: protectedProcedure
+    .input(z.object({ id: z.uuid(), voted: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const post = await loadVisible(ctx.db, input.id, ctx.user);
+      if (input.voted) {
+        await ctx.db
+          .insert(communityPostVotes)
+          .values({ postId: post.id, userId: ctx.user.id })
+          .onConflictDoNothing();
+      } else {
+        await ctx.db
+          .delete(communityPostVotes)
+          .where(and(eq(communityPostVotes.postId, post.id), eq(communityPostVotes.userId, ctx.user.id)));
+      }
+      const [row] = await ctx.db
+        .select({ total: count() })
+        .from(communityPostVotes)
+        .where(eq(communityPostVotes.postId, post.id));
+      return { id: post.id, voteCount: Number(row?.total ?? 0), viewerVoted: input.voted };
     }),
 
   byId: protectedProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {

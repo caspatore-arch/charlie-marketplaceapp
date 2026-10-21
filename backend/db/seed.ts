@@ -15,6 +15,7 @@ import {
   availabilityWindows,
   bids,
   communityPosts,
+  communityPostVotes,
   campuses,
   listingPhotos,
   listingSpots,
@@ -645,6 +646,18 @@ export async function seed(): Promise<void> {
       };
     }),
   );
+
+  // Demo upvotes on the demo posts above (deleted with them via ON DELETE
+  // CASCADE, so re-seeding never duplicates). Shaped so the sorts differ among
+  // the buying posts: Top puts the TI-84 post first (2 older votes); Hottest
+  // puts the mini-fridge post first (1 vote a few minutes ago).
+  const voteAgo = (min: number) => new Date(Date.now() - min * 60 * 1000);
+  await db.insert(communityPostVotes).values([
+    { postId: P(1), userId: SAM_ID, createdAt: voteAgo(5) },
+    { postId: P(3), userId: MAYA_ID, createdAt: voteAgo(150) },
+    { postId: P(3), userId: JORDAN_ID, createdAt: voteAgo(140) },
+    { postId: P(2), userId: JORDAN_ID, createdAt: voteAgo(40) },
+  ]);
 
   // Past sales and their completed meetups. Inserted after the browsable
   // listings so the feed is untouched: every row here is already `sold`.

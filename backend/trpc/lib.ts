@@ -572,23 +572,39 @@ export async function blockedUserIds(db: Db, viewerId: string): Promise<string[]
 
 /* ----------------------------------------------------------------- shapes */
 
-/** Public view of a user. Never includes `email`. */
+/**
+ * Public view of a user. Never includes `email`.
+ *
+ * `instagramHandle` / `contactPhone` are present ONLY when the user opted in
+ * to showing that field (and it is non-empty). When not shared the KEY IS
+ * ABSENT from the object — not null, not hidden by the client — because any
+ * client can read the raw tRPC response. `contactPhone` is typed by the user
+ * and never verified.
+ */
 export type PublicUser = {
   id: string;
   displayName: string;
   avatarUrl: string | null;
   isDemo: boolean;
   campusEmailVerified: boolean;
+  instagramHandle?: string;
+  contactPhone?: string;
 };
 
 export function toPublicUser(u: User): PublicUser {
-  return {
+  const out: PublicUser = {
     id: u.id,
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
     isDemo: u.isDemo,
     campusEmailVerified: u.campusEmailVerifiedAt != null,
   };
+  // A closed account never shares, whatever the flags say.
+  if (u.deletedAt == null) {
+    if (u.shareInstagram && u.instagramHandle) out.instagramHandle = u.instagramHandle;
+    if (u.sharePhone && u.contactPhone) out.contactPhone = u.contactPhone;
+  }
+  return out;
 }
 
 export type ListingCard = Listing & {

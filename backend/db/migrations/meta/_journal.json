@@ -71,6 +71,20 @@
       "when": 1792554217954,
       "tag": "0009_offers_booking_community_sms",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792618146068,
+      "tag": "0010_community_post_votes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792618433172,
+      "tag": "0011_contact_sharing",
+      "breakpoints": true
     }
   ]
 }

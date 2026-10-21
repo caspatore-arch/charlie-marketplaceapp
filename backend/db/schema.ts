@@ -163,6 +163,17 @@ export const users = pgTable('users', {
   smsOptIn: boolean('sms_opt_in').notNull().default(false),
   smsOptInAt: ts('sms_opt_in_at'),
   smsOptOutAt: ts('sms_opt_out_at'),
+  /**
+   * Opt-in contact sharing. Both values are typed by the user and NEVER
+   * verified. `contactPhone` is deliberately NOT `phone`: `phone` is UNIQUE
+   * and is what phone sign-in authenticates against, so a typed-in number
+   * there would let anyone claim another person's login. Neither value is
+   * exposed unless its share flag is true (see toPublicUser).
+   */
+  instagramHandle: text('instagram_handle'),
+  contactPhone: text('contact_phone'),
+  shareInstagram: boolean('share_instagram').notNull().default(false),
+  sharePhone: boolean('share_phone').notNull().default(false),
 });
 
 export const sessions = pgTable('sessions', {
@@ -737,6 +748,31 @@ export const communityPosts = pgTable(
   ],
 );
 
+/**
+ * Upvotes on community posts (popularity only; never an endorsement or a
+ * safety signal). The composite primary key is the UNIQUE constraint: one
+ * vote per user per post, enforced by the database, so concurrent double-taps
+ * cannot create two rows (the second insert hits ON CONFLICT DO NOTHING).
+ * Counts are always derived with COUNT(*), so they can never go negative.
+ */
+export const communityPostVotes = pgTable(
+  'community_post_votes',
+  {
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => communityPosts.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.postId, t.userId] }),
+    // Recent-vote scans for the "hot" ranking.
+    index('community_post_votes_recent_idx').on(t.createdAt),
+  ],
+);
+
 /* -------------------------------------------------------- phone + SMS */
 
 /** One-time sign-in codes. Only a sha256 hash is stored, never the code. */
@@ -814,5 +850,6 @@ export type NotificationPreferences = typeof notificationPreferences.$inferSelec
 export type Offer = typeof offers.$inferSelect;
 export type OfferStatus = Offer['status'];
 export type CommunityPost = typeof communityPosts.$inferSelect;
+export type CommunityPostVote = typeof communityPostVotes.$inferSelect;
 export type SmsMessage = typeof smsMessages.$inferSelect;
 export type ReservationEvent = typeof reservationEvents.$inferSelect;

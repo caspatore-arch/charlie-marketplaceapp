@@ -1,6 +1,7 @@
 /**
  * Community tab: short, 24-hour campus posts ("Does anyone have shirts?").
- * Posts show the author's normal display name. Filter chips, composer,
+ * Posts show the author's normal display name. Buyers / Sellers tabs, Top /
+ * Newest / Hottest sorts (all ranked by the server), upvotes, composer,
  * pull-to-refresh, infinite scroll, per-post actions (delete / report / block).
  */
 import React, { useCallback, useMemo, useState } from 'react';
@@ -9,13 +10,13 @@ import { useRouter } from 'expo-router';
 import { MessagesSquare, Users } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
-import { Chip } from '@/components/ui/Chip';
 import { Button } from '@/components/ui/Button';
 import { Sheet } from '@/components/ui/Sheet';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { PostCard } from '@/components/community/PostCard';
+import { FeedPost } from '@/components/community/FeedPost';
+import { FeedControls, type CommunitySort } from '@/components/community/FeedControls';
 import { PostComposer } from '@/components/community/PostComposer';
 import { PostReportSheet } from '@/components/community/PostReportSheet';
 import { useNow } from '@/components/community/useNow';
@@ -24,8 +25,6 @@ import { trpc } from '@/lib/trpc';
 import { confirmAction } from '@/utils/confirm';
 import { colors, space } from '@/constants/theme';
 import type { CommunityPost, CommunityPostKind } from '@/types';
-
-type Filter = 'all' | CommunityPostKind;
 
 export default function CommunityScreen() {
   const { status } = useAuth();
@@ -65,14 +64,15 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
   const router = useRouter();
   const utils = trpc.useUtils();
   const now = useNow();
-  const [filter, setFilter] = useState<Filter>('all');
+  const [kind, setKind] = useState<CommunityPostKind>('buying');
+  const [sort, setSort] = useState<CommunitySort>('new');
   const [actionPost, setActionPost] = useState<CommunityPost | null>(null);
   const [reportPost, setReportPost] = useState<CommunityPost | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const me = trpc.auth.me.useQuery();
   const feed = trpc.community.feed.useInfiniteQuery(
-    { kind: filter === 'all' ? undefined : filter, limit: 20 },
+    { kind, sort, limit: 20 },
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
 
@@ -111,16 +111,7 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
   const header = (
     <View style={styles.listHeader}>
       <PostComposer onPosted={refetchFeed} />
-      <View style={styles.chips}>
-        {(['all', 'buying', 'selling'] as const).map((f) => (
-          <Chip
-            key={f}
-            label={f === 'all' ? 'All' : f === 'buying' ? 'Buying' : 'Selling'}
-            selected={filter === f}
-            onPress={() => setFilter(f)}
-          />
-        ))}
-      </View>
+      <FeedControls kind={kind} sort={sort} onKind={setKind} onSort={setSort} />
       {actionError ? (
         <Text variant="label" color="danger" accessibilityRole="alert">
           {actionError}
@@ -144,8 +135,12 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
     empty = (
       <EmptyState
         icon={<Users size={40} color={colors.inkFaint} />}
-        title="Nothing yet"
-        body="Ask if anyone's selling what you need. Posts disappear after 24 hours."
+        title={kind === 'buying' ? 'No buyer posts yet' : 'No seller posts yet'}
+        body={
+          kind === 'buying'
+            ? 'Nobody is looking for anything right now. Posts disappear after 24 hours.'
+            : "Nobody is selling anything here right now. Posts disappear after 24 hours."
+        }
       />
     );
   }
@@ -180,7 +175,7 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
         ListEmptyComponent={empty}
         ItemSeparatorComponent={() => <View style={{ height: space.md }} />}
         renderItem={({ item }) => (
-          <PostCard
+          <FeedPost
             post={item}
             now={now}
             onPressAuthor={() => router.push(`/user/${item.author.id}`)}
@@ -271,7 +266,6 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   listContent: { paddingHorizontal: space.lg, paddingBottom: space.xxxl, flexGrow: 1 },
   listHeader: { gap: space.md, paddingBottom: space.md },
-  chips: { flexDirection: 'row', gap: space.sm },
   actions: { gap: space.sm },
   footerSkeleton: { marginTop: space.md },
 });
