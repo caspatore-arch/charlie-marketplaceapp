@@ -2,78 +2,336 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Dibbs — the UArizona student marketplace</title>
-  <meta name="description" content="Buy and sell clothes, shoes, dorm stuff, books and tech with other University of Arizona students. Join the waitlist." />
+  <meta name="description" content="Buy and sell clothes, shoes, dorm stuff, books and tech with other University of Arizona students. Listings last one day. Join the waitlist." />
+
+  <meta property="og:title" content="Dibbs — the UArizona student marketplace" />
+  <meta property="og:description" content="Clothes, shoes, dorm stuff, books and tech, handed off in person on campus. Listings last one day." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="/dibbs-wordmark-white.png" />
+  <meta name="theme-color" content="#EE3B30" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
   <style>
+    /*
+      Palette is the app's own (constants/theme.ts), kept in sync by hand
+      because this page deploys separately from the Expo bundle.
+
+      The two reds are not interchangeable. --brand is the literal logo red;
+      white on it is 3.96:1, which clears WCAG AA for LARGE text (3:1) and
+      fails it for body copy (4.5:1). So --brand is only ever a large-type or
+      graphic surface. --accent is the deepened sibling used for buttons and
+      links, where white text has to pass at any size (4.63:1).
+    */
     :root {
-      --bg: #FAF8F5; --surface: #FFFFFF; --ink: #161513; --muted: #6F6A62;
-      --line: #E6E1DA; --accent: #C8442B; --accent-soft: #FBE9E4; --success: #2E7D4F;
+      --bg: #FCF8F7;
+      --surface: #FFFFFF;
+      --surface-muted: #F5F0EE;
+      --ink: #161513;
+      --ink-muted: #6F6A62;
+      --ink-faint: #6E6860;
+      --line: #E8E1DE;
+      --brand: #EE3B30;
+      --accent: #DE2F26;
+      --accent-pressed: #C4281F;
+      --accent-soft: #FDEAE8;
+      --accent-ink: #A82018;
+      --success: #2E7D4F;
+      --shadow: 0 1px 2px rgba(22,21,19,.04), 0 8px 24px -8px rgba(22,21,19,.12);
+      --font: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
+
     * { box-sizing: border-box; }
+
     body {
-      margin: 0; background: var(--bg); color: var(--ink);
-      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
     }
-    main { max-width: 1040px; margin: 0 auto; padding: 48px 16px 64px; display: grid; gap: 40px; }
-    @media (min-width: 800px) { main { grid-template-columns: 1.1fr 0.9fr; align-items: start; padding-top: 96px; } }
-    .brand { font-weight: 800; font-size: 22px; color: var(--accent); letter-spacing: -0.3px; }
-    .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--accent); margin: 24px 0 8px; }
-    h1 { font-size: clamp(34px, 6vw, 52px); line-height: 1.05; letter-spacing: -1px; margin: 0 0 16px; }
-    .lede { color: var(--muted); font-size: 18px; margin: 0 0 28px; max-width: 34ch; }
-    ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
-    ol li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; }
-    ol li span { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
-      font-weight: 700; font-size: 14px; display: grid; place-items: center; }
-    ol b { display: block; }
-    ol p { margin: 2px 0 0; color: var(--muted); font-size: 15px; }
-    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 28px;
-      box-shadow: 0 4px 12px rgba(0,0,0,.06); }
-    .card h2 { margin: 0 0 6px; font-size: 22px; }
-    .card p { margin: 0 0 20px; color: var(--muted); font-size: 15px; }
-    label { display: block; font-size: 14px; font-weight: 600; margin: 0 0 6px; }
-    input[type=email], input[type=text] { width: 100%; min-height: 48px; padding: 12px 14px; font-size: 16px;
-      border: 1px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--ink); margin-bottom: 16px; }
-    input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-    button { width: 100%; min-height: 52px; border: 0; border-radius: 14px; background: var(--accent); color: #fff;
-      font-size: 17px; font-weight: 700; cursor: pointer; }
-    button:hover { filter: brightness(0.95); }
-    .fine { font-size: 13px; color: var(--muted); margin: 14px 0 0; }
+
+    /* ---------- Hero: full-bleed brand band ---------------------------- */
+    /*
+      The band is the logo's own red, so the transparent white wordmark sits
+      on it with no visible edge — the mark reads as printed onto the page
+      rather than pasted over it.
+    */
+    .hero {
+      background: var(--brand);
+      padding: calc(44px + env(safe-area-inset-top, 0px)) 16px 52px;
+    }
+    .hero-inner { max-width: 1060px; margin: 0 auto; }
+
+    .logo {
+      display: block;
+      width: clamp(176px, 34vw, 268px);
+      height: auto;
+    }
+
+    .tagline {
+      /* The logo's own tagline face is a geometric sans with a double-story
+         'a' — Montserrat. Set as live text so it stays crisp at any size
+         instead of being baked into the image. */
+      margin: 10px 0 0;
+      font-size: clamp(13px, 2.4vw, 15px);
+      font-weight: 600;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: #fff;
+    }
+
+    .hero h1 {
+      margin: 30px 0 0;
+      max-width: 15ch;
+      font-size: clamp(36px, 7.4vw, 62px);
+      font-weight: 800;
+      line-height: 1.04;
+      letter-spacing: -.022em;
+      color: #fff;
+      text-wrap: balance;
+    }
+
+    /* 20px at weight 600 counts as WCAG "large text", so white on the brand
+       red (3.96:1) is conformant here. Do not shrink or lighten this. */
+    .hero .lede {
+      margin: 18px 0 0;
+      max-width: 42ch;
+      font-size: clamp(17px, 2.6vw, 20px);
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .hero .pill {
+      display: inline-block;
+      margin-top: 26px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.17);
+      border: 1px solid rgba(255,255,255,.42);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+
+    /* ---------- Body ---------------------------------------------------- */
+    main {
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 0 16px 72px;
+    }
+
+    .panel {
+      display: grid;
+      gap: 32px;
+      margin-top: -28px; /* the signup card laps onto the red band */
+    }
+    @media (min-width: 880px) {
+      .panel { grid-template-columns: 1fr 400px; gap: 48px; align-items: start; }
+    }
+
+    .steps { padding-top: 56px; }
+    @media (min-width: 880px) { .steps { padding-top: 60px; } }
+
+    .section-label {
+      margin: 0 0 20px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--accent-ink);
+    }
+
+    ol.steps-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 26px; }
+    ol.steps-list li { display: grid; grid-template-columns: 38px 1fr; gap: 16px; align-items: start; }
+    ol.steps-list .num {
+      width: 38px; height: 38px; border-radius: 12px;
+      background: var(--accent-soft);
+      color: var(--accent-ink); /* plain --accent on this tint is 3.99:1 and fails */
+      font-size: 15px; font-weight: 700;
+      display: grid; place-items: center;
+    }
+    ol.steps-list b { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+    ol.steps-list p { margin: 4px 0 0; color: var(--ink-muted); font-size: 15px; }
+
+    /* ---------- Signup card --------------------------------------------- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 24px;
+    }
+    @media (max-width: 879px) { .card { position: static; } }
+
+    .card h2 { margin: 0 0 6px; font-size: 23px; font-weight: 800; letter-spacing: -.02em; }
+    .card .sub { margin: 0 0 22px; color: var(--ink-muted); font-size: 15px; }
+
+    label { display: block; font-size: 14px; font-weight: 600; margin: 0 0 7px; }
+
+    input[type=email], input[type=text] {
+      width: 100%;
+      min-height: 50px;
+      padding: 13px 15px;
+      /* 16px minimum: iOS Safari zooms the whole page on focus below this. */
+      font-size: 16px;
+      font-family: var(--font);
+      color: var(--ink);
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      margin-bottom: 18px;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    input::placeholder { color: var(--ink-faint); }
+    input[type=email]:focus, input[type=text]:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    /* Keyboard users still get a visible ring even in forced-colors mode. */
+    input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    button {
+      width: 100%;
+      min-height: 52px;
+      border: 0;
+      border-radius: 14px;
+      background: var(--accent);
+      color: #fff;
+      font-family: var(--font);
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -.01em;
+      cursor: pointer;
+      transition: background-color .15s ease, transform .06s ease;
+    }
+    button:hover { background: var(--accent-pressed); }
+    button:active { transform: translateY(1px); }
+    button:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+
+    .fine { font-size: 13px; color: var(--ink-muted); margin: 16px 0 0; }
+
     .hidden { display: none; }
-    footer { grid-column: 1 / -1; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+
+    /* ---------- Honesty strip ------------------------------------------- */
+    /*
+      Says plainly what Dibbs is not. A marketplace that implies protection it
+      does not provide is the failure mode worth designing against, so this is
+      given real space rather than buried in the footer.
+    */
+    .plain {
+      margin-top: 56px;
+      padding: 22px 24px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      display: grid;
+      gap: 8px;
+    }
+    .plain h3 { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: .02em; }
+    .plain p { margin: 0; color: var(--ink-muted); font-size: 14px; }
+
+    footer {
+      margin-top: 40px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      color: var(--ink-faint);
+      font-size: 13px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
   </style>
 </head>
+
 <body>
-  <main>
-    <section>
-      <div class="brand">Dibbs</div>
-      <div class="eyebrow">University of Arizona · coming soon</div>
+  <header class="hero">
+    <div class="hero-inner">
+      <img class="logo" src="/dibbs-wordmark-white.png" width="900" height="376" alt="Dibbs" />
+      <p class="tagline">Campus Marketplace</p>
+
       <h1>Buy and sell on campus, one day at a time.</h1>
-      <p class="lede">A marketplace just for UArizona students — clothes, shoes, dorm stuff, books and tech, handed off in person on campus.</p>
-      <ol>
-        <li><span>1</span><div><b>List it for 24 hours</b><p>A photo, a price, and when you can meet. Listings don't linger.</p></div></li>
-        <li><span>2</span><div><b>Buyers book an exact time and spot</b><p>No "is this still available?" — pick a 30-minute slot at a campus meetup spot.</p></div></li>
-        <li><span>3</span><div><b>Make an offer</b><p>Price too high? Offer less. The seller accepts or declines.</p></div></li>
-      </ol>
+      <p class="lede">
+        A marketplace just for UArizona students — clothes, shoes, dorm stuff,
+        books and tech, handed off in person on campus.
+      </p>
+      <span class="pill">University of Arizona · coming soon</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="panel">
+      <section class="steps" aria-labelledby="how">
+        <p class="section-label" id="how">How it works</p>
+        <ol class="steps-list">
+          <li>
+            <span class="num" aria-hidden="true">1</span>
+            <div>
+              <b>List it for 24 hours</b>
+              <p>A photo, a price, and when you can meet. Listings don't linger — what you see is what's actually still around.</p>
+            </div>
+          </li>
+          <li>
+            <span class="num" aria-hidden="true">2</span>
+            <div>
+              <b>Buyers book an exact time and spot</b>
+              <p>No "is this still available?" Pick a 30-minute slot at a campus meetup spot from the times the seller already offered.</p>
+            </div>
+          </li>
+          <li>
+            <span class="num" aria-hidden="true">3</span>
+            <div>
+              <b>Make an offer</b>
+              <p>Price too high? Offer less, with the time and place attached. The seller accepts or declines.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="card" aria-labelledby="join">
+        <h2 id="join">Get early access</h2>
+        <p class="sub">We'll email you when Dibbs opens for UArizona students. Nothing else.</p>
+
+        <!-- Netlify Forms: submissions appear in the Netlify dashboard under Forms.
+             The name, data-netlify, honeypot and hidden form-name below are how
+             Netlify detects this form when it parses the deployed HTML. Changing
+             or removing any of them does not error — it silently stops capturing
+             signups. Leave them exactly as they are. -->
+        <form name="waitlist" method="POST" data-netlify="true" netlify-honeypot="company" action="/thanks.html">
+          <input type="hidden" name="form-name" value="waitlist" />
+          <p class="hidden"><label>Leave this empty <input name="company" /></label></p>
+
+          <label for="email">Email (your @arizona.edu works best)</label>
+          <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@arizona.edu" />
+
+          <label for="interest">What would you buy or sell? (optional)</label>
+          <input id="interest" name="interest" type="text" maxlength="200" placeholder="e.g. mini fridge, textbooks, sneakers" />
+
+          <button type="submit">Join the waitlist</button>
+          <p class="fine">We only use your email to tell you when Dibbs launches. Unsubscribe anytime by replying "stop".</p>
+        </form>
+      </section>
+    </div>
+
+    <section class="plain">
+      <h3>What Dibbs is not</h3>
+      <p>Dibbs doesn't hold your money, handle payment, or check who anyone is. A campus email proves someone is a student here — not that they're trustworthy. Meet in public, on campus, and use your own judgment.</p>
     </section>
 
-    <section class="card" aria-labelledby="join">
-      <h2 id="join">Get early access</h2>
-      <p>We'll email you when Dibbs opens for UArizona students. Nothing else.</p>
-      <!-- Netlify Forms: submissions appear in the Netlify dashboard under Forms. -->
-      <form name="waitlist" method="POST" data-netlify="true" netlify-honeypot="company" action="/thanks.html">
-        <input type="hidden" name="form-name" value="waitlist" />
-        <p class="hidden"><label>Leave this empty <input name="company" /></label></p>
-        <label for="email">Email (your @arizona.edu works best)</label>
-        <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@arizona.edu" />
-        <label for="interest">What would you buy or sell? (optional)</label>
-        <input id="interest" name="interest" type="text" maxlength="200" placeholder="e.g. mini fridge, textbooks, sneakers" />
-        <button type="submit">Join the waitlist</button>
-        <p class="fine">We only use your email to tell you when Dibbs launches. Unsubscribe anytime by replying "stop".</p>
-      </form>
-    </section>
-
-    <footer>Dibbs is an independent student project and is not affiliated with or endorsed by the University of Arizona.</footer>
+    <footer>
+      Dibbs is an independent student project and is not affiliated with or endorsed by the University of Arizona.
+    </footer>
   </main>
 </body>
 </html>
