@@ -1,5 +1,5 @@
 /**
- * Listings / Posts tabs, identical on your profile and anyone else's.
+ * Listings / Posts / Comments tabs, identical on your profile and anyone else's.
  *
  * Deliberately no conversations here. Chats are private between two people:
  * nothing in this component, or in the queries behind it, takes a
@@ -22,7 +22,7 @@ import { timeLeftLabel, useNow } from '@/components/community/useNow';
 import { formatRelative } from '@/utils/format';
 import { space } from '@/constants/theme';
 
-type Tab = 'listings' | 'posts';
+type Tab = 'listings' | 'posts' | 'comments';
 
 export function ProfileContent({
   userId,
@@ -47,6 +47,7 @@ export function ProfileContent({
     : (theirs.data ?? []);
 
   const postsQuery = trpc.user.posts.useQuery({ userId }, { enabled: tab === 'posts' });
+  const commentsQuery = trpc.user.comments.useQuery({ userId }, { enabled: tab === 'comments' });
 
   return (
     <View>
@@ -54,6 +55,7 @@ export function ProfileContent({
         segments={[
           { key: 'listings', label: 'Listings' },
           { key: 'posts', label: 'Posts' },
+          { key: 'comments', label: 'Comments' },
         ]}
         value={tab}
         onChange={setTab}
@@ -91,6 +93,40 @@ export function ProfileContent({
                 </View>
               )}
             />
+          )
+        ) : tab === 'comments' ? (
+          commentsQuery.isPending ? (
+            <Skeleton height={90} />
+          ) : commentsQuery.isError ? (
+            <ErrorState message={commentsQuery.error.message} onRetry={() => commentsQuery.refetch()} />
+          ) : commentsQuery.data.length === 0 ? (
+            <EmptyState
+              title={isSelf ? "You haven't commented lately" : `${firstName} hasn't commented lately`}
+              body="Comments live as long as the post they're on, so this fills up whenever someone joins a conversation."
+            />
+          ) : (
+            <View style={styles.posts}>
+              {commentsQuery.data.map((c) => (
+                <Card key={c.id} style={styles.post}>
+                  <Text variant="caption" color="inkFaint" numberOfLines={2}>
+                    On: {c.postExcerpt}
+                  </Text>
+                  <Text variant="body" style={styles.postBody}>
+                    {c.body}
+                  </Text>
+                  <View style={styles.postTop}>
+                    <Text variant="caption" color="inkFaint">
+                      {formatRelative(c.createdAt)} · {timeLeftLabel(c.postExpiresAt, now)}
+                    </Text>
+                    {c.voteCount > 0 ? (
+                      <Text variant="caption" color="inkMuted">
+                        {c.voteCount} {c.voteCount === 1 ? 'upvote' : 'upvotes'}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Card>
+              ))}
+            </View>
           )
         ) : postsQuery.isPending ? (
           <Skeleton height={110} />

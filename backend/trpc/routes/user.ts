@@ -1,10 +1,13 @@
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
 import {
   blocks,
   campuses,
+  communityCommentVotes,
+  communityComments,
   communityPostVotes,
   emailCodes,
   communityPosts,
@@ -31,6 +34,7 @@ import {
   type PublicUser,
 } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
+import { commentReadable, liveFilter } from './community';
 
 export type PublicProfile = PublicUser & {
   campus: typeof campuses.$inferSelect;
@@ -219,6 +223,61 @@ export const userRouter = router({
         return [] as PublicUser[];
       }
       return followList(ctx.db, input.userId, input.direction, ctx.user.id, input.limit);
+    }),
+
+  /**
+   * A person's comments for the profile Comments tab. Every lifecycle rule is
+   * borrowed from the community router, not re-typed: the parent post must
+   * satisfy `liveFilter` (not expired, not removed) on the viewer's campus,
+   * the comment must satisfy `commentReadable` (not removed, author not
+   * closed, not blocked), and a post by someone the viewer has blocked (or who
+   * blocked them) is left out so its text never leaks through a snippet.
+   */
+  comments: protectedProcedure
+    .input(z.object({ userId: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      const hidden = await blockedUserIds(ctx.db, ctx.user.id);
+      if (input.userId !== ctx.user.id && hidden.includes(input.userId)) return [];
+      const postAuthor = alias(users, 'post_author');
+      const rows = await ctx.db
+        .select({ comment: communityComments, post: communityPosts })
+        .from(communityComments)
+        .innerJoin(users, eq(users.id, communityComments.authorId))
+        .innerJoin(communityPosts, eq(communityPosts.id, communityComments.postId))
+        .innerJoin(postAuthor, eq(postAuthor.id, communityPosts.authorId))
+        .where(
+          and(
+            eq(communityComments.authorId, input.userId),
+            // Only the viewer's own block list is applied to the comment author
+            // above; the profile owner is not "hidden" from themselves.
+            commentReadable([]),
+            eq(communityPosts.campusId, ctx.user.campusId),
+            liveFilter(new Date()),
+            isNull(postAuthor.deletedAt),
+            hidden.length > 0 ? notInArray(communityPosts.authorId, hidden) : undefined,
+          ),
+        )
+        .orderBy(desc(communityComments.createdAt))
+        .limit(50);
+      if (rows.length === 0) return [];
+      const totals = await ctx.db
+        .select({ id: communityCommentVotes.commentId, total: count() })
+        .from(communityCommentVotes)
+        .where(inArray(communityCommentVotes.commentId, rows.map((r) => r.comment.id)))
+        .groupBy(communityCommentVotes.commentId);
+      const totalById = new Map(totals.map((t) => [t.id, Number(t.total)]));
+      return rows.map(({ comment, post }) => ({
+        id: comment.id,
+        postId: post.id,
+        body: comment.body,
+        createdAt: comment.createdAt,
+        /** What it was said on, so the comment has context. Expires with the post. */
+        postExcerpt: post.body.length > 80 ? `${post.body.slice(0, 77)}...` : post.body,
+        postExpiresAt: post.expiresAt,
+        isMine: comment.authorId === ctx.user.id,
+        /** Popularity only. Never an endorsement, and not a safety signal. */
+        voteCount: totalById.get(comment.id) ?? 0,
+      }));
     }),
 
   /**

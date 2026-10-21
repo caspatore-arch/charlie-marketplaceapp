@@ -1552,6 +1552,105 @@ async function main(): Promise<number> {
     assert(!jordanFollowing.some((u) => u.id === CLOSER_ID), 'a closed account is not in anyone\'s following list');
   });
 
+  /* ----------------------------------------------------------------- 17 */
+
+  await criterion('17. Comments: one vote each, inherit the post lifecycle, honour blocks, drive Hottest', async () => {
+    // Earlier criteria leave Sam at the live-post cap; clear his board first.
+    for (const old of await sam.user.posts.query({ userId: SAM_ID })) await sam.community.remove.mutate({ id: old.id });
+    const mk = (body: string) => sam.community.create.mutate({ kind: 'buying', body });
+    const P = await mk('Comment test P: anyone have a rice cooker?');
+    const Q = await mk('Comment test Q: anyone have a floor lamp?');
+
+    // Signed-out viewers cannot read or write comments.
+    await expectTrpcError('UNAUTHORIZED', () => guest.community.comments.query({ postId: P.id }));
+    await expectTrpcError('UNAUTHORIZED', () => guest.community.addComment.mutate({ postId: P.id, body: 'hi' }));
+
+    // Empty / whitespace-only / too long are rejected; text is trimmed.
+    await expectTrpcError('BAD_REQUEST', () => jordan.community.addComment.mutate({ postId: P.id, body: '   \n ' }));
+    await expectTrpcError('BAD_REQUEST', () => jordan.community.addComment.mutate({ postId: P.id, body: 'x'.repeat(501) }));
+    const c1 = await jordan.community.addComment.mutate({ postId: P.id, body: '  I have one!  ' });
+    assertEqual(c1.body, 'I have one!', 'comment text is trimmed');
+    const c2 = await maya.community.addComment.mutate({ postId: P.id, body: 'Me too, cheap.' });
+
+    // One vote per person per comment, even under concurrency; never negative.
+    // (Jordan blocked Maya in criterion 9, so Sam and Maya are the voters.)
+    await Promise.all([1, 2, 3, 4].map(() => sam.community.setCommentVote.mutate({ id: c2.id, voted: true })));
+    let list = await sam.community.comments.query({ postId: P.id });
+    assertEqual(list.find((c) => c.id === c2.id)!.voteCount, 1, 'four concurrent votes by one user count once');
+    assert(list.find((c) => c.id === c2.id)!.viewerVoted, 'the voter sees their own vote state');
+    await maya.community.setCommentVote.mutate({ id: c2.id, voted: true });
+    list = await sam.community.comments.query({ postId: P.id });
+    assertEqual(list.find((c) => c.id === c2.id)!.voteCount, 2, 'a second person adds a second vote');
+    const off1 = await sam.community.setCommentVote.mutate({ id: c2.id, voted: false });
+    const off2 = await sam.community.setCommentVote.mutate({ id: c2.id, voted: false });
+    assertEqual(off1.voteCount, 1, 'un-vote removes only my vote');
+    assertEqual(off2.voteCount, 1, 'a repeated un-vote changes nothing');
+    await expectTrpcError('FORBIDDEN', () => maya.community.removeComment.mutate({ id: c1.id }));
+
+    // Comment counts arrive with the post (one aggregate, no per-post request).
+    let samFeed = await sam.community.feed.query({ kind: 'buying', sort: 'new', limit: 50 });
+    assertEqual(samFeed.items.find((i) => i.id === P.id)!.commentCount, 2, 'feed carries the comment count');
+    assertEqual(samFeed.items.find((i) => i.id === Q.id)!.commentCount, 0, 'a post with no comments counts zero');
+
+    // Hottest now counts comment activity: P (2 fresh comments + a comment vote)
+    // outranks the newer, silent Q.
+    const hot = await sam.community.feed.query({ kind: 'buying', sort: 'hot', limit: 50 });
+    assertEqual(hot.items[0]!.id, P.id, 'hot: a post with fresh comments leads');
+    assert(hot.items.findIndex((i) => i.id === P.id) < hot.items.findIndex((i) => i.id === Q.id), 'hot: P above silent Q');
+
+    // Profile Comments tab data: the person's live comments, with context.
+    const jordansComments = await sam.user.comments.query({ userId: JORDAN_ID });
+    assert(jordansComments.some((c) => c.id === c1.id && c.postExcerpt.includes('rice cooker')), "profile lists Jordan's comment");
+
+    // Blocked users' comments are invisible, in the thread, counts, votes and profile.
+    await sam.user.block.mutate({ userId: MAYA_ID });
+    try {
+      list = await sam.community.comments.query({ postId: P.id });
+      assert(!list.some((c) => c.id === c2.id), "a blocked person's comment is hidden from the blocker");
+      samFeed = await sam.community.feed.query({ kind: 'buying', sort: 'new', limit: 50 });
+      assertEqual(samFeed.items.find((i) => i.id === P.id)!.commentCount, 1, 'the count excludes hidden comments');
+      await expectTrpcError('NOT_FOUND', () => sam.community.setCommentVote.mutate({ id: c2.id, voted: true }));
+      assertEqual((await sam.user.comments.query({ userId: MAYA_ID })).length, 0, "a blocked person's profile shows no comments");
+      // ...and the block works both ways.
+      const mayaList = await maya.community.comments.query({ postId: P.id }).catch(() => null);
+      assert(mayaList === null || !mayaList.some((c) => c.id === c1.id && c.author.id === SAM_ID), 'no leak in reverse');
+    } finally {
+      await sam.user.unblock.mutate({ userId: MAYA_ID });
+    }
+
+    // Author deletes own comment: gone for everyone.
+    await jordan.community.removeComment.mutate({ id: c1.id });
+    list = await sam.community.comments.query({ postId: P.id });
+    assert(!list.some((c) => c.id === c1.id), 'a deleted comment is not readable');
+
+    // Comments inherit the post: a REMOVED post's comments are neither readable nor creatable.
+    const cq = await jordan.community.addComment.mutate({ postId: Q.id, body: 'Comment on Q before it is removed' });
+    assert((await sam.user.comments.query({ userId: JORDAN_ID })).some((c) => c.id === cq.id), 'comment shows while its post is live');
+    await sam.community.remove.mutate({ id: Q.id });
+    await expectTrpcError('NOT_FOUND', () => jordan.community.comments.query({ postId: Q.id }));
+    await expectTrpcError('NOT_FOUND', () => jordan.community.addComment.mutate({ postId: Q.id, body: 'too late' }));
+    await expectTrpcError('NOT_FOUND', () => maya.community.setCommentVote.mutate({ id: cq.id, voted: true }));
+    assert(!(await sam.user.comments.query({ userId: JORDAN_ID })).some((c) => c.id === cq.id), 'removed post: comment gone from profile');
+
+    // ...and so are an EXPIRED post's.
+    if (!external) {
+      const { db } = await import('../backend/db/client');
+      const { eq: eqOp } = await import('drizzle-orm');
+      const schema = await import('../backend/db/schema');
+      await db.update(schema.communityPosts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eqOp(schema.communityPosts.id, P.id));
+      await expectTrpcError('NOT_FOUND', () => jordan.community.comments.query({ postId: P.id }));
+      await expectTrpcError('NOT_FOUND', () => jordan.community.addComment.mutate({ postId: P.id, body: 'too late' }));
+      await expectTrpcError('NOT_FOUND', () => sam.community.setCommentVote.mutate({ id: c2.id, voted: true }));
+      assertEqual((await sam.user.comments.query({ userId: MAYA_ID })).length, 0, 'expired post: comment gone from profile');
+      // Deleting the post cascades to its comments and their votes.
+      await db.delete(schema.communityPosts).where(eqOp(schema.communityPosts.id, P.id));
+      const orphans = await db.select().from(schema.communityComments).where(eqOp(schema.communityComments.postId, P.id));
+      assertEqual(orphans.length, 0, 'comments are deleted with their post');
+      const orphanVotes = await db.select().from(schema.communityCommentVotes).where(eqOp(schema.communityCommentVotes.commentId, c2.id));
+      assertEqual(orphanVotes.length, 0, 'comment votes are deleted with their comment');
+    }
+  });
+
   stop?.();
 
   const failed = results.filter((r) => !r.ok);

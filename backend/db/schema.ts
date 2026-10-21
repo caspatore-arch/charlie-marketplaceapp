@@ -774,6 +774,58 @@ export const communityPostVotes = pgTable(
 );
 
 /**
+ * Comments on community posts. A comment has no lifecycle of its own beyond
+ * moderation: whether it can be read or written is decided by its POST's
+ * live conditions (not expired, not removed, same campus) at query time, and
+ * the foreign key cascades so hard-deleting a post leaves no comments behind.
+ * `removedAt` is the soft removal used by the author and by moderators,
+ * mirroring `communityPosts.removedAt`.
+ */
+export const communityComments = pgTable(
+  'community_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => communityPosts.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    removedAt: ts('removed_at'),
+    removedById: uuid('removed_by_id').references(() => users.id),
+  },
+  (t) => [
+    index('community_comments_post_idx').on(t.postId, t.createdAt),
+    index('community_comments_author_idx').on(t.authorId, t.createdAt),
+  ],
+);
+
+/**
+ * Upvotes on comments: same shape and guarantees as `communityPostVotes`
+ * (composite primary key = one vote per person per comment, ON CONFLICT DO
+ * NOTHING, counts via COUNT(*), no downvotes). Popularity only.
+ */
+export const communityCommentVotes = pgTable(
+  'community_comment_votes',
+  {
+    commentId: uuid('comment_id')
+      .notNull()
+      .references(() => communityComments.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.commentId, t.userId] }),
+    // Recent-vote scans for the "hot" ranking.
+    index('community_comment_votes_recent_idx').on(t.createdAt),
+  ],
+);
+
+/**
  * Follow graph: follower -> followee. Popularity only; a follow is never an
  * endorsement and says nothing about safety. The composite primary key is the
  * UNIQUE constraint (a double-tap hits ON CONFLICT DO NOTHING and stays one
@@ -877,6 +929,7 @@ export type Offer = typeof offers.$inferSelect;
 export type OfferStatus = Offer['status'];
 export type CommunityPost = typeof communityPosts.$inferSelect;
 export type CommunityPostVote = typeof communityPostVotes.$inferSelect;
+export type CommunityComment = typeof communityComments.$inferSelect;
 export type Follow = typeof follows.$inferSelect;
 export type SmsMessage = typeof smsMessages.$inferSelect;
 export type ReservationEvent = typeof reservationEvents.$inferSelect;
