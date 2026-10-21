@@ -12,6 +12,14 @@
 #
 # Rules are evaluated top-to-bottom; the first match wins.
 
+# One site, one address: https://trydibbs.com. The app used to live on
+# app.trydibbs.com, and old links still point there, so both it and www
+# forward permanently to the same path on the bare domain. These must stay
+# above the catch-all below or it answers first. They only fire once those
+# hostnames are attached to this Netlify site (docs/DEPLOY-WEB.md).
+https://app.trydibbs.com/*  https://trydibbs.com/:splat  301!
+https://www.trydibbs.com/*  https://trydibbs.com/:splat  301!
+
 # Pass real static asset directories straight through (200 = serve as-is).
 /_expo/*   /_expo/:splat  200
 /assets/*  /assets/:splat 200

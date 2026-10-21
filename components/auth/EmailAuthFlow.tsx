@@ -23,8 +23,22 @@ import { useAuth } from '@/hooks/useAuth';
 import { MINIMUM_AGE } from '@/constants/legal';
 import { colors, radius, space } from '@/constants/theme';
 
+export type AuthMode = 'signup' | 'login';
+
+/** What the host needs to know once someone is signed in. */
+export interface AuthFinish {
+  /** True when this sign-in created the account — the host sends them to profile setup. */
+  isNewAccount: boolean;
+}
+
 export interface EmailAuthFlowProps {
-  onFinished: () => void;
+  onFinished: (result: AuthFinish) => void;
+  /**
+   * 'signup' asks for a name and the age/Terms consent up front; 'login' hides
+   * them. Left unset, the combined "sign in or sign up" flow is used, where a
+   * typed name means "I'm new".
+   */
+  mode?: AuthMode;
   /** Called for "Use your phone number instead". */
   onUsePhone?: () => void;
   /** Hide the first-step heading (the host card already has one). */
@@ -37,6 +51,7 @@ export function EmailAuthFlow({
   onUsePhone,
   hideFirstHeading,
   submitLabel = 'Email me a code',
+  mode,
 }: EmailAuthFlowProps) {
   const router = useRouter();
   const { requestCode, signInWithCode } = useAuth();
@@ -54,8 +69,9 @@ export function EmailAuthFlow({
   const [info, setInfo] = useState<string | undefined>();
   const [network, setNetwork] = useState(false);
 
-  const isSigningUp = displayName.trim().length > 0;
-  const gateOk = !isSigningUp || (ageOk && termsOk);
+  const isSigningUp = mode === 'signup' || (mode !== 'login' && displayName.trim().length > 0);
+  const nameOk = mode !== 'signup' || displayName.trim().length > 0;
+  const gateOk = nameOk && (!isSigningUp || (ageOk && termsOk));
 
   async function sendCode(isResend: boolean) {
     const trimmed = email.trim();
@@ -92,6 +108,10 @@ export function EmailAuthFlow({
       setError('Enter the 6-digit code.');
       return;
     }
+    if (!nameOk) {
+      setError('Enter your name to create your account.');
+      return;
+    }
     if (!gateOk) {
       setError('Confirm your age and agree to the Terms and Privacy Policy to create an account.');
       return;
@@ -100,8 +120,12 @@ export function EmailAuthFlow({
     setError(undefined);
     setInfo(undefined);
     try {
-      await signInWithCode(email.trim(), code.trim(), displayName.trim() || undefined);
-      onFinished();
+      const result = await signInWithCode(
+        email.trim(),
+        code.trim(),
+        mode === 'login' ? undefined : displayName.trim() || undefined,
+      );
+      onFinished(result);
     } catch (e) {
       const d = describeError(e, 'That code didn’t work. Try again.');
       setNetwork(d.network);
@@ -141,8 +165,9 @@ export function EmailAuthFlow({
           editable={!busy}
           style={styles.codeInput}
         />
+        {mode === 'login' ? null : (
         <Field
-          label="Your name (new accounts only)"
+          label={mode === 'signup' ? 'Your name' : 'Your name (new accounts only)'}
           placeholder="e.g. Maya"
           value={displayName}
           onChangeText={(v) => {
@@ -155,6 +180,7 @@ export function EmailAuthFlow({
           textContentType="name"
           editable={!busy}
         />
+        )}
         {isSigningUp ? (
           <View style={styles.consent}>
             <CheckboxRow
@@ -196,7 +222,7 @@ export function EmailAuthFlow({
           A campus email shows you&apos;re a student — it isn&apos;t an identity check.
         </Text>
         <Button
-          title={network ? 'Try again' : 'Verify'}
+          title={network ? 'Try again' : mode === 'signup' ? 'Create account' : mode === 'login' ? 'Log in' : 'Verify'}
           onPress={submitCode}
           loading={busy}
           disabled={code.length !== 6 || !gateOk}

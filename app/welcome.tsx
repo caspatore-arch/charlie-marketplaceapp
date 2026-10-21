@@ -1,240 +1,303 @@
 /**
- * Website landing / onboarding. Desktop (>= breakpoints.lg): two-column hero —
- * how Dibbs works on the left, the sign-up card (same flow as
- * /auth/sign-in) on the right. Mobile: stacks, card first under the headline.
- * Copy is deliberately plain: payments are simulated, a campus email proves
- * you are a student there (not who you are), nothing is guaranteed.
+ * The front door of trydibbs.com: create an account or log in.
+ *
+ * This replaces the old static waitlist page (waitlist/index.html) and keeps
+ * its look on purpose — full-bleed brand-red band with the white wordmark,
+ * "How it works" steps, the account card lapping onto the band, and the
+ * "What Dibbs is not" strip. The card is the real sign-in flow, so signing up
+ * here creates an account instead of joining a list.
+ *
+ * Where people go next:
+ * - new account  -> /create-profile (photo, name, bio), then the app
+ * - existing     -> the app
+ * - already signed in when they land here -> the app, no card needed
+ *
+ * Copy stays plain: a campus email proves you are a student there, not that
+ * you are trustworthy, and Dibbs holds no money.
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Logo } from '@/components/ui/Logo';
-import { Stack, useRouter } from 'expo-router';
+import React, { useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Image } from 'expo-image';
+import { Redirect, Stack, useRouter } from 'expo-router';
 import { Text } from '@/components/ui/Text';
-import { Button } from '@/components/ui/Button';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { AuthMethods } from '@/components/auth/AuthMethods';
+import type { AuthFinish, AuthMode } from '@/components/auth/EmailAuthFlow';
 import { useAuth } from '@/hooks/useAuth';
-import { breakpoints, colors, radius, shadow, space } from '@/constants/theme';
+import { colors, radius, shadow, space } from '@/constants/theme';
 
+const WORDMARK = require('../assets/branding/dibbs-wordmark-white.png');
+const WORDMARK_RATIO = 900 / 376;
+
+// Two-column from here up, same as the old page's 880px media query.
+const WIDE = 880;
 
 const STEPS = [
   {
     title: 'List it for 24 hours',
-    body: 'Post a photo, a price, and the times you can meet. Every listing lives one day, so what you see is what’s actually still around.',
+    body: 'A photo, a price, and when you can meet. Listings don’t linger — what you see is what’s actually still around.',
   },
   {
     title: 'Buyers book an exact time and spot',
-    body: 'No “still available?” back-and-forth. A buyer picks a 30-minute slot and a campus meetup spot from your open times.',
+    body: 'No “is this still available?” Pick a 30-minute slot at a campus meetup spot from the times the seller already offered.',
   },
   {
     title: 'Make an offer',
-    body: 'Think the price is high? Offer less. If the seller accepts, the item is held for you for an hour so you can book.',
+    body: 'Price too high? Offer less, with the time and place attached. The seller accepts or declines.',
   },
-  {
-    title: 'Community posts',
-    body: 'Looking for something, or have extras? Post to your campus board. Posts disappear after 24 hours too.',
-  },
-];
-
-const HONEST = [
-  'Payments are simulated in this prototype — no money moves.',
-  'A verified campus email means someone controls a school email address. It is not an identity check.',
-  'Meet in public campus spots and use your own judgment — Dibbs can’t promise how a meetup goes.',
 ];
 
 export default function WelcomeScreen() {
   const { width } = useWindowDimensions();
-  const isDesktop = width >= breakpoints.lg;
+  const wide = width >= WIDE;
   const router = useRouter();
   const { status } = useAuth();
+  const [mode, setMode] = useState<AuthMode>('signup');
+  // Once the card finishes we navigate ourselves; this stops the signed-in
+  // redirect below from racing it and skipping profile setup.
+  const [finishing, setFinishing] = useState(false);
 
-  // Remember whether this visit started signed in, so finishing sign-up in the
-  // card doesn't swap the card away mid-flow.
-  const [startedSignedIn, setStartedSignedIn] = useState<boolean | null>(null);
-  const decided = useRef(false);
-  useEffect(() => {
-    if (decided.current || status === 'loading') return;
-    decided.current = true;
-    setStartedSignedIn(status === 'signedIn');
-  }, [status]);
+  // A returning visitor with a live session skips the front door.
+  if (status === 'signedIn' && !finishing) return <Redirect href="/" />;
 
-  const browse = () => router.replace('/');
+  const onFinished = ({ isNewAccount }: AuthFinish) => {
+    setFinishing(true);
+    router.replace(isNewAccount ? '/create-profile' : '/');
+  };
 
   const card = (
-    <View style={[styles.card, isDesktop ? styles.cardDesktop : null]}>
-      {startedSignedIn ? (
-        <View style={styles.cardBody}>
-          <Text variant="title">You’re signed in</Text>
-          <Text variant="body" color="inkMuted">
-            Pick up where you left off.
-          </Text>
-          <Button title="Browse listings" onPress={browse} />
-          <Button title="Account settings" variant="ghost" onPress={() => router.push('/settings')} />
-        </View>
-      ) : startedSignedIn === null ? (
-        <View style={styles.cardBody}>
-          <Text variant="body" color="inkMuted">
-            Loading…
-          </Text>
+    <View style={[styles.card, wide ? styles.cardWide : null]}>
+      <View style={styles.tabs} accessibilityRole="tablist">
+        {(['signup', 'login'] as const).map((m) => {
+          const active = mode === m;
+          return (
+            <Pressable
+              key={m}
+              onPress={() => setMode(m)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              style={[styles.tab, active ? styles.tabActive : null]}
+            >
+              <Text variant="label" weight={active ? '700' : '600'} color={active ? 'ink' : 'inkMuted'}>
+                {m === 'signup' ? 'Create account' : 'Log in'}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Text variant="title" accessibilityRole="header" style={styles.cardTitle}>
+        {mode === 'signup' ? 'Make your Dibbs account' : 'Welcome back'}
+      </Text>
+
+      {status === 'loading' || finishing ? (
+        <View style={styles.loading}>
+          <Skeleton height={48} />
+          <Skeleton height={52} />
         </View>
       ) : (
-        <View style={styles.cardBody}>
-          <Text variant="title" accessibilityRole="header">
-            Get started
-          </Text>
-          <AuthMethods hideFirstHeading cardIntro onFinished={browse} />
-        </View>
+        // Keyed on mode so switching tabs starts the flow fresh rather than
+        // carrying a half-entered code from one tab into the other.
+        <AuthMethods key={mode} mode={mode} hideFirstHeading cardIntro onFinished={onFinished} />
       )}
+
+      <Text variant="caption" color="inkMuted" style={styles.switchLine}>
+        {mode === 'signup' ? 'Already have an account? ' : 'New to Dibbs? '}
+        <Text
+          variant="caption"
+          weight="700"
+          color="accent"
+          accessibilityRole="link"
+          onPress={() => setMode(mode === 'signup' ? 'login' : 'signup')}
+        >
+          {mode === 'signup' ? 'Log in' : 'Create an account'}
+        </Text>
+      </Text>
     </View>
   );
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.page}>
-      <Stack.Screen options={{ headerShown: false, title: 'Dibbs — campus marketplace' }} />
+    <View style={styles.page}>
+      <Stack.Screen options={{ headerShown: false, title: 'Dibbs — the UArizona student marketplace' }} />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={[styles.inner, isDesktop ? styles.innerDesktop : null]}>
-          <View style={styles.nav}>
-            <Logo variant="lockup" width={96} />
-            <View style={styles.navActions}>
-              <Pressable onPress={browse} accessibilityRole="link" style={styles.navLink}>
-                <Text variant="label" weight="600">
-                  Browse listings
-                </Text>
-              </Pressable>
-              {status === 'signedIn' ? null : (
-                <Pressable
-                  onPress={() => router.push('/auth/sign-in')}
-                  accessibilityRole="link"
-                  style={styles.navLink}
-                >
-                  <Text variant="label" weight="600" color="accent">
-                    Sign in
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-
-          <View style={[styles.hero, isDesktop ? styles.heroDesktop : null]}>
-            <View style={[styles.left, isDesktop ? styles.leftDesktop : null]}>
-              <Text variant="caption" color="accent" weight="700" style={styles.kicker}>
-                CAMPUS MARKETPLACE
-              </Text>
-              <Text
-                variant="display"
-                accessibilityRole="header"
-                style={[styles.headline, isDesktop ? styles.headlineDesktop : null]}
-              >
-                Buy and sell on campus, one day at a time.
-              </Text>
-              <Text variant="body" color="inkMuted" style={styles.lede}>
-                Dibbs is a student marketplace built around meeting up. Every listing lasts 24 hours, and every
-                purchase comes with a time and a place.
-              </Text>
-
-              {isDesktop ? null : <View style={styles.mobileCard}>{card}</View>}
-
-              <View style={styles.ctaRow}>
-                <Button title="Browse listings" variant="secondary" onPress={browse} />
-              </View>
-
-              <View style={styles.steps} accessibilityRole="list">
-                {STEPS.map((s, i) => (
-                  <View key={s.title} style={styles.step} accessibilityRole="none">
-                    <View style={styles.stepNum}>
-                      <Text variant="label" weight="700" color="accent">
-                        {i + 1}
-                      </Text>
-                    </View>
-                    <View style={styles.stepText}>
-                      <Text variant="heading">{s.title}</Text>
-                      <Text variant="body" color="inkMuted">
-                        {s.body}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {isDesktop ? <View style={styles.right}>{card}</View> : null}
-          </View>
-
-          <View style={styles.honest}>
-            <Text variant="heading" style={styles.honestTitle}>
-              Straight talk
+        {/* Hero: the logo's own red, so the transparent wordmark has no seam. */}
+        <View style={styles.hero}>
+          <View style={styles.inner}>
+            <Image
+              source={WORDMARK}
+              accessibilityLabel="Dibbs"
+              contentFit="contain"
+              style={{ width: wide ? 268 : 190, aspectRatio: WORDMARK_RATIO }}
+            />
+            <Text variant="label" weight="600" color="white" style={styles.tagline}>
+              CAMPUS MARKETPLACE
             </Text>
-            {HONEST.map((line) => (
-              <Text key={line} variant="body" color="inkMuted">
-                • {line}
+            {/* Headline and lede stay large: white on brand red is 3.96:1,
+                which only passes for large text. Don't shrink them. */}
+            <Text
+              variant="display"
+              color="white"
+              weight="700"
+              accessibilityRole="header"
+              style={[styles.h1, wide ? styles.h1Wide : null]}
+            >
+              Buy and sell on campus, one day at a time.
+            </Text>
+            <Text variant="body" color="white" weight="600" style={styles.lede}>
+              A marketplace just for UArizona students — clothes, shoes, dorm stuff, books and tech, handed off in
+              person on campus.
+            </Text>
+            <View style={styles.pill}>
+              <Text variant="caption" color="white" weight="600" style={styles.pillText}>
+                University of Arizona students
               </Text>
-            ))}
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.inner}>
+          <View style={[styles.panel, wide ? styles.panelWide : null]}>
+            {wide ? null : card}
+
+            <View style={[styles.steps, wide ? styles.stepsWide : null]}>
+              <Text variant="caption" weight="700" color="accentInk" style={styles.sectionLabel}>
+                HOW IT WORKS
+              </Text>
+              {STEPS.map((s, i) => (
+                <View key={s.title} style={styles.step}>
+                  <View style={styles.num}>
+                    <Text variant="label" weight="700" color="accentInk">
+                      {i + 1}
+                    </Text>
+                  </View>
+                  <View style={styles.stepText}>
+                    <Text variant="heading" weight="700">
+                      {s.title}
+                    </Text>
+                    <Text variant="body" color="inkMuted" style={styles.stepBody}>
+                      {s.body}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {wide ? <View style={styles.cardCol}>{card}</View> : null}
+          </View>
+
+          <View style={styles.plain}>
+            <Text variant="label" weight="700">
+              What Dibbs is not
+            </Text>
+            <Text variant="label" color="inkMuted">
+              Dibbs doesn’t hold your money, handle payment, or check who anyone is. A campus email proves someone is
+              a student here — not that they’re trustworthy. Meet in public, on campus, and use your own judgment.
+            </Text>
+          </View>
+
+          <View style={styles.footer}>
+            <Text variant="caption" color="inkFaint">
+              Dibbs is an independent student project and is not affiliated with or endorsed by the University of
+              Arizona.
+            </Text>
             <View style={styles.legalRow}>
-              <Text variant="label" color="accent" weight="600" accessibilityRole="link" onPress={() => router.push('/legal/terms')}>
+              <Text variant="caption" color="accent" weight="600" accessibilityRole="link" onPress={() => router.push('/legal/terms')}>
                 Terms
               </Text>
-              <Text variant="label" color="accent" weight="600" accessibilityRole="link" onPress={() => router.push('/legal/privacy')}>
+              <Text variant="caption" color="accent" weight="600" accessibilityRole="link" onPress={() => router.push('/legal/privacy')}>
                 Privacy
               </Text>
             </View>
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
-  scroll: { flexGrow: 1, alignItems: 'center', paddingBottom: space.huge },
-  inner: { width: '100%', paddingHorizontal: space.lg },
-  innerDesktop: { maxWidth: 1120, paddingHorizontal: space.xxxl },
-  nav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: space.md,
-  },
-  navActions: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  navLink: { minHeight: 48, justifyContent: 'center', paddingHorizontal: space.sm },
-  hero: { gap: space.xxl, paddingTop: space.lg },
-  heroDesktop: { flexDirection: 'row', alignItems: 'flex-start', gap: space.huge, paddingTop: space.xxxl },
-  left: { gap: space.lg },
-  leftDesktop: { flex: 1.2 },
-  right: { flex: 1, maxWidth: 440, position: 'sticky' as never, top: space.xl } as never,
-  kicker: { letterSpacing: 1.2 },
-  headline: { fontSize: 36, lineHeight: 42 },
-  headlineDesktop: { fontSize: 52, lineHeight: 58, letterSpacing: -1 },
-  lede: { fontSize: 18, lineHeight: 26 },
-  mobileCard: { width: '100%' },
-  ctaRow: { flexDirection: 'row', gap: space.md },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
+  scroll: { flexGrow: 1, paddingBottom: 72 },
+  inner: { width: '100%', maxWidth: 1060, alignSelf: 'center', paddingHorizontal: space.lg },
+
+  hero: { backgroundColor: colors.brand, paddingTop: 44, paddingBottom: 52 },
+  tagline: { marginTop: 10, letterSpacing: 2.2 },
+  h1: { marginTop: 30, maxWidth: 560, fontSize: 38, lineHeight: 42, letterSpacing: -0.8 },
+  h1Wide: { fontSize: 60, lineHeight: 63, letterSpacing: -1.3 },
+  lede: { marginTop: 18, maxWidth: 520, fontSize: 20, lineHeight: 29 },
+  pill: {
+    alignSelf: 'flex-start',
+    marginTop: 26,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.17)',
     borderWidth: 1,
-    borderColor: colors.line,
-    ...shadow,
+    borderColor: 'rgba(255,255,255,0.42)',
   },
-  cardDesktop: { width: '100%' },
-  cardBody: { padding: space.xxl, gap: space.md },
-  steps: { gap: space.xl, marginTop: space.lg },
+  pillText: { fontSize: 13, letterSpacing: 0.3 },
+
+  // The card laps onto the red band, as on the old page.
+  panel: { gap: space.xxxl, marginTop: -28 },
+  panelWide: { flexDirection: 'row', alignItems: 'flex-start', gap: 48 },
+
+  steps: { paddingTop: space.lg, gap: 26 },
+  stepsWide: { flex: 1, paddingTop: 60 },
+  sectionLabel: { letterSpacing: 1.7, marginBottom: -6 },
   step: { flexDirection: 'row', gap: space.lg, alignItems: 'flex-start' },
-  stepNum: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  num: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepText: { flex: 1, gap: space.xs },
-  honest: {
-    marginTop: space.huge,
-    padding: space.xxl,
-    borderRadius: radius.lg,
+  stepText: { flex: 1 },
+  stepBody: { marginTop: 4, fontSize: 15, lineHeight: 23 },
+
+  cardCol: {
+    width: 420,
+    ...(Platform.OS === 'web' ? ({ position: 'sticky', top: 24 } as object) : null),
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 22,
+    padding: 28,
+    gap: space.md,
+    ...shadow,
+  },
+  cardWide: { width: '100%' },
+  tabs: {
+    flexDirection: 'row',
     backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: 4,
+    marginBottom: space.xs,
+  },
+  tab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 11 },
+  tabActive: { backgroundColor: colors.surface, ...shadow },
+  cardTitle: { fontSize: 23 },
+  loading: { gap: space.md },
+  switchLine: { textAlign: 'center', marginTop: space.xs, fontSize: 13 },
+
+  plain: {
+    marginTop: 56,
+    padding: space.xxl,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 18,
     gap: space.sm,
   },
-  honestTitle: { marginBottom: space.xs },
-  legalRow: { flexDirection: 'row', gap: space.xl, marginTop: space.md },
+  footer: {
+    marginTop: space.huge,
+    paddingTop: 22,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    gap: space.md,
+  },
+  legalRow: { flexDirection: 'row', gap: space.xl },
 });

@@ -10,6 +10,7 @@ import { Text } from '@/components/ui/Text';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmailAuthFlow } from '@/components/auth/EmailAuthFlow';
 import { PhoneAuthFlow } from '@/components/auth/PhoneAuthFlow';
+import type { AuthFinish, AuthMode } from '@/components/auth/EmailAuthFlow';
 import { trpc } from '@/lib/trpc';
 import { space } from '@/constants/theme';
 
@@ -21,8 +22,11 @@ export function AuthMethods({
   initialMethod,
   hideFirstHeading,
   cardIntro,
+  mode,
 }: {
-  onFinished: () => void;
+  onFinished: (result: AuthFinish) => void;
+  /** Create-account vs log-in (email flow). Unset = combined "sign in or sign up". */
+  mode?: AuthMode;
   /** Force a method (e.g. `?method=phone`); otherwise the server's `primary`. */
   initialMethod?: 'email' | 'phone';
   hideFirstHeading?: boolean;
@@ -60,6 +64,7 @@ export function AuthMethods({
           onFinished={onFinished}
           hideFirstHeading={hideFirstHeading}
           submitLabel={cardIntro ? 'Email me a code' : undefined}
+          mode={mode}
           onUsePhone={() => setOverride('phone')}
         />
       ) : (

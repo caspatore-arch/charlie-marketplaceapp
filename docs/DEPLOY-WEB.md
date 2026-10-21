@@ -8,6 +8,35 @@ Budget **an afternoon** the first time.
 
 ---
 
+## One site on trydibbs.com
+
+There is **one website**, at **https://trydibbs.com**. There is no separate waitlist page any more, and the app no longer lives on `app.trydibbs.com`.
+
+What a visitor sees:
+
+- **First visit, signed out:** the front door (`app/welcome.tsx`) — the red Dibbs page that used to be the waitlist, same look, but the card now has **Create account** and **Log in** tabs instead of a waitlist form.
+- **Create account:** campus email → 6-digit code + name + age/Terms → **Make your profile** (`app/create-profile.tsx`: photo, name, bio; "Skip for now" is allowed) → the listing feed.
+- **Log in:** campus email → code → straight to the listing feed.
+- **Coming back later:** if they are still signed in, `trydibbs.com` opens the feed directly. If not, they land on the front door and use **Log in**.
+- **Shared listing links** (`trydibbs.com/listing/…`) still open for anyone, signed in or not.
+
+The native app (Expo Go / App Store) is unchanged: signed-out people can still browse there.
+
+### Moving the domain (one-time, in the Netlify dashboard)
+
+Today `trydibbs.com` points at the old waitlist site and `app.trydibbs.com` at the app site. Do these in order, so there is never a moment when `trydibbs.com` shows nothing:
+
+1. **Backend first.** On the backend host (Railway), set
+   `ALLOWED_ORIGINS=https://trydibbs.com,https://www.trydibbs.com,https://app.trydibbs.com`
+   and `EXPO_PUBLIC_WEB_BASE_URL=https://trydibbs.com` (used for links in texts). Wait for it to restart.
+2. **Waitlist site:** Netlify → the waitlist site → *Domain management* → remove `trydibbs.com` and `www.trydibbs.com`. Download any waitlist signups you want to keep first (*Forms* → `waitlist` → export CSV); they go away with the site.
+3. **App site:** Netlify → the app site → *Domain management* → *Add a domain* → `trydibbs.com`. Make it the **primary domain**. Keep `app.trydibbs.com` attached as a second domain, and add `www.trydibbs.com` too — `public/_redirects` forwards both to `trydibbs.com`, so old links keep working.
+4. **Redeploy** the app site (*Deploys* → *Trigger deploy* → *Clear cache and deploy*). `netlify.toml` already sets `EXPO_PUBLIC_WEB_BASE_URL=https://trydibbs.com` for the build.
+5. **Check:** open `https://trydibbs.com` in a private window — you should see the red page with Create account / Log in. Open `https://app.trydibbs.com/listing/anything` — the address bar should change to `trydibbs.com/listing/anything`.
+6. Once that works, delete the old waitlist site in Netlify. Its code has been removed from this repo (`waitlist/`); it is still in git history if you ever need it.
+
+---
+
 ## 0. Why the order matters
 
 The website is a static package — a folder of files that a hosting service delivers to browsers. Unlike a traditional web app, there is no server running on the host. That means:
@@ -146,7 +175,7 @@ You only need to do this once. After that, every share link a student sends will
 
 Go through this list after deploying. None of it requires a terminal.
 
-- [ ] Open the site URL on an iPhone in Safari. You should see the listing feed.
+- [ ] Open https://trydibbs.com on an iPhone in Safari, signed out. You should see the red front door with **Create account** and **Log in**. Create an account and check you land on **Make your profile**, then the feed.
 - [ ] **Hard-refresh a listing URL directly.** This is the most important test. Copy a listing URL (e.g. `https://dibbs.yourdomain.com/listing/some-id`), paste it into a new browser tab, and open it. It should show the listing — not a 404 page. If you get a 404, the SPA rewrite rule isn't working and shared links will be broken for everyone. (The `vercel.json`, `netlify.toml`, and `public/_redirects` files in this repo are the fix — make sure your host is actually reading the right one.)
 - [ ] Sign in with a `@arizona.edu` email address. You should receive a sign-in code (note: email delivery is still simulated — the code is printed to the backend server's logs, viewable in your host's dashboard; see `docs/DEPLOY.md` §8 for the full list of what's still simulated).
 - [ ] Tap the share button on a listing. On iPhone Safari you should see the native share sheet. Copy the link and paste it into a new tab — it should open the listing, not a 404.

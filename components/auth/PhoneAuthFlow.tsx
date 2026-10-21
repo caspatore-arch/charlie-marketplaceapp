@@ -24,9 +24,11 @@ import { colors, radius, space } from '@/constants/theme';
 
 type Step = 'phone' | 'code' | 'profile' | 'campusEmail';
 
+import type { AuthFinish } from '@/components/auth/EmailAuthFlow';
+
 export interface PhoneAuthFlowProps {
   /** Called when the flow is complete (signed in, and verified or skipped). */
-  onFinished: () => void;
+  onFinished: (result: AuthFinish) => void;
   /** Called for "Use campus email instead". */
   onUseEmail?: () => void;
   /** Heading shown on the first step. */
@@ -50,6 +52,10 @@ export function PhoneAuthFlow({
   const { requestPhoneCode, verifyPhoneCode } = useAuth();
 
   const [step, setStep] = useState<Step>('phone');
+  // Set once the profile step creates the account, so the host can route a
+  // brand-new user to profile setup.
+  const [createdAccount, setCreatedAccount] = useState(false);
+  const finish = (isNew = createdAccount) => onFinished({ isNewAccount: isNew });
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [simulated, setSimulated] = useState(false);
@@ -118,8 +124,9 @@ export function PhoneAuthFlow({
     }
   }
 
-  function afterSignedIn(campusEmailVerified: boolean) {
-    if (campusEmailVerified) onFinished();
+  function afterSignedIn(campusEmailVerified: boolean, isNew = false) {
+    if (isNew) setCreatedAccount(true);
+    if (campusEmailVerified) finish(isNew);
     else setStep('campusEmail');
   }
 
@@ -161,7 +168,7 @@ export function PhoneAuthFlow({
       });
       setNetwork(false);
       if (res.status === 'needs_profile') setError('Something went wrong. Please try again.');
-      else afterSignedIn(!!res.user.campusEmailVerifiedAt);
+      else afterSignedIn(!!res.user.campusEmailVerifiedAt, true);
     } catch (e) {
       fail(e, 'Could not create your account. Try again.');
     } finally {
@@ -179,7 +186,7 @@ export function PhoneAuthFlow({
     return (
       <View style={styles.wrap}>
         <Text variant="title">Verify your campus email</Text>
-        <CampusEmailVerify onDone={onFinished} onSkip={onFinished} skipLabel="Browse first" />
+        <CampusEmailVerify onDone={() => finish()} onSkip={() => finish()} skipLabel="Browse first" />
       </View>
     );
   }

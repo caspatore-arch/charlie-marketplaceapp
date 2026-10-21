@@ -287,6 +287,9 @@ export const authRouter = router({
       }
 
       let [user] = await ctx.db.select().from(users).where(eq(users.email, email)).limit(1);
+      // Lets the client send a brand-new account to profile setup and a
+      // returning one straight into the app.
+      const isNewAccount = !user;
       if (!user) {
         [user] = await ctx.db
           .insert(users)
@@ -308,7 +311,7 @@ export const authRouter = router({
       const token = await issueSession(ctx.db, user!.id);
       // `user` carries its campus so the client can hydrate the same shape
       // `auth.me` returns without a second round trip.
-      return { token, user: { ...user!, campus } };
+      return { token, isNewAccount, user: { ...user!, campus } };
     }),
 
   /** Dev-only identity switcher for the demo. Disabled unless DEV_LOGIN=1. */

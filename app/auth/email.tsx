@@ -19,7 +19,9 @@ export default function EmailSignInScreen() {
       <EmailAuthFlow
         hideFirstHeading
         submitLabel="Email me a code"
-        onFinished={() => router.replace((returnTo || '/') as never)}
+        onFinished={({ isNewAccount }) =>
+          router.replace((isNewAccount ? '/create-profile' : returnTo || '/') as never)
+        }
         onUsePhone={() =>
           router.replace({ pathname: '/auth/sign-in', params: { returnTo: returnTo ?? '', method: 'phone' } })
         }

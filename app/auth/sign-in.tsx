@@ -11,12 +11,16 @@ import React from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AuthScreenShell } from '@/components/auth/AuthScreenShell';
 import { AuthMethods } from '@/components/auth/AuthMethods';
+import type { AuthFinish } from '@/components/auth/EmailAuthFlow';
 
 export default function SignInScreen() {
   const { returnTo, method } = useLocalSearchParams<{ returnTo?: string; method?: string }>();
   const router = useRouter();
 
-  const finish = () => router.replace((returnTo || '/') as never);
+  // A brand-new account makes its profile first; everyone else goes back to
+  // where they were.
+  const finish = ({ isNewAccount }: AuthFinish) =>
+    router.replace((isNewAccount ? '/create-profile' : returnTo || '/') as never);
 
   return (
     <AuthScreenShell title="Sign in or sign up">

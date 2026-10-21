@@ -16,6 +16,16 @@
   publish = "dist"
   command = "npm run web:build"
 
+# The whole site lives at https://trydibbs.com (see docs/DEPLOY-WEB.md, "One
+# site on trydibbs.com"). Share links are built from this, so it must be the
+# bare domain. It is baked into the bundle at build time.
+[build.environment]
+  EXPO_PUBLIC_WEB_BASE_URL = "https://trydibbs.com"
+
+# The host-level redirects (app.trydibbs.com and www -> trydibbs.com) live at
+# the TOP of public/_redirects, not here: Netlify runs _redirects before this
+# file, so the catch-all there would otherwise swallow them.
+
 # Pass real static asset directories straight through (no redirect needed —
 # Netlify serves existing files before redirect rules, but being explicit is
 # safer and self-documenting).

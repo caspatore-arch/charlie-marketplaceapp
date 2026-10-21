@@ -52,6 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string, code: string, displayName?: string) => {
       const result = await verifyCodeMutation.mutateAsync({ email, code, displayName });
       await applySession(result.token);
+      return { isNewAccount: !!result.isNewAccount };
     },
     [verifyCodeMutation, applySession],
   );

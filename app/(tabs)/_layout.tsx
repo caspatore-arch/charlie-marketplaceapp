@@ -10,8 +10,8 @@
  * /inbox ("Meetups & messages"), linked from Profile and Community.
  */
 import React from 'react';
-import { StyleSheet, Text as RNText, View, useWindowDimensions } from 'react-native';
-import { Tabs, useRouter } from 'expo-router';
+import { Platform, StyleSheet, Text as RNText, View, useWindowDimensions } from 'react-native';
+import { Redirect, Tabs, useRouter } from 'expo-router';
 import { Search, PlusCircle, Users, User } from 'lucide-react-native';
 import { colors, breakpoints, maxContentWidth } from '@/constants/theme';
 import { trpc } from '@/lib/trpc';
@@ -44,6 +44,12 @@ export default function TabsLayout() {
       (unreadTotalQuery.data?.actionableReservations ?? 0) +
       pendingOffers
     : 0;
+
+  // On the website the front door is the create-account / log-in page, so a
+  // signed-out visitor to trydibbs.com lands there rather than in the feed.
+  // Shared links to a single listing (/listing/…) stay public — they live
+  // outside this tab group. The native app keeps signed-out browsing.
+  if (Platform.OS === 'web' && status === 'signedOut') return <Redirect href="/welcome" />;
 
   return (
     <Tabs

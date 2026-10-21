@@ -20,7 +20,11 @@ export interface AuthContextValue {
   /** Step 1 of email sign-in: emails a 6-digit code (printed to the server log when `simulated`). */
   requestCode: (email: string) => Promise<EmailCodeResult>;
   /** Step 2: verify the code (and optionally set a display name on first sign-in). */
-  signInWithCode: (email: string, code: string, displayName?: string) => Promise<void>;
+  signInWithCode: (
+    email: string,
+    code: string,
+    displayName?: string,
+  ) => Promise<{ isNewAccount: boolean }>;
   /** Phone step 1: text a 6-digit code (printed to the server log when simulated). */
   requestPhoneCode: (phone: string) => Promise<{
     simulated: boolean;
