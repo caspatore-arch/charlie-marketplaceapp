@@ -1,12 +1,14 @@
 /**
- * Inbox tab: two segments — Messages (conversation.list) and Requests
- * (reservation.mine, grouped "As buyer" / "As seller"). Requires auth; polls
- * every 10s while focused as a stand-in for push notifications.
+ * "Meetups & messages" stack screen (moved off the tab bar): three segments —
+ * Meetups (reservation.mine, grouped "As buyer" / "As seller"), Offers
+ * (offer.mine, with Accept/Decline for a seller's pending offers) and
+ * Messages (conversation.list). Requires auth; polls every 10s while focused
+ * as a stand-in for push notifications.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { useRouter, useIsFocused } from 'expo-router';
-import { MessageCircle, Inbox as InboxIcon } from 'lucide-react-native';
+import { useRouter, useIsFocused, Stack } from 'expo-router';
+import { MessageCircle, Inbox as InboxIcon, Tag } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -14,16 +16,18 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Divider } from '@/components/ui/Divider';
 import { SegmentedTabs } from '@/components/inbox/SegmentedTabs';
+import { OfferRow } from '@/components/inbox/OfferRow';
 import { ConversationRow } from '@/components/inbox/ConversationRow';
 import { ReservationRow } from '@/components/inbox/ReservationRow';
 import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
+import { confirmAction } from '@/utils/confirm';
 import { colors, space } from '@/constants/theme';
-import type { ConversationSummary, ReservationDetail } from '@/types';
+import type { ConversationSummary, OfferWithContext, ReservationDetail } from '@/types';
 
 const POLL_MS = 10_000;
 
-type Tab = 'messages' | 'requests';
+type Tab = 'meetups' | 'offers' | 'messages';
 
 export default function InboxScreen() {
   const { status } = useAuth();
@@ -47,8 +51,8 @@ export default function InboxScreen() {
       <Screen>
         <EmptyState
           icon={<MessageCircle size={40} color={colors.inkFaint} />}
-          title="Sign in to see your inbox"
-          body="Messages with buyers and sellers, and your meetup requests, show up here."
+          title="Sign in to see your meetups and messages"
+          body="Your meetups, offers, and messages with buyers and sellers show up here."
           actionLabel="Sign in"
           onAction={() => router.push('/auth/sign-in')}
         />
@@ -60,7 +64,7 @@ export default function InboxScreen() {
 }
 
 function SignedInInbox() {
-  const [tab, setTab] = useState<Tab>('messages');
+  const [tab, setTab] = useState<Tab>('meetups');
   const router = useRouter();
   const isFocused = useIsFocused();
   const { user } = useAuth();
@@ -73,15 +77,59 @@ function SignedInInbox() {
     { refetchInterval: isFocused ? POLL_MS : false },
   );
 
+  const offersQuery = trpc.offer.mine.useQuery(undefined, {
+    refetchInterval: isFocused ? POLL_MS : false,
+  });
+  const utils = trpc.useUtils();
+  const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+  const [offerError, setOfferError] = useState<string | null>(null);
+  const afterOfferChange = () => {
+    void utils.offer.mine.invalidate();
+    void utils.listing.byId.invalidate();
+  };
+  const acceptMutation = trpc.offer.accept.useMutation({
+    onSuccess: afterOfferChange,
+    onError: (e) => setOfferError(e.message),
+    onSettled: () => setBusyOfferId(null),
+  });
+  const declineMutation = trpc.offer.decline.useMutation({
+    onSuccess: afterOfferChange,
+    onError: (e) => setOfferError(e.message),
+    onSettled: () => setBusyOfferId(null),
+  });
+  const onAccept = (o: OfferWithContext) =>
+    confirmAction(
+      'Accept this offer?',
+      `${o.buyer.displayName} would get first chance to book this item for an hour.`,
+      'Accept',
+      () => {
+        setOfferError(null);
+        setBusyOfferId(o.id);
+        acceptMutation.mutate({ id: o.id });
+      },
+      { destructive: false },
+    );
+  const onDecline = (o: OfferWithContext) =>
+    confirmAction(
+      'Decline this offer?',
+      `${o.buyer.displayName} will be told it was declined.`,
+      'Decline',
+      () => {
+        setOfferError(null);
+        setBusyOfferId(o.id);
+        declineMutation.mutate({ id: o.id });
+      },
+    );
+
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([conversationsQuery.refetch(), reservationsQuery.refetch()]);
+      await Promise.all([conversationsQuery.refetch(), reservationsQuery.refetch(), offersQuery.refetch()]);
     } finally {
       setRefreshing(false);
     }
-  }, [conversationsQuery, reservationsQuery]);
+  }, [conversationsQuery, reservationsQuery, offersQuery]);
 
   const unreadCount = useMemo(
     () => (conversationsQuery.data ?? []).reduce((sum, c) => sum + (c.unreadCount > 0 ? 1 : 0), 0),
@@ -94,23 +142,43 @@ function SignedInInbox() {
     ).length;
   }, [reservationsQuery.data, user]);
 
+  const pendingOffersToAnswer = useMemo(
+    () => (offersQuery.data ?? []).filter((o) => o.sellerId === user?.id && o.status === 'pending').length,
+    [offersQuery.data, user],
+  );
+
   return (
-    <Screen edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <Text variant="title">Inbox</Text>
-      </View>
+    <Screen edges={['left', 'right']}>
+      <Stack.Screen options={{ title: 'Meetups & messages' }} />
       <View style={styles.tabsWrap}>
         <SegmentedTabs
           segments={[
+            { key: 'meetups', label: 'Meetups', badge: needsReplyCount || undefined },
+            { key: 'offers', label: 'Offers', badge: pendingOffersToAnswer || undefined },
             { key: 'messages', label: 'Messages', badge: unreadCount || undefined },
-            { key: 'requests', label: 'Requests', badge: needsReplyCount || undefined },
           ]}
           value={tab}
           onChange={setTab}
         />
       </View>
 
-      {tab === 'messages' ? (
+      {tab === 'offers' ? (
+        <OffersList
+          data={offersQuery.data}
+          isPending={offersQuery.isPending}
+          isError={offersQuery.isError}
+          errorMessage={offersQuery.error?.message}
+          onRetry={() => offersQuery.refetch()}
+          viewerId={user?.id ?? ''}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          busyId={busyOfferId}
+          actionError={offerError}
+          onOpen={(o) => router.push(`/listing/${o.listingId}`)}
+          onAccept={onAccept}
+          onDecline={onDecline}
+        />
+      ) : tab === 'messages' ? (
         <MessagesList
           data={conversationsQuery.data}
           isPending={conversationsQuery.isPending}
@@ -195,6 +263,86 @@ function MessagesList({
   );
 }
 
+function OffersList({
+  data,
+  isPending,
+  isError,
+  errorMessage,
+  onRetry,
+  viewerId,
+  refreshing,
+  onRefresh,
+  busyId,
+  actionError,
+  onOpen,
+  onAccept,
+  onDecline,
+}: {
+  data: OfferWithContext[] | undefined;
+  isPending: boolean;
+  isError: boolean;
+  errorMessage?: string;
+  onRetry: () => void;
+  viewerId: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+  busyId: string | null;
+  actionError: string | null;
+  onOpen: (o: OfferWithContext) => void;
+  onAccept: (o: OfferWithContext) => void;
+  onDecline: (o: OfferWithContext) => void;
+}) {
+  if (isPending) {
+    return (
+      <View style={styles.listContent}>
+        <RowSkeleton />
+        <RowSkeleton />
+        <RowSkeleton />
+      </View>
+    );
+  }
+  if (isError) {
+    return <ErrorState message={errorMessage} onRetry={onRetry} />;
+  }
+  const offers = data ?? [];
+  const refresh = <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />;
+
+  if (offers.length === 0) {
+    return (
+      <ScrollView contentContainerStyle={styles.listContent} refreshControl={refresh}>
+        <EmptyState
+          icon={<Tag size={40} color={colors.inkFaint} />}
+          title="No offers yet"
+          body="Offers you make, and offers on your items, show up here."
+        />
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.listContent} refreshControl={refresh}>
+      {actionError ? (
+        <Text variant="label" color="danger" style={styles.actionError} accessibilityRole="alert">
+          {actionError}
+        </Text>
+      ) : null}
+      {offers.map((o, i) => (
+        <View key={o.id}>
+          <OfferRow
+            offer={o}
+            viewerId={viewerId}
+            busy={busyId === o.id}
+            onPress={() => onOpen(o)}
+            onAccept={() => onAccept(o)}
+            onDecline={() => onDecline(o)}
+          />
+          {i < offers.length - 1 ? <Divider /> : null}
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
 function RequestsList({
   data,
   isPending,
@@ -240,8 +388,8 @@ function RequestsList({
       >
         <EmptyState
           icon={<InboxIcon size={40} color={colors.inkFaint} />}
-          title="No requests yet"
-          body="When you request a meetup, or someone requests one on your listing, it shows up here."
+          title="No meetups yet"
+          body="When you book a meetup, or someone books one on your listing, it shows up here."
         />
       </ScrollView>
     );
@@ -307,8 +455,8 @@ function RowSkeleton() {
 
 const styles = StyleSheet.create({
   loadingWrap: { gap: space.md, paddingTop: space.lg },
-  header: { paddingTop: space.sm, paddingHorizontal: space.lg, paddingBottom: space.md },
-  tabsWrap: { paddingHorizontal: space.lg, marginBottom: space.sm },
+  actionError: { marginBottom: space.sm },
+  tabsWrap: { paddingHorizontal: space.lg, marginTop: space.sm, marginBottom: space.sm },
   listContent: { paddingHorizontal: space.lg, paddingBottom: space.xxl, flexGrow: 1 },
   rowSkeleton: { flexDirection: 'row', gap: space.md, paddingVertical: space.md },
   rowSkeletonInfo: { flex: 1, gap: space.sm, justifyContent: 'center' },

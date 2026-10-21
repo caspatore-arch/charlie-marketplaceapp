@@ -1,13 +1,13 @@
 /**
- * Sell-form availability-window editor. Shows the windows already added and
- * an "Add window" button that opens a Sheet to pick a day (next 7 days) and
- * a start/end time in 30-minute steps via chips — no native DateTimePicker,
- * per spec, to stay Expo Go friendly.
+ * Availability editor for a listing. A listing is live for 24 hours, so every
+ * window must sit between now and the listing's end (`until`). The seller adds
+ * one or more windows (max 8, each at least 30 minutes); buyers then book one
+ * 30-minute slot inside them.
  *
- * Times are built in the device's local time zone. That matches what a
- * student picking "today, 3:00-4:00" expects to see; the campus's IANA time
- * zone (used elsewhere for display) isn't threaded through here since the
- * seller is presumed to be on campus when listing.
+ * Times are real instants on :00/:30 boundaries and are displayed in the
+ * campus timezone, so "Today / Tomorrow" and the clock match what buyers see.
+ * No native date picker: day chips plus start/end chips keep it Expo Go and
+ * web friendly.
  */
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { Sheet } from '@/components/ui/Sheet';
 import { Chip } from '@/components/ui/Chip';
 import { colors, radius, space } from '@/constants/theme';
-import { formatPickupWindow } from '@/utils/format';
+import { SLOT_MS, clockTime, dayKey, nextSlotBoundary, relativeDayLabel, shortDate } from '@/components/booking/time';
 
 export interface WindowItem {
   key: string;
@@ -25,9 +25,16 @@ export interface WindowItem {
   endsAt: string; // ISO
 }
 
+export const MAX_WINDOWS = 8;
+
 export interface WindowEditorProps {
   windows: WindowItem[];
   onChange: (windows: WindowItem[]) => void;
+  /** End of the listing's life: now + 24h for a new listing, `expiresAt` when editing. */
+  until: Date;
+  /** Campus IANA timezone used to display times. */
+  timeZone?: string;
+  error?: string;
 }
 
 let keySeq = 0;
@@ -36,163 +43,90 @@ function nextKey() {
   return `window-${Date.now()}-${keySeq}`;
 }
 
-const DAY_COUNT = 7;
-const START_MIN = 7 * 60; // 7:00 AM
-const END_MIN = 22 * 60; // 10:00 PM
-const STEP_MIN = 30;
-
-function buildDayOptions(): { label: string; date: Date }[] {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Array.from({ length: DAY_COUNT }).map((_, i) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() + i);
-    const label =
-      i === 0
-        ? 'Today'
-        : i === 1
-          ? 'Tomorrow'
-          : date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    return { label, date };
-  });
+/** Boundaries (:00/:30) from the next one until `until`, inclusive. */
+function boundaries(until: Date): Date[] {
+  const out: Date[] = [];
+  for (let t = nextSlotBoundary().getTime(); t <= until.getTime(); t += SLOT_MS) out.push(new Date(t));
+  return out;
 }
 
-function buildTimeOptions(): { label: string; minutes: number }[] {
-  const options: { label: string; minutes: number }[] = [];
-  for (let m = START_MIN; m <= END_MIN; m += STEP_MIN) {
-    const hours24 = Math.floor(m / 60);
-    const mins = m % 60;
-    const period = hours24 >= 12 ? 'PM' : 'AM';
-    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
-    options.push({ label: `${hours12}:${mins.toString().padStart(2, '0')} ${period}`, minutes: m });
-  }
-  return options;
-}
-
-/**
- * One-tap windows for the common cases. The custom sheet costs four taps and
- * two scrolls through 31 time chips, which is enough friction that sellers
- * publish with no windows at all — and a listing with no windows is exactly
- * the "message me to work it out" experience this app exists to replace.
- */
-const QUICK_PRESETS: { dayOffset: 0 | 1; startMin: number; endMin: number }[] = [
-  { dayOffset: 0, startMin: 9 * 60, endMin: 12 * 60 },
-  { dayOffset: 0, startMin: 13 * 60, endMin: 16 * 60 },
-  { dayOffset: 0, startMin: 17 * 60, endMin: 20 * 60 },
-  { dayOffset: 1, startMin: 9 * 60, endMin: 12 * 60 },
-  { dayOffset: 1, startMin: 13 * 60, endMin: 16 * 60 },
-  { dayOffset: 1, startMin: 17 * 60, endMin: 20 * 60 },
-];
-
-/** Resolves a preset against the current local day. */
-function presetRange(p: { dayOffset: 0 | 1; startMin: number; endMin: number }) {
-  const day = new Date();
-  day.setHours(0, 0, 0, 0);
-  day.setDate(day.getDate() + p.dayOffset);
-  const startsAt = new Date(day);
-  startsAt.setMinutes(p.startMin);
-  const endsAt = new Date(day);
-  endsAt.setMinutes(p.endMin);
-  return { startsAt, endsAt };
-}
-
-function formatWindowRange(startsAt: string, endsAt: string): string {
-  const start = new Date(startsAt);
-  const end = new Date(endsAt);
-  const now = new Date();
-  const sameDay = start.toDateString() === now.toDateString();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const isTomorrow = start.toDateString() === tomorrow.toDateString();
-
-  const dayLabel = sameDay
-    ? 'Today'
-    : isTomorrow
-      ? 'Tomorrow'
-      : start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const startTime = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  const endTime = end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  return `${dayLabel}, ${startTime} – ${endTime}`;
-}
-
-export function WindowEditor({ windows, onChange }: WindowEditorProps) {
+export function WindowEditor({ windows, onChange, until, timeZone, error }: WindowEditorProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [dayIndex, setDayIndex] = useState<number | null>(null);
-  const [startMinutes, setStartMinutes] = useState<number | null>(null);
-  const [endMinutes, setEndMinutes] = useState<number | null>(null);
+  const [day, setDay] = useState<string | null>(null);
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
 
-  const dayOptions = useMemo(buildDayOptions, []);
-  const timeOptions = useMemo(buildTimeOptions, []);
+  const untilMs = until.getTime();
+  const all = useMemo(() => boundaries(new Date(untilMs)), [untilMs]);
 
-  // Drop presets that have already passed, and any the seller has added, so
-  // the row only ever offers windows that would actually do something.
-  // `now` is captured once on mount rather than read during each render: the
-  // preset row does not need to tick, and reading the clock while rendering
-  // makes the component non-idempotent (react-hooks/purity).
-  const [now] = useState(() => Date.now());
+  const days = useMemo(() => {
+    const map = new Map<string, { label: string; sub: string }>();
+    for (const b of all) {
+      const k = dayKey(b, timeZone);
+      if (!map.has(k)) map.set(k, { label: relativeDayLabel(b, timeZone), sub: shortDate(b, timeZone) });
+    }
+    return [...map.entries()];
+  }, [all, timeZone]);
 
-  const quickOptions = useMemo(() => {
-    const taken = new Set(windows.map((w) => `${w.startsAt}|${w.endsAt}`));
-    return QUICK_PRESETS.map((p) => {
-      const { startsAt, endsAt } = presetRange(p);
-      return {
-        label: formatPickupWindow(startsAt, endsAt),
-        startsAt: startsAt.toISOString(),
-        endsAt: endsAt.toISOString(),
-      };
-    })
-      .filter((o) => new Date(o.endsAt).getTime() > now && !taken.has(`${o.startsAt}|${o.endsAt}`))
-      .slice(0, 4);
-  }, [windows, now]);
+  // Starts must leave room for a 30-minute meetup before the end of the listing.
+  const startOptions = all.filter((b) => dayKey(b, timeZone) === day && b.getTime() + SLOT_MS <= untilMs);
+  const endOptions = start
+    ? all.filter((b) => b.getTime() >= new Date(start).getTime() + SLOT_MS && b.getTime() <= untilMs)
+    : [];
 
-  function addQuick(option: { startsAt: string; endsAt: string }) {
-    onChange([...windows, { key: nextKey(), startsAt: option.startsAt, endsAt: option.endsAt }]);
-  }
+  const quick = useMemo(() => {
+    const first = nextSlotBoundary().getTime();
+    const candidates = [
+      { label: 'Next 2 hours', hours: 2 },
+      { label: 'Next 4 hours', hours: 4 },
+      { label: 'Next 8 hours', hours: 8 },
+    ];
+    return candidates
+      .map((c) => {
+        const e = Math.min(first + c.hours * 3_600_000, untilMs);
+        return { label: c.label, startsAt: new Date(first).toISOString(), endsAt: new Date(e).toISOString(), ok: e - first >= SLOT_MS };
+      })
+      .filter((c) => c.ok && !windows.some((w) => w.startsAt === c.startsAt && w.endsAt === c.endsAt));
+  }, [windows, untilMs]);
+
+  const full = windows.length >= MAX_WINDOWS;
 
   function openSheet() {
-    setDayIndex(null);
-    setStartMinutes(null);
-    setEndMinutes(null);
+    setDay(days[0]?.[0] ?? null);
+    setStart(null);
+    setEnd(null);
     setSheetOpen(true);
   }
 
   function handleAdd() {
-    if (dayIndex === null || startMinutes === null || endMinutes === null) return;
-    const day = dayOptions[dayIndex]!.date;
-    const start = new Date(day);
-    start.setMinutes(startMinutes);
-    const end = new Date(day);
-    end.setMinutes(endMinutes);
-    if (end <= start) return;
-
-    onChange([...windows, { key: nextKey(), startsAt: start.toISOString(), endsAt: end.toISOString() }]);
+    if (!start || !end) return;
+    onChange([...windows, { key: nextKey(), startsAt: start, endsAt: end }]);
     setSheetOpen(false);
   }
 
-  function handleRemove(key: string) {
-    onChange(windows.filter((w) => w.key !== key));
-  }
-
-  const canAdd = dayIndex !== null && startMinutes !== null && endMinutes !== null && endMinutes > startMinutes;
+  const sorted = [...windows].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
   return (
     <View>
-      {windows.length === 0 ? (
-        <Text variant="body" color="inkMuted" style={styles.emptyHint}>
-          No windows yet. Buyers can still request a time, and &ldquo;Pickup today&rdquo; visibility needs at
-          least one window today.
+      <Text variant="body" color="inkMuted" style={styles.hint}>
+        Your listing is live for 24 hours. Buyers book one of these times.
+      </Text>
+
+      {sorted.length === 0 ? (
+        <Text variant="body" color={error ? 'danger' : 'inkMuted'} style={styles.hint} accessibilityRole={error ? 'alert' : undefined}>
+          {error ?? 'Add at least one time you can meet in the next 24 hours.'}
         </Text>
       ) : (
         <View style={styles.list}>
-          {windows.map((w) => (
+          {sorted.map((w) => (
             <View key={w.key} style={styles.row}>
               <Text variant="body" style={styles.rowText}>
-                {formatWindowRange(w.startsAt, w.endsAt)}
+                {relativeDayLabel(w.startsAt, timeZone)}, {clockTime(w.startsAt, timeZone)} – {clockTime(w.endsAt, timeZone)}
               </Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Remove this window"
-                onPress={() => handleRemove(w.key)}
+                accessibilityLabel={`Remove window ${relativeDayLabel(w.startsAt, timeZone)} ${clockTime(w.startsAt, timeZone)}`}
+                onPress={() => onChange(windows.filter((x) => x.key !== w.key))}
                 hitSlop={14}
                 style={styles.deleteButton}
               >
@@ -203,15 +137,14 @@ export function WindowEditor({ windows, onChange }: WindowEditorProps) {
         </View>
       )}
 
-      {quickOptions.length > 0 ? (
+      {quick.length > 0 && !full ? (
         <View style={styles.quickWrap}>
-          {quickOptions.map((o) => (
+          {quick.map((o) => (
             <Chip
-              key={o.startsAt}
+              key={o.label}
               label={o.label}
-              selected={false}
-              onPress={() => addQuick(o)}
-              accessibilityLabel={`Add pickup window ${o.label}`}
+              onPress={() => onChange([...windows, { key: nextKey(), startsAt: o.startsAt, endsAt: o.endsAt }])}
+              accessibilityLabel={`Add window: ${o.label}`}
             />
           ))}
         </View>
@@ -221,18 +154,38 @@ export function WindowEditor({ windows, onChange }: WindowEditorProps) {
         title={windows.length > 0 ? 'Add another time' : 'Pick a custom time'}
         variant="secondary"
         onPress={openSheet}
+        disabled={full || all.length < 2}
         icon={<Plus size={18} color={colors.ink} />}
         style={styles.addButton}
       />
+      {full ? (
+        <Text variant="caption" color="inkMuted" style={styles.hint}>
+          Up to {MAX_WINDOWS} windows.
+        </Text>
+      ) : null}
+      {all.length < 2 ? (
+        <Text variant="caption" color="inkMuted" style={styles.hint}>
+          Not enough time left on this listing to add a window.
+        </Text>
+      ) : null}
 
-      <Sheet visible={sheetOpen} onClose={() => setSheetOpen(false)} title="Add a pickup window">
+      <Sheet visible={sheetOpen} onClose={() => setSheetOpen(false)} title="Add a meetup window">
         <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
           <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
             Day
           </Text>
           <View style={styles.chipWrap}>
-            {dayOptions.map((d, i) => (
-              <Chip key={i} label={d.label} selected={dayIndex === i} onPress={() => setDayIndex(i)} />
+            {days.map(([k, d]) => (
+              <Chip
+                key={k}
+                label={`${d.label} · ${d.sub}`}
+                selected={day === k}
+                onPress={() => {
+                  setDay(k);
+                  setStart(null);
+                  setEnd(null);
+                }}
+              />
             ))}
           </View>
 
@@ -240,36 +193,51 @@ export function WindowEditor({ windows, onChange }: WindowEditorProps) {
             Start time
           </Text>
           <View style={styles.chipWrap}>
-            {timeOptions.map((t) => (
-              <Chip
-                key={t.minutes}
-                label={t.label}
-                selected={startMinutes === t.minutes}
-                onPress={() => {
-                  setStartMinutes(t.minutes);
-                  if (endMinutes !== null && endMinutes <= t.minutes) setEndMinutes(null);
-                }}
-              />
-            ))}
+            {startOptions.map((t) => {
+              const iso = t.toISOString();
+              return (
+                <Chip
+                  key={iso}
+                  label={clockTime(t, timeZone)}
+                  selected={start === iso}
+                  onPress={() => {
+                    setStart(iso);
+                    if (end && new Date(end).getTime() < t.getTime() + SLOT_MS) setEnd(null);
+                  }}
+                />
+              );
+            })}
+            {startOptions.length === 0 ? (
+              <Text variant="caption" color="inkMuted">
+                Nothing left on this day.
+              </Text>
+            ) : null}
           </View>
 
           <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
-            End time
+            End time (at least 30 minutes later)
           </Text>
           <View style={styles.chipWrap}>
-            {timeOptions
-              .filter((t) => startMinutes === null || t.minutes > startMinutes)
-              .map((t) => (
+            {endOptions.map((t) => {
+              const iso = t.toISOString();
+              const sameDay = dayKey(t, timeZone) === day;
+              return (
                 <Chip
-                  key={t.minutes}
-                  label={t.label}
-                  selected={endMinutes === t.minutes}
-                  onPress={() => setEndMinutes(t.minutes)}
+                  key={iso}
+                  label={sameDay ? clockTime(t, timeZone) : `${relativeDayLabel(t, timeZone)} ${clockTime(t, timeZone)}`}
+                  selected={end === iso}
+                  onPress={() => setEnd(iso)}
                 />
-              ))}
+              );
+            })}
+            {!start ? (
+              <Text variant="caption" color="inkMuted">
+                Pick a start time first.
+              </Text>
+            ) : null}
           </View>
 
-          <Button title="Add window" onPress={handleAdd} disabled={!canAdd} style={styles.confirmButton} />
+          <Button title="Add window" onPress={handleAdd} disabled={!start || !end} style={styles.confirmButton} />
         </ScrollView>
       </Sheet>
     </View>
@@ -277,7 +245,7 @@ export function WindowEditor({ windows, onChange }: WindowEditorProps) {
 }
 
 const styles = StyleSheet.create({
-  emptyHint: { marginBottom: space.md },
+  hint: { marginBottom: space.md },
   list: { gap: space.sm, marginBottom: space.md },
   row: {
     flexDirection: 'row',
@@ -291,7 +259,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   rowText: { flex: 1 },
-  deleteButton: { padding: space.xs },
+  deleteButton: { padding: space.sm },
   quickWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md },
   addButton: { alignSelf: 'flex-start' },
   sheetScroll: { maxHeight: 480 },

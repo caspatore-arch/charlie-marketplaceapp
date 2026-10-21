@@ -13,7 +13,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { trpc } from '@/lib/trpc';
 import { colors, space } from '@/constants/theme';
 
-type Category = 'messages' | 'meetups' | 'auctions';
+type Category = 'messages' | 'meetups' | 'offers';
 
 const ROWS: { key: Category; label: string; helper: string }[] = [
   { key: 'messages', label: 'Messages', helper: 'A new message from a buyer or seller.' },
@@ -23,9 +23,9 @@ const ROWS: { key: Category; label: string; helper: string }[] = [
     helper: 'A request, acceptance, decline, new time proposed, or cancellation.',
   },
   {
-    key: 'auctions',
-    label: 'Auctions',
-    helper: "You've been outbid, an auction you won, or one of yours ending with no bids.",
+    key: 'offers',
+    label: 'Offers',
+    helper: 'A new offer on your item, or an offer you made being accepted or declined.',
   },
 ];
 
@@ -70,8 +70,8 @@ export function NotificationsSection() {
   return (
     <View style={styles.wrap}>
       <Text variant="body" color="inkMuted" style={styles.intro}>
-        Choose what can notify you. This app never sends push notifications until you place a bid,
-        send a message, or request a meetup for the first time — and only for what you leave on here.
+        Choose what can notify you. This app never sends push notifications until you make an offer,
+        send a message, or book a meetup for the first time — and only for what you leave on here.
       </Text>
 
       {ROWS.map((row) => (

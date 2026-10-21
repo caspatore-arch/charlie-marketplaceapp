@@ -43,6 +43,7 @@ import { directionsUrlForCoords, geocodeAddress, haversineMeters, GeocodeError }
 import { notifyMeetupEvent, type MeetupEventKind } from '../../notifications/events';
 import {
   AVAILABILITY_HORIZON_MS,
+  LEGACY_AUCTION_MESSAGE,
   MEETUP_SLOT_MINUTES,
   applyExpiry,
   applyExpiryForRead,
@@ -251,8 +252,6 @@ const locationInput = z
 
 const OPEN_STATUSES = ['requested', 'countered', 'accepted'] as const;
 
-export const LEGACY_AUCTION_MESSAGE =
-  'This was posted as an auction before Dibbs switched to asking prices. It closes at its original end time.';
 const OFFER_HOLD_MESSAGE =
   'The seller accepted another offer on this item. It may open up again if that buyer does not book within the hour.';
 
@@ -1074,11 +1073,25 @@ export const reservationRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: 'This listing belongs to someone else.' });
       }
 
-      return ctx.db
+      const rows = await ctx.db
         .select()
         .from(reservations)
         .where(eq(reservations.listingId, listing.id))
         .orderBy(desc(reservations.createdAt));
+
+      const buyerIds = [...new Set(rows.map((r) => r.buyerId))];
+      const buyers = buyerIds.length
+        ? await ctx.db
+            .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl })
+            .from(users)
+            .where(inArray(users.id, buyerIds))
+        : [];
+      const buyerById = new Map(buyers.map((b) => [b.id, b]));
+
+      return rows.map((r) => ({
+        ...r,
+        buyer: buyerById.get(r.buyerId) ?? { id: r.buyerId, displayName: 'Deleted account', avatarUrl: null },
+      }));
     }),
 
   /**

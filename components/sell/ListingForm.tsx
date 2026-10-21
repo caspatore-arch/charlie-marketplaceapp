@@ -16,19 +16,13 @@ import { Divider } from '@/components/ui/Divider';
 import { PhotoPickerRow, type PhotoItem } from './PhotoPickerRow';
 import { SpotMultiSelect } from './SpotMultiSelect';
 import { WindowEditor, type WindowItem } from './WindowEditor';
-import { SellTodayToggle } from './SellTodayToggle';
-import { SaleTypeSelector, type SaleType } from './SaleTypeSelector';
+import { DAY_MS } from '@/components/booking/time';
 import { space } from '@/constants/theme';
 import { CATEGORIES, CATEGORY_LABELS, CONDITIONS, CONDITION_LABELS, CLOTHING_SIZE_OPTIONS, SHOE_SIZE_OPTIONS } from '@/constants/campus';
 import type { Category, Condition } from '@/constants/campus';
 
 export interface ListingFormInitialValues {
   photos: PhotoItem[];
-  saleType: SaleType;
-  startPriceCents: number | null;
-  buyoutPriceCents: number | null;
-  /** Bids already placed on this auction. > 0 freezes the price fields. */
-  bidCount: number;
   title: string;
   category: Category | null;
   condition: Condition | null;
@@ -38,13 +32,9 @@ export interface ListingFormInitialValues {
   description: string;
   spotIds: string[];
   windows: WindowItem[];
-  isSellToday: boolean;
 }
 
 export interface ListingFormSubmitValues {
-  saleType: SaleType;
-  startPriceCents?: number;
-  buyoutPriceCents?: number | null;
   title: string;
   description?: string;
   category: Category;
@@ -52,6 +42,7 @@ export interface ListingFormSubmitValues {
   priceCents: number;
   size?: string;
   brand?: string;
+  /** Every listing is live for 24 hours, so this is always true. */
   isSellToday: boolean;
   photoUrls: string[];
   spotIds: string[];
@@ -67,6 +58,8 @@ export interface ListingFormProps {
   submitLabel: string;
   submitting?: boolean;
   submitError?: string | null;
+  /** End of the listing's life: new listings default to now + 24h; edit passes `expiresAt`. */
+  until?: Date;
   onSubmit: (values: ListingFormSubmitValues) => void;
   onDirtyChange?: (dirty: boolean) => void;
   /** Extra content rendered below the form fields, above Publish (edit screen's "More" section). */
@@ -75,10 +68,6 @@ export interface ListingFormProps {
 
 const DEFAULTS: ListingFormInitialValues = {
   photos: [],
-  saleType: 'fixed',
-  startPriceCents: null,
-  buyoutPriceCents: null,
-  bidCount: 0,
   title: '',
   category: null,
   condition: null,
@@ -88,7 +77,6 @@ const DEFAULTS: ListingFormInitialValues = {
   description: '',
   spotIds: [],
   windows: [],
-  isSellToday: false,
 };
 
 function priceCentsToInput(cents: number | null): string {
@@ -110,9 +98,8 @@ interface FieldErrors {
   category?: string;
   condition?: string;
   price?: string;
-  startPrice?: string;
-  buyoutPrice?: string;
   spots?: string;
+  windows?: string;
 }
 
 const FIELD_ORDER: (keyof FieldErrors)[] = [
@@ -121,21 +108,23 @@ const FIELD_ORDER: (keyof FieldErrors)[] = [
   'category',
   'condition',
   'price',
-  'startPrice',
-  'buyoutPrice',
   'spots',
+  'windows',
 ];
 
-/** docs/AUCTIONS.md §1: the $1 floor a platform fee can round against. */
-const MIN_START_PRICE_CENTS = 100;
+/** The $1 floor a platform fee can round against. */
+const MIN_PRICE_CENTS = 100;
 
 export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(function ListingForm(
-  { initialValues, submitLabel, submitting = false, submitError, onSubmit, onDirtyChange, footer },
+  { initialValues, submitLabel, submitting = false, submitError, until, onSubmit, onDirtyChange, footer },
   ref,
 ) {
   const merged = { ...DEFAULTS, ...initialValues };
   const { user } = useAuth();
   const campusId = user?.campus?.id;
+  const timeZone = user?.campus?.timezone;
+  const [defaultUntil] = useState(() => new Date(Date.now() + DAY_MS));
+  const windowsUntil = until ?? defaultUntil;
   const spotsQuery = trpc.campus.spots.useQuery({ campusId: campusId! }, { enabled: !!campusId });
 
   const [photos, setPhotos] = useState<PhotoItem[]>(merged.photos);
@@ -143,17 +132,11 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
   const [category, setCategory] = useState<Category | null>(merged.category);
   const [condition, setCondition] = useState<Condition | null>(merged.condition);
   const [priceInput, setPriceInput] = useState(priceCentsToInput(merged.priceCents));
-  const [saleType, setSaleType] = useState<SaleType>(merged.saleType);
-  const [startPriceInput, setStartPriceInput] = useState(priceCentsToInput(merged.startPriceCents));
-  const [buyoutPriceInput, setBuyoutPriceInput] = useState(
-    priceCentsToInput(merged.buyoutPriceCents),
-  );
   const [size, setSize] = useState(merged.size);
   const [brand, setBrand] = useState(merged.brand);
   const [description, setDescription] = useState(merged.description);
   const [spotIds, setSpotIds] = useState<string[]>(merged.spotIds);
   const [windows, setWindows] = useState<WindowItem[]>(merged.windows);
-  const [isSellToday, setIsSellToday] = useState(merged.isSellToday);
 
   const [touched, setTouched] = useState<Partial<Record<keyof FieldErrors, boolean>>>({});
   const [triedSubmit, setTriedSubmit] = useState(false);
@@ -162,11 +145,6 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
   const sectionY = useRef<Partial<Record<keyof FieldErrors, number>>>({});
 
   const priceCents = parsePriceInput(priceInput);
-  const startPriceCents = parsePriceInput(startPriceInput);
-  const buyoutPriceCents = parsePriceInput(buyoutPriceInput);
-  const isAuction = saleType === 'auction';
-  // Rule 6: an auction that already has bids has made a promise to its bidders.
-  const pricesLocked = merged.bidCount > 0 && merged.saleType === 'auction';
   const showSize = category === 'clothing' || category === 'shoes';
   const sizeOptions = category === 'shoes' ? SHOE_SIZE_OPTIONS : CLOTHING_SIZE_OPTIONS;
 
@@ -177,15 +155,11 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
         category: merged.category,
         condition: merged.condition,
         priceCents: merged.priceCents,
-        saleType: merged.saleType,
-        startPriceCents: merged.startPriceCents,
-        buyoutPriceCents: merged.buyoutPriceCents,
         size: merged.size,
         brand: merged.brand,
         description: merged.description,
         spotIds: [...merged.spotIds].sort(),
         windowCount: merged.windows.length,
-        isSellToday: merged.isSellToday,
         photoCount: merged.photos.length,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,15 +171,11 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
     category,
     condition,
     priceCents,
-    saleType,
-    startPriceCents,
-    buyoutPriceCents,
     size,
     brand,
     description,
     spotIds: [...spotIds].sort(),
     windowCount: windows.length,
-    isSellToday,
     photoCount: photos.length,
   });
   const dirty = currentSnapshot !== initialSnapshot;
@@ -224,22 +194,11 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
   else if (title.length > 80) errors.title = 'Keep the title under 80 characters.';
   if (!category) errors.category = 'Pick a category.';
   if (!condition) errors.condition = 'Pick a condition.';
-  if (isAuction) {
-    if (startPriceCents === null) errors.startPrice = 'Set a start price for your auction.';
-    else if (startPriceCents < MIN_START_PRICE_CENTS) {
-      errors.startPrice = 'The start price has to be at least $1.';
-    }
-    if (
-      buyoutPriceCents !== null &&
-      startPriceCents !== null &&
-      buyoutPriceCents <= startPriceCents
-    ) {
-      errors.buyoutPrice = 'Buy it now has to be more than the start price.';
-    }
-  } else if (priceCents === null || priceCents <= 0) {
-    errors.price = 'Enter a price above $0.';
+  if (priceCents === null || priceCents < MIN_PRICE_CENTS) {
+    errors.price = 'Set an asking price of at least $1.';
   }
-  if (spotIds.length === 0) errors.spots = 'Pick at least one pickup spot.';
+  if (spotIds.length === 0) errors.spots = 'Pick at least one campus meetup place.';
+  if (windows.length === 0) errors.windows = 'Add at least one time you can meet in the next 24 hours.';
 
   const visible = (key: keyof FieldErrors): string | undefined =>
     (touched[key] || triedSubmit) && errors[key] ? errors[key] : undefined;
@@ -260,18 +219,14 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
     if (uploading) return;
 
     onSubmit({
-      saleType,
-      startPriceCents: isAuction ? startPriceCents! : undefined,
-      buyoutPriceCents: isAuction ? buyoutPriceCents : undefined,
       title: title.trim(),
       description: description.trim() || undefined,
       category: category!,
       condition: condition!,
-      // An auction's price IS its start price; the server mirrors it too.
-      priceCents: isAuction ? startPriceCents! : priceCents!,
+      priceCents: priceCents!,
       size: showSize && size ? size : undefined,
       brand: brand.trim() || undefined,
-      isSellToday: isAuction ? false : isSellToday,
+      isSellToday: true,
       photoUrls: photos.filter((p) => p.status === 'done' && p.url).map((p) => p.url!),
       spotIds,
       windows: windows.map((w) => ({ startsAt: w.startsAt, endsAt: w.endsAt })),
@@ -296,21 +251,6 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <View>
-          <Text variant="label" color="inkMuted" style={styles.label}>
-            How are you selling it?
-          </Text>
-          <SaleTypeSelector value={saleType} onChange={setSaleType} disabled={pricesLocked} />
-          {pricesLocked ? (
-            <Text variant="caption" color="inkMuted" style={styles.error}>
-              This auction already has bids, so the sale type and prices are locked. Bidders have
-              committed to buy at these prices.
-            </Text>
-          ) : null}
-        </View>
-
-        <Divider style={styles.divider} />
-
         <View onLayout={recordY('photos')}>
           <Text variant="label" color="inkMuted" style={styles.label}>
             Photos
@@ -382,57 +322,18 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
           ) : null}
         </View>
 
-        {isAuction ? (
-          <>
-            <View onLayout={recordY('startPrice')} style={styles.field}>
-              <Input
-                label="Start price"
-                placeholder="0.00"
-                value={startPriceInput}
-                onChangeText={setStartPriceInput}
-                onBlur={() => setTouched((t) => ({ ...t, startPrice: true }))}
-                error={visible('startPrice')}
-                editable={!pricesLocked}
-                keyboardType="decimal-pad"
-                helper="At least $1."
-              />
-              <Text variant="caption" color="inkMuted" style={styles.auctionNote}>
-                If only one person bids, your item sells at the start price. Set it to the least
-                you would happily accept.
-              </Text>
-            </View>
-
-            <View onLayout={recordY('buyoutPrice')} style={styles.field}>
-              <Input
-                label="Buy it now (optional)"
-                placeholder="0.00"
-                value={buyoutPriceInput}
-                onChangeText={setBuyoutPriceInput}
-                onBlur={() => setTouched((t) => ({ ...t, buyoutPrice: true }))}
-                error={visible('buyoutPrice')}
-                editable={!pricesLocked}
-                keyboardType="decimal-pad"
-                helper="Leave blank for bidding only. Must be more than the start price."
-              />
-              <Text variant="caption" color="inkMuted" style={styles.auctionNote}>
-                Someone can end the auction early by paying this. Bidding runs for 24 hours; a bid
-                in the last 2 minutes adds 2 more.
-              </Text>
-            </View>
-          </>
-        ) : (
-          <View onLayout={recordY('price')} style={styles.field}>
-            <Input
-              label="Price"
-              placeholder="0.00"
-              value={priceInput}
-              onChangeText={setPriceInput}
-              onBlur={() => setTouched((t) => ({ ...t, price: true }))}
-              error={visible('price')}
-              keyboardType="decimal-pad"
-            />
-          </View>
-        )}
+        <View onLayout={recordY('price')} style={styles.field}>
+          <Input
+            label="Asking price ($)"
+            placeholder="0.00"
+            value={priceInput}
+            onChangeText={setPriceInput}
+            onBlur={() => setTouched((t) => ({ ...t, price: true }))}
+            error={visible('price')}
+            keyboardType="decimal-pad"
+            helper="At least $1. Buyers can book at this price or send you an offer below it."
+          />
+        </View>
 
         {showSize ? (
           <View style={styles.field}>
@@ -465,7 +366,7 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
 
         <View onLayout={recordY('spots')} style={styles.field}>
           <Text variant="label" color="inkMuted" style={styles.label}>
-            Pickup spots
+            Campus meetup places
           </Text>
           <SpotMultiSelect
             spots={spotsQuery.data}
@@ -483,27 +384,21 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
 
         <Divider style={styles.divider} />
 
-        <View style={styles.field}>
+        <View onLayout={recordY('windows')} style={styles.field}>
           <Text variant="label" color="inkMuted" style={styles.label}>
-            Availability windows
+            When can you meet?
           </Text>
-          <WindowEditor windows={windows} onChange={setWindows} />
+          <WindowEditor
+            windows={windows}
+            onChange={(w) => {
+              setWindows(w);
+              setTouched((t) => ({ ...t, windows: true }));
+            }}
+            until={windowsUntil}
+            timeZone={timeZone}
+            error={visible('windows')}
+          />
         </View>
-
-        <Divider style={styles.divider} />
-
-        {isAuction ? (
-          <View style={styles.field}>
-            <Text variant="caption" color="inkMuted">
-              Auctions run for 24 hours from the moment you publish. &quot;Sell today&quot; is for
-              fixed-price listings.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.field}>
-            <SellTodayToggle value={isSellToday} onChange={setIsSellToday} />
-          </View>
-        )}
 
         {footer ? <View style={styles.footer}>{footer}</View> : null}
 
@@ -532,7 +427,6 @@ const styles = StyleSheet.create({
   field: { marginTop: space.lg },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   error: { marginTop: space.sm },
-  auctionNote: { marginTop: space.xs, lineHeight: 16 },
   divider: { marginVertical: space.xl },
   footer: { marginTop: space.xl },
   submitError: { marginTop: space.lg, textAlign: 'center' },

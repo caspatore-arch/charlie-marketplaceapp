@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { AccountSection } from '@/components/settings/AccountSection';
+import { PhoneAccountSection } from '@/components/settings/PhoneAccountSection';
 import { SafetySection } from '@/components/settings/SafetySection';
 import { NotificationsSection } from '@/components/settings/NotificationsSection';
 import { PayoutsSection } from '@/components/settings/PayoutsSection';
@@ -63,6 +64,10 @@ export default function SettingsScreen() {
       >
         <SettingsSection title="Account">
           <AccountSection />
+        </SettingsSection>
+
+        <SettingsSection title="Account & phone">
+          <PhoneAccountSection />
         </SettingsSection>
 
         <SettingsSection title="Payouts">

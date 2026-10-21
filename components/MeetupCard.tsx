@@ -1,6 +1,6 @@
 /**
- * The signature meetup summary card, used on reservation/[id] and inline in
- * Inbox > Requests. Usage:
+ * The signature meetup summary card, used on reservation/[id] and in the
+ * Meetups & messages list. Usage:
  *
  * <MeetupCard
  *   photoUrl={reservation.listing.coverPhotoUrl}
@@ -31,7 +31,7 @@ import { Button } from './ui/Button';
 import { PriceText } from './ui/PriceText';
 import { ReservationStatusPill } from './ReservationStatusPill';
 import { resolveMediaUrl } from '@/lib/trpc';
-import { formatMeetupTime } from '@/utils/format';
+import { exactMeetupTime } from '@/components/booking/time';
 import type { ReservationStatus } from '@/types';
 
 export interface MeetupCardProps {
@@ -44,7 +44,10 @@ export interface MeetupCardProps {
   /** A party-proposed address, resolved server-side. Renders in place of the spot. */
   customAddress?: string | null;
   startsAt: string;
+  /** Campus IANA timezone; times are always shown in campus time. */
   timeZone?: string;
+  /** True when the price came from an accepted offer. */
+  agreedOffer?: boolean;
   status: ReservationStatus;
   onPressDirections?: () => void;
   onReschedule?: () => void;
@@ -60,6 +63,7 @@ export function MeetupCard({
   customAddress,
   startsAt,
   timeZone,
+  agreedOffer,
   status,
   onPressDirections,
   onReschedule,
@@ -81,6 +85,11 @@ export function MeetupCard({
             {title}
           </Text>
           <PriceText cents={priceCents} />
+          {agreedOffer ? (
+            <Text variant="caption" color="inkMuted">
+              Agreed offer
+            </Text>
+          ) : null}
         </View>
         <ReservationStatusPill status={status} />
       </View>
@@ -113,7 +122,7 @@ export function MeetupCard({
           </>
         )}
         <Text variant="body" style={styles.time}>
-          {formatMeetupTime(startsAt, timeZone)}
+          {exactMeetupTime(startsAt, timeZone)}
         </Text>
       </View>
 

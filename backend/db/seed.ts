@@ -7,13 +7,14 @@
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from './client';
 import { runMigrations } from './migrate';
 import {
   availabilityWindows,
   bids,
+  communityPosts,
   campuses,
   listingPhotos,
   listingSpots,
@@ -151,14 +152,6 @@ type SeedListing = {
   size?: string;
   brand?: string;
   isSellToday?: boolean;
-  /** Auction demo rows (docs/AUCTIONS.md §1). Omitted = ordinary fixed price. */
-  saleType?: 'fixed' | 'auction';
-  startPriceCents?: number;
-  buyoutPriceCents?: number;
-  /** Hours from now the auction ends. Refreshed on every seed run. */
-  endsInHours?: number;
-  /** Seeded bids: [bidder id, amount in cents], oldest first. */
-  seedBids?: [string, number][];
   photos: string[];
   spots: string[];
   /** 'today' adds the guaranteed-bookable slot plus a later one today. */
@@ -362,23 +355,16 @@ const SEED_LISTINGS: SeedListing[] = [
     spots: [SPOT_UNION, SPOT_LIBRARY],
     windows: 'none',
   },
-  /* ---------------------------------------------------------- auctions */
+  /* ------------------- formerly auction demos, now fixed asking prices */
   {
     id: L(13),
     sellerId: JORDAN_ID,
     title: 'Film camera, fully working',
-    description: 'Shoots beautifully. Battery and strap included. Auction — highest bid at the end wins.',
+    description: 'Shoots beautifully. Battery and strap included. Open to offers.',
     category: 'tech',
     condition: 'good',
-    priceCents: 6000,
+    priceCents: 6500,
     brand: 'Canon',
-    saleType: 'auction',
-    startPriceCents: 6000,
-    endsInHours: 1,
-    seedBids: [
-      [MAYA_ID, 6000],
-      [SAM_ID, 6500],
-    ],
     photos: ['demo-tech'],
     spots: [SPOT_UNION, SPOT_LIBRARY],
     windows: 'today',
@@ -387,19 +373,10 @@ const SEED_LISTINGS: SeedListing[] = [
     id: L(14),
     sellerId: MAYA_ID,
     title: 'Leather weekender bag',
-    description: 'Full-grain leather, soft from use. Auction runs 24 hours.',
+    description: 'Full-grain leather, soft from use.',
     category: 'accessories',
     condition: 'good',
-    priceCents: 4000,
-    saleType: 'auction',
-    startPriceCents: 4000,
-    endsInHours: 20,
-    seedBids: [
-      [JORDAN_ID, 4000],
-      [SAM_ID, 4500],
-      [JORDAN_ID, 5200],
-      [SAM_ID, 6000],
-    ],
+    priceCents: 6000,
     photos: ['demo-bag', 'demo-jacket'],
     spots: [SPOT_LIBRARY],
     windows: 'tomorrow',
@@ -408,14 +385,10 @@ const SEED_LISTINGS: SeedListing[] = [
     id: L(15),
     sellerId: JORDAN_ID,
     title: 'Mechanical keyboard, hot-swap',
-    description: 'Tactile switches, extra keycaps in the box. Bid, or take it now at the buy-it-now price.',
+    description: 'Tactile switches, extra keycaps in the box. Offers welcome.',
     category: 'tech',
     condition: 'like_new',
-    priceCents: 5000,
-    saleType: 'auction',
-    startPriceCents: 5000,
-    buyoutPriceCents: 9000,
-    endsInHours: 12,
+    priceCents: 7500,
     photos: ['demo-tech', 'demo-books'],
     spots: [SPOT_UNION, SPOT_REC],
     windows: 'today',
@@ -424,14 +397,10 @@ const SEED_LISTINGS: SeedListing[] = [
     id: L(16),
     sellerId: MAYA_ID,
     title: 'Desk chair, barely used',
-    description: 'Adjustable, no squeaks. Starting low — a single bid wins it at the start price.',
+    description: 'Adjustable, no squeaks. Priced to go before move-out.',
     category: 'dorm',
     condition: 'like_new',
-    priceCents: 2500,
-    saleType: 'auction',
-    startPriceCents: 2500,
-    buyoutPriceCents: 6000,
-    endsInHours: 23,
+    priceCents: 4000,
     photos: ['demo-dorm'],
     spots: [SPOT_REC, SPOT_OLD_MAIN],
     windows: 'today',
@@ -508,6 +477,11 @@ export async function seed(): Promise<void> {
       {
         id: MAYA_ID,
         email: 'maya@demo.campus.test',
+        // Fictional 555-01xx numbers. SMS is simulated: nothing is ever sent.
+        phone: '+15205550101',
+        phoneVerifiedAt: new Date(),
+        smsOptIn: true,
+        smsOptInAt: new Date(),
         displayName: 'Maya Test',
         campusId: CAMPUS_ID,
         campusEmailVerifiedAt: new Date(),
@@ -519,6 +493,11 @@ export async function seed(): Promise<void> {
       {
         id: JORDAN_ID,
         email: 'jordan@demo.campus.test',
+        // Fictional 555-01xx numbers. SMS is simulated: nothing is ever sent.
+        phone: '+15205550102',
+        phoneVerifiedAt: new Date(),
+        smsOptIn: true,
+        smsOptInAt: new Date(),
         displayName: 'Jordan Test',
         campusId: CAMPUS_ID,
         campusEmailVerifiedAt: new Date(),
@@ -529,6 +508,11 @@ export async function seed(): Promise<void> {
       {
         id: SAM_ID,
         email: 'sam@demo.campus.test',
+        // Fictional 555-01xx numbers. SMS is simulated: nothing is ever sent.
+        phone: '+15205550103',
+        phoneVerifiedAt: new Date(),
+        smsOptIn: true,
+        smsOptInAt: new Date(),
         displayName: 'Sam Test',
         campusId: CAMPUS_ID,
         campusEmailVerifiedAt: new Date(),
@@ -553,9 +537,9 @@ export async function seed(): Promise<void> {
         category: l.category,
         condition: l.condition,
         priceCents: l.priceCents,
-        saleType: l.saleType ?? ('fixed' as const),
-        startPriceCents: l.startPriceCents ?? null,
-        buyoutPriceCents: l.buyoutPriceCents ?? null,
+        saleType: 'fixed' as const,
+        startPriceCents: null,
+        buyoutPriceCents: null,
         size: l.size ?? null,
         brand: l.brand ?? null,
         status: 'active' as const,
@@ -564,10 +548,7 @@ export async function seed(): Promise<void> {
         // correctly populated and non-expired right after a seed.
         // Auctions keep their custom end-time (endsInHours); fixed-price
         // listings all use LISTING_LIFETIME_MS.
-        expiresAt:
-          l.saleType === 'auction'
-            ? new Date(Date.now() + (l.endsInHours ?? 24) * HOUR)
-            : new Date(Date.now() + LISTING_LIFETIME_MS),
+        expiresAt: new Date(Date.now() + LISTING_LIFETIME_MS),
       })),
     )
     .onConflictDoNothing();
@@ -587,63 +568,80 @@ export async function seed(): Promise<void> {
     SEED_LISTINGS.flatMap((l) => l.spots.map((spotId) => ({ listingId: l.id, spotId }))),
   );
 
+  // Availability is "the next rolling 24 hours" (docs/CONTRACT.md "Booking"),
+  // so clamp every demo window to end by the listing's 24h expiry.
+  const horizon = Date.now() + LISTING_LIFETIME_MS - 60_000;
+  const clamp = (w: { startsAt: Date; endsAt: Date }) =>
+    w.endsAt.getTime() > horizon ? { startsAt: w.startsAt, endsAt: new Date(horizon) } : w;
   const windowRows = SEED_LISTINGS.flatMap((l) => {
     if (l.windows === 'none') return [];
     if (l.windows === 'tomorrow') {
       return [
-        { listingId: l.id, ...localWindow(10, 13, 1) },
-        { listingId: l.id, ...localWindow(16, 19, 1) },
+        { listingId: l.id, ...clamp(localWindow(10, 13, 1)) },
+        { listingId: l.id, ...clamp(localWindow(16, 19, 1)) },
       ];
     }
     return [
-      { listingId: l.id, ...soonWindow() },
-      { listingId: l.id, ...localWindow(10, 13, 1) },
+      { listingId: l.id, ...clamp(soonWindow()) },
+      { listingId: l.id, ...clamp(localWindow(10, 13, 1)) },
     ];
-  });
+  }).filter((w) => w.endsAt.getTime() - Math.max(w.startsAt.getTime(), Date.now()) >= 30 * 60 * 1000);
   if (windowRows.length > 0) await db.insert(availabilityWindows).values(windowRows);
 
-  // All fixed-price listings expire 24h from seed time; refresh on every run so
-  // a re-seed never leaves the demo feed stale. (onConflictDoNothing skips the
-  // insert after the first run, so the expiresAt from that first run must be
-  // reset here.)
-  const fixedSeeds = SEED_LISTINGS.filter((l) => !l.saleType || l.saleType === 'fixed');
-  for (const l of fixedSeeds) {
+  // Every demo listing is fixed-price and expires 24h from seed time; refresh
+  // on every run so a re-seed never leaves the feed stale. This also converts
+  // a dev database seeded before auctions were retired (demo data only — real
+  // auction rows are never rewritten; see migration 0009).
+  for (const l of SEED_LISTINGS) {
     await db
       .update(listings)
-      .set({ expiresAt: new Date(Date.now() + LISTING_LIFETIME_MS) })
+      .set({
+        saleType: 'fixed',
+        startPriceCents: null,
+        buyoutPriceCents: null,
+        priceCents: l.priceCents,
+        description: l.description,
+        expiresAt: new Date(Date.now() + LISTING_LIFETIME_MS),
+      })
       .where(eq(listings.id, l.id));
   }
+  // Demo bids from the old auction demos are dropped with their auctions.
+  await db.delete(bids).where(inArray(bids.listingId, ids));
 
-  // Auction clocks and bids are relative to "now", so rebuild them every run.
-  // Deleting this seed's own bids first is what keeps re-seeding idempotent.
-  const auctionSeeds = SEED_LISTINGS.filter((l) => l.saleType === 'auction');
-  if (auctionSeeds.length > 0) {
-    await db.delete(bids).where(
-      inArray(
-        bids.listingId,
-        auctionSeeds.map((l) => l.id),
-      ),
-    );
-    for (const l of auctionSeeds) {
-      await db
-        .update(listings)
-        .set({
-          status: 'active',
-          expiresAt: new Date(Date.now() + (l.endsInHours ?? 24) * HOUR),
-        })
-        .where(eq(listings.id, l.id));
-    }
-    const bidRows = auctionSeeds.flatMap((l) =>
-      (l.seedBids ?? []).map(([bidderId, amountCents], i) => ({
-        listingId: l.id,
-        bidderId,
-        amountCents,
-        // Spread the history backwards so "newest first" reads sensibly.
-        createdAt: new Date(Date.now() - ((l.seedBids?.length ?? 0) - i) * 11 * 60 * 1000),
-      })),
-    );
-    if (bidRows.length > 0) await db.insert(bids).values(bidRows);
+  // Demo users get their fictional numbers even on a database seeded earlier.
+  for (const [id, phone] of [
+    [MAYA_ID, '+15205550101'],
+    [JORDAN_ID, '+15205550102'],
+    [SAM_ID, '+15205550103'],
+  ] as const) {
+    await db
+      .update(users)
+      .set({ phone, phoneVerifiedAt: new Date(), smsOptIn: true, smsOptInAt: new Date() })
+      .where(and(eq(users.id, id), isNull(users.phone)));
   }
+
+  // Community demo posts: fixed ids, re-created every run with a fresh 24h.
+  const P = (n: number) => `00000000-0000-4000-8000-0000000003${String(n).padStart(2, '0')}`;
+  const posts = [
+    { n: 1, authorId: JORDAN_ID, kind: 'buying' as const, body: 'Anyone selling a mini fridge? Moving into Coronado this weekend.', agoMin: 25 },
+    { n: 2, authorId: MAYA_ID, kind: 'selling' as const, body: 'Clearing out my closet before break — anyone interested in vintage band tees? Sizes S–L.', agoMin: 70 },
+    { n: 3, authorId: SAM_ID, kind: 'buying' as const, body: 'Does anyone have a TI-84 they want to sell before finals?', agoMin: 180 },
+  ];
+  await db.delete(communityPosts).where(inArray(communityPosts.id, posts.map((p) => P(p.n))));
+  await db.insert(communityPosts).values(
+    posts.map((p) => {
+      const createdAt = new Date(Date.now() - p.agoMin * 60 * 1000);
+      return {
+        id: P(p.n),
+        campusId: CAMPUS_ID,
+        authorId: p.authorId,
+        kind: p.kind,
+        body: p.body,
+        createdAt,
+        expiresAt: new Date(createdAt.getTime() + 24 * HOUR),
+      };
+    }),
+  );
 
   // Past sales and their completed meetups. Inserted after the browsable
   // listings so the feed is untouched: every row here is already `sold`.
@@ -699,8 +697,7 @@ export async function seed(): Promise<void> {
   const total = await db.select({ id: listings.id }).from(listings);
   console.log(
     `seeded: 1 campus, 4 demo spots, 3 test users, ${SEED_LISTINGS.length} demo listings ` +
-      `(${SEED_LISTINGS.filter((l) => l.saleType === 'auction').length} auctions, ` +
-      `${SEED_HISTORY.length} past sales for profile history, ` +
+      `(${SEED_HISTORY.length} past sales for profile history, ` +
       `${total.length} listings in db), ${DEMO_ART.length} demo photos written`,
   );
 }

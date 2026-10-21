@@ -12,9 +12,12 @@ import {
   meetupSpots,
   savedListings,
 } from '../../db/schema';
+import { enqueueListingPosted } from '../../sms/outbox';
 import {
-  AUCTION_TTL_MS,
+  AVAILABILITY_HORIZON_MS,
   LISTING_LIFETIME_MS,
+  MEETUP_SLOT_MS,
+  expireOffers,
   applyExpiry,
   applyExpiryForRead,
   blockedUserIds,
@@ -22,12 +25,52 @@ import {
   toListingCards,
   toListingDetail,
 } from '../lib';
-import { protectedProcedure, publicProcedure, router } from '../trpc';
+import { campusVerifiedProcedure, protectedProcedure, publicProcedure, router } from '../trpc';
 
-/** docs/AUCTIONS.md §1: below $1 a platform fee cannot round sensibly. */
-const MIN_START_PRICE_CENTS = 100;
+/** Below $1 a platform fee cannot round sensibly. */
+const MIN_PRICE_CENTS = 100;
 
+/**
+ * Auctions were retired. 'auction' is still a parseable value so a stale
+ * client gets a clear message instead of a schema error, but it is refused.
+ */
 const saleTypeSchema = z.enum(['fixed', 'auction']);
+const AUCTIONS_RETIRED = 'Auctions have been replaced by an asking price plus offers. Update the app and set a price.';
+
+const MAX_WINDOWS = 8;
+
+/**
+ * Availability windows must sit inside "now → the listing's own expiry" (which
+ * for a new listing is the rolling next 24 hours), be long enough for one
+ * meetup slot, and there can be at most 8. A small grace on the start lets a
+ * window that "starts now" survive the round trip.
+ */
+function assertWindows(
+  windows: { startsAt: Date; endsAt: Date }[],
+  opts: { now: Date; until: Date; requireOne: boolean },
+) {
+  if (opts.requireOne && windows.length === 0) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Add at least one time you can meet in the next 24 hours.' });
+  }
+  if (windows.length > MAX_WINDOWS) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: `Add up to ${MAX_WINDOWS} meetup windows.` });
+  }
+  const grace = 15 * 60 * 1000;
+  for (const w of windows) {
+    if (w.endsAt.getTime() <= opts.now.getTime() || w.startsAt.getTime() < opts.now.getTime() - grace) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Meetup windows have to be in the future.' });
+    }
+    if (w.endsAt.getTime() > opts.until.getTime() + 60_000) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Meetup windows have to end within 24 hours — the listing expires then.',
+      });
+    }
+    if (w.endsAt.getTime() - Math.max(w.startsAt.getTime(), opts.now.getTime()) < MEETUP_SLOT_MS) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Each window needs room for at least one 30-minute meetup.' });
+    }
+  }
+}
 
 const categorySchema = z.enum([
   'clothing',
@@ -63,49 +106,17 @@ const listingFields = z.object({
   windows: z.array(windowSchema),
 });
 
-/**
- * Cross-field auction rules from docs/AUCTIONS.md §1. Shared by create and
- * relist; `update` runs the same checks against the merged row in the handler,
- * because a partial update may only send one of the three fields.
- */
-function checkAuctionFields(
-  v: {
-    saleType?: 'fixed' | 'auction';
-    priceCents?: number | null;
-    startPriceCents?: number | null;
-    buyoutPriceCents?: number | null;
-  },
+/** Fixed asking price only. Rejects stale auction submissions with a clear message. */
+function checkPriceFields(
+  v: { saleType?: 'fixed' | 'auction'; priceCents?: number | null },
   ctx: z.RefinementCtx,
 ): void {
-  if (v.saleType !== 'auction') {
-    if (v.priceCents == null || v.priceCents <= 0) {
-      ctx.addIssue({ code: 'custom', path: ['priceCents'], message: 'Enter a price above $0.' });
-    }
+  if (v.saleType === 'auction') {
+    ctx.addIssue({ code: 'custom', path: ['saleType'], message: AUCTIONS_RETIRED });
     return;
   }
-  if (v.startPriceCents == null) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['startPriceCents'],
-      message: 'Set a start price for your auction.',
-    });
-  } else if (v.startPriceCents < MIN_START_PRICE_CENTS) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['startPriceCents'],
-      message: 'The start price has to be at least $1.',
-    });
-  }
-  if (
-    v.buyoutPriceCents != null &&
-    v.startPriceCents != null &&
-    v.buyoutPriceCents <= v.startPriceCents
-  ) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['buyoutPriceCents'],
-      message: 'Buy it now has to be more than the start price.',
-    });
+  if (v.priceCents == null || v.priceCents < MIN_PRICE_CENTS) {
+    ctx.addIssue({ code: 'custom', path: ['priceCents'], message: 'Set an asking price of at least $1.' });
   }
 }
 
@@ -114,14 +125,14 @@ const createInput = listingFields
     windows: z.array(windowSchema).default([]),
     saleType: saleTypeSchema.default('fixed'),
   })
-  .superRefine(checkAuctionFields);
+  .superRefine(checkPriceFields);
 
 // Every field optional on update — and deliberately WITHOUT the `windows`
 // default, so omitting windows leaves the seller's existing ones alone.
 // Auction cross-field rules are checked in the handler against the merged row.
 const updateInput = listingFields.partial().extend({ id: z.uuid() });
 
-/** Count of bids already placed on a listing. */
+/** Count of bids already placed on a (legacy auction) listing. */
 async function bidCountFor(db: Db, listingId: string): Promise<number> {
   const rows = await db.select({ id: bids.id }).from(bids).where(eq(bids.listingId, listingId));
   return rows.length;
@@ -288,12 +299,11 @@ export const listingRouter = router({
     return toListingCards(ctx.db, rows);
   }),
 
-  create: protectedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
+  create: campusVerifiedProcedure.input(createInput).mutation(async ({ ctx, input }) => {
     const now = new Date();
-    const isAuction = input.saleType === 'auction';
-    // An auction's `priceCents` mirrors its start price so every existing
-    // price filter, sort and card keeps working without special-casing.
-    const priceCents = isAuction ? input.startPriceCents! : input.priceCents;
+    // Every listing lives exactly 24 hours, whoever posted it.
+    const expiresAt = new Date(now.getTime() + LISTING_LIFETIME_MS);
+    assertWindows(input.windows, { now, until: expiresAt, requireOne: true });
 
     const [listing] = await ctx.db
       .insert(listings)
@@ -304,20 +314,15 @@ export const listingRouter = router({
         description: input.description ?? null,
         category: input.category,
         condition: input.condition,
-        priceCents,
-        saleType: input.saleType,
-        startPriceCents: isAuction ? input.startPriceCents! : null,
-        buyoutPriceCents: isAuction ? (input.buyoutPriceCents ?? null) : null,
+        priceCents: input.priceCents,
+        saleType: 'fixed',
+        startPriceCents: null,
+        buyoutPriceCents: null,
         size: input.size ?? null,
         brand: input.brand ?? null,
         status: 'active',
-        // An auction always runs 24h; "Sell today" is a fixed-price idea.
-        isSellToday: isAuction ? false : input.isSellToday,
-        // Every listing expires 24h after creation — auctions via AUCTION_TTL_MS,
-        // fixed-price via LISTING_LIFETIME_MS. Both happen to equal 24h today.
-        expiresAt: isAuction
-          ? new Date(now.getTime() + AUCTION_TTL_MS)
-          : new Date(now.getTime() + LISTING_LIFETIME_MS),
+        isSellToday: input.isSellToday,
+        expiresAt,
         createdAt: now,
         updatedAt: now,
       })
@@ -326,6 +331,7 @@ export const listingRouter = router({
     await replacePhotos(ctx.db, listing!.id, input.photoUrls);
     await replaceSpots(ctx.db, listing!.id, ctx.user.campusId, input.spotIds);
     await replaceWindows(ctx.db, listing!.id, input.windows);
+    await enqueueListingPosted(ctx.db, listing!.id);
 
     return toListingDetail(ctx.db, listing!, ctx.user.id);
   }),
@@ -335,39 +341,23 @@ export const listingRouter = router({
     .mutation(async ({ ctx, input }) => {
       const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
 
-      // docs/AUCTIONS.md §1 rule 6: once an auction has a bid the price is a
-      // commitment to the bidders, so price fields and the sale type freeze.
-      const placedBids = existing.saleType === 'auction' ? await bidCountFor(ctx.db, existing.id) : 0;
-      const touchesPrice =
-        (input.priceCents !== undefined && input.priceCents !== existing.priceCents) ||
-        (input.startPriceCents !== undefined && input.startPriceCents !== existing.startPriceCents) ||
-        (input.buyoutPriceCents !== undefined &&
-          input.buyoutPriceCents !== existing.buyoutPriceCents) ||
-        (input.saleType !== undefined && input.saleType !== existing.saleType);
-      if (placedBids > 0 && touchesPrice) {
+      if (existing.saleType === 'auction') {
         throw new TRPCError({
           code: 'CONFLICT',
-          message: "This auction already has bids, so its prices can't change.",
+          message: 'This listing was posted as an auction and closes at its original end time. Relist it with an asking price afterwards.',
         });
       }
-
-      const merged = {
-        saleType: input.saleType ?? existing.saleType,
-        priceCents: input.priceCents ?? existing.priceCents,
-        startPriceCents:
-          input.startPriceCents !== undefined ? input.startPriceCents : existing.startPriceCents,
-        buyoutPriceCents:
-          input.buyoutPriceCents !== undefined ? input.buyoutPriceCents : existing.buyoutPriceCents,
-      };
-      const parsed = z
-        .object({})
-        .passthrough()
-        .superRefine((_v, c) => checkAuctionFields(merged, c))
-        .safeParse({});
-      if (!parsed.success) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: parsed.error.issues[0]?.message ?? 'Check the price fields.',
+      if (input.saleType === 'auction') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: AUCTIONS_RETIRED });
+      }
+      if (input.priceCents !== undefined && input.priceCents < MIN_PRICE_CENTS) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Set an asking price of at least $1.' });
+      }
+      if (input.windows) {
+        assertWindows(input.windows, {
+          now: new Date(),
+          until: existing.expiresAt ?? new Date(Date.now() + AVAILABILITY_HORIZON_MS),
+          requireOne: true,
         });
       }
 
@@ -378,31 +368,11 @@ export const listingRouter = router({
       if (input.condition !== undefined) patch.condition = input.condition;
       if (input.size !== undefined) patch.size = input.size;
       if (input.brand !== undefined) patch.brand = input.brand;
-
-      if (merged.saleType === 'auction') {
-        patch.saleType = 'auction';
-        patch.startPriceCents = merged.startPriceCents!;
-        patch.buyoutPriceCents = merged.buyoutPriceCents ?? null;
-        patch.priceCents = merged.startPriceCents!;
-        patch.isSellToday = false;
-        // Switching a fixed-price listing to an auction starts the 24h clock.
-        if (existing.saleType !== 'auction') {
-          patch.expiresAt = new Date(Date.now() + AUCTION_TTL_MS);
-        }
-      } else {
-        patch.saleType = 'fixed';
-        patch.startPriceCents = null;
-        patch.buyoutPriceCents = null;
-        if (input.priceCents !== undefined) patch.priceCents = input.priceCents;
-        if (input.isSellToday !== undefined) patch.isSellToday = input.isSellToday;
-        // Deliberately do NOT recompute expiresAt here. An edit must never extend
-        // or reset the listing's expiry clock — the 24h window started at creation.
-        // Exception: if a listing is being converted FROM an auction to fixed-price,
-        // set expiresAt relative to the original createdAt so the clock is consistent.
-        if (existing.saleType === 'auction') {
-          patch.expiresAt = new Date(existing.createdAt.getTime() + LISTING_LIFETIME_MS);
-        }
-      }
+      // A new asking price applies to new bookings only: confirmed bookings keep
+      // their price snapshot, and pending offers keep askingPriceCents.
+      if (input.priceCents !== undefined) patch.priceCents = input.priceCents;
+      if (input.isSellToday !== undefined) patch.isSellToday = input.isSellToday;
+      // Deliberately never touches expiresAt: an edit must not extend the 24h.
 
       const [updated] = await ctx.db
         .update(listings)
@@ -431,14 +401,20 @@ export const listingRouter = router({
         .update(listings)
         .set({ status: 'removed', updatedAt: new Date() })
         .where(eq(listings.id, existing.id));
+      await expireOffers(ctx.db);
       return { ok: true as const };
     }),
 
-  relist: protectedProcedure
+  relist: campusVerifiedProcedure
     .input(
       z.object({
         id: z.uuid(),
         isSellToday: z.boolean(),
+        /** New asking price; omit to keep the old one (or the old start price for a legacy auction). */
+        priceCents: z.number().int().min(0).max(5_000_00).optional(),
+        /** Fresh availability for the new 24 hours. Omit to relist with none (add it in Edit). */
+        windows: z.array(windowSchema).optional(),
+        /** Legacy fields from old clients; 'auction' is refused. */
         saleType: saleTypeSchema.optional(),
         startPriceCents: z.number().int().min(0).max(5_000_00).nullish(),
         buyoutPriceCents: z.number().int().min(0).max(5_000_00).nullish(),
@@ -452,50 +428,37 @@ export const listingRouter = router({
           message: 'Only expired or removed items can be relisted.',
         });
       }
-
-      const saleType = input.saleType ?? existing.saleType;
-      const startPriceCents =
-        input.startPriceCents !== undefined ? input.startPriceCents : existing.startPriceCents;
-      const buyoutPriceCents =
-        input.buyoutPriceCents !== undefined ? input.buyoutPriceCents : existing.buyoutPriceCents;
-
-      if (saleType === 'auction') {
-        const check = z
-          .object({})
-          .passthrough()
-          .superRefine((_v, c) =>
-            checkAuctionFields({ saleType, startPriceCents, buyoutPriceCents }, c),
-          )
-          .safeParse({});
-        if (!check.success) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: check.error.issues[0]?.message ?? 'Check the auction prices.',
-          });
-        }
-        // A new auction is a new auction: the old bids do not carry over.
-        await ctx.db.delete(bids).where(eq(bids.listingId, existing.id));
+      if (input.saleType === 'auction') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: AUCTIONS_RETIRED });
+      }
+      const priceCents = input.priceCents ?? existing.startPriceCents ?? existing.priceCents;
+      if (priceCents < MIN_PRICE_CENTS) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Set an asking price of at least $1.' });
       }
 
       const now = new Date();
+      const expiresAt = new Date(now.getTime() + LISTING_LIFETIME_MS);
+      if (input.windows) assertWindows(input.windows, { now, until: expiresAt, requireOne: false });
+
+      // Bid history of a legacy auction is kept, not deleted: the relisted
+      // item is fixed-price, so those rows simply stop mattering.
       const [updated] = await ctx.db
         .update(listings)
         .set({
           status: 'active',
-          saleType,
-          startPriceCents: saleType === 'auction' ? startPriceCents! : null,
-          buyoutPriceCents: saleType === 'auction' ? (buyoutPriceCents ?? null) : null,
-          priceCents: saleType === 'auction' ? startPriceCents! : existing.priceCents,
-          isSellToday: saleType === 'auction' ? false : input.isSellToday,
-          expiresAt:
-            saleType === 'auction'
-              ? new Date(now.getTime() + AUCTION_TTL_MS)
-              : new Date(now.getTime() + LISTING_LIFETIME_MS),
+          saleType: 'fixed',
+          startPriceCents: null,
+          buyoutPriceCents: null,
+          priceCents,
+          isSellToday: input.isSellToday,
+          expiresAt,
           createdAt: now,
           updatedAt: now,
         })
         .where(eq(listings.id, existing.id))
         .returning();
+      await replaceWindows(ctx.db, existing.id, input.windows ?? []);
+      await enqueueListingPosted(ctx.db, existing.id);
       return toListingDetail(ctx.db, updated!, ctx.user.id);
     }),
 

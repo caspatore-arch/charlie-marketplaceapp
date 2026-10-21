@@ -151,6 +151,9 @@ export async function recordReservationEvent(
  * made to existing bidders are honoured. See docs/CONTRACT.md "Auctions retired".
  */
 
+export const LEGACY_AUCTION_MESSAGE =
+  'This was posted as an auction before Dibbs switched to asking prices. It closes at its original end time.';
+
 /** Every auction ran for 24 hours (docs/AUCTIONS.md §1). */
 export const AUCTION_TTL_MS = 24 * 60 * 60 * 1000;
 

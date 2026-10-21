@@ -1,5 +1,11 @@
 # Auctions, custom meetup locations, payments — specification
 
+> **STATUS 2026-10-20 — §1 (auctions) is RETIRED. §2 and §3 still apply.**
+> - **§1 is historical.** Dibbs no longer runs auctions: new auctions, bids and buy-outs are refused, and buyers book at the asking price or send an offer instead. See `docs/CONTRACT.md` sections "Auctions retired", "Offers" and "Booking". Do not build to §1.
+> - Nothing was deleted: old `bids` rows and listings that were already auctions remain, and those listings still settle at their original end time (at most 24h after the change shipped), after which the legacy path is dead.
+> - **§2 (custom meetup addresses)** still applies unchanged to `reservation.request`/`counter`.
+> - **§3 (payments)** still applies. The payment timeout only affects legacy auction reservations (the ones created by auction settlement); meetups created by `reservation.book` carry no auction payment deadline.
+
 Supersedes the fixed-price parts of `docs/CONTRACT.md`. Written before implementation; it is the source of truth. Deviate only by editing this file in the same change.
 
 ## 1. Auction is an option on the sell form

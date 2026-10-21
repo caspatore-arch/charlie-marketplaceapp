@@ -1,17 +1,18 @@
 /**
- * Bottom tabs: Browse · Sell · Inbox · Profile. Sell doesn't render its own
+ * Bottom tabs: Browse · Sell · Community · Profile. Sell doesn't render its own
  * screen — pressing it opens /listing/new as a modal instead (intercepted via
  * the tabPress listener below); app/(tabs)/sell.tsx is a trivial redirect
  * kept only so the route exists for typed-routes/deep-links.
  *
- * The Inbox tab carries a badge = unread conversations + actionable
- * reservations (capped at "9+" for display), backed by conversation.unreadTotal
- * polled every ~15s while signed in (never while signed out).
+ * The Profile tab carries a badge = unread conversations + actionable
+ * reservations + pending offers received (capped at "9+" for display), polled
+ * every ~15s while signed in (never while signed out). Messaging lives at
+ * /inbox ("Meetups & messages"), linked from Profile and Community.
  */
 import React from 'react';
 import { StyleSheet, Text as RNText, View, useWindowDimensions } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
-import { Search, PlusCircle, MessageCircle, User } from 'lucide-react-native';
+import { Search, PlusCircle, Users, User } from 'lucide-react-native';
 import { colors, breakpoints, maxContentWidth } from '@/constants/theme';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/hooks/useAuth';
@@ -30,8 +31,18 @@ export default function TabsLayout() {
     enabled: signedIn,
   });
 
+  const pendingOffersQuery = trpc.offer.mine.useQuery(
+    { role: 'seller' },
+    { refetchInterval: signedIn ? UNREAD_POLL_MS : false, enabled: signedIn },
+  );
+  const pendingOffers = signedIn
+    ? (pendingOffersQuery.data ?? []).filter((o) => o.status === 'pending').length
+    : 0;
+
   const total = signedIn
-    ? (unreadTotalQuery.data?.conversations ?? 0) + (unreadTotalQuery.data?.actionableReservations ?? 0)
+    ? (unreadTotalQuery.data?.conversations ?? 0) +
+      (unreadTotalQuery.data?.actionableReservations ?? 0) +
+      pendingOffers
     : 0;
 
   return (
@@ -81,12 +92,19 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="inbox"
+        name="community"
         options={{
-          title: 'Inbox',
+          title: 'Community',
+          tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
           tabBarIcon: ({ color, size }) => (
             <View>
-              <MessageCircle color={color} size={size} />
+              <User color={color} size={size} />
               {total > 0 ? (
                 <View style={styles.badge}>
                   <RNText style={styles.badgeText}>{total > 9 ? '9+' : total}</RNText>
@@ -95,14 +113,7 @@ export default function TabsLayout() {
             </View>
           ),
           tabBarAccessibilityLabel:
-            total > 0 ? `Inbox, ${total} item${total === 1 ? '' : 's'} need attention` : 'Inbox',
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
+            total > 0 ? `Profile, ${total} item${total === 1 ? '' : 's'} need attention` : 'Profile',
         }}
       />
     </Tabs>

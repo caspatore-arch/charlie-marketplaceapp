@@ -4,7 +4,7 @@
  * "more from this seller", share/save/report, and a sticky bottom action bar
  * that differs for the seller vs. everyone else.
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -32,12 +32,15 @@ import { TrustCompact } from '@/components/TrustSignals';
 import { SpotPicker } from '@/components/SpotPicker';
 import { ListingCard } from '@/components/ListingCard';
 import { StatusBanner } from '@/components/browse/StatusBanner';
-import { AuctionPanel } from '@/components/auction/AuctionPanel';
-import { BidSheet } from '@/components/auction/BidSheet';
-import { useCountdown } from '@/components/auction/useCountdown';
+import { OfferSheet } from '@/components/offers/OfferSheet';
+import { BuyerOfferCard } from '@/components/offers/BuyerOfferCard';
+import { SellerOffersList } from '@/components/offers/SellerOffersList';
+import { ServerErrorNote, type ServerErrorLike } from '@/components/offers/ServerErrorNote';
+import { ReservationStatusPill } from '@/components/ReservationStatusPill';
+import { exactMeetupTime } from '@/components/booking/time';
 import { ReportSheet } from '@/components/browse/ReportSheet';
 import { trpc } from '@/lib/trpc';
-import { useRequireAuth } from '@/hooks/useAuth';
+import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { confirmAction } from '@/utils/confirm';
 import { shareListing } from '@/utils/shareListing';
 import { colors, space } from '@/constants/theme';
@@ -53,62 +56,81 @@ export default function ListingDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const requireAuth = useRequireAuth();
+  const { status: authStatus } = useAuth();
   const utils = trpc.useUtils();
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [bidOpen, setBidOpen] = useState(false);
-  const [bidError, setBidError] = useState<string | null>(null);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [offerError, setOfferError] = useState<ServerErrorLike | null>(null);
+  const [offersActionError, setOffersActionError] = useState<ServerErrorLike | null>(null);
+  const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+  // Current time for the availability filter, refreshed each minute so the
+  // render itself stays free of Date.now() calls.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const listingQuery = trpc.listing.byId.useQuery({ id }, { enabled: !!id });
   const listing = listingQuery.data;
 
   const campusesQuery = trpc.campus.list.useQuery();
+
+  // The slot chart is the source of truth for "can this still be booked" and
+  // carries the campus timezone plus the server's closed message.
+  const slotsQuery = trpc.reservation.slots.useQuery({ listingId: id! }, { enabled: !!id });
   const timeZone = useMemo(
-    () => campusesQuery.data?.find((c) => c.id === listing?.campusId)?.timezone,
-    [campusesQuery.data, listing?.campusId],
+    () =>
+      slotsQuery.data?.timezone ?? campusesQuery.data?.find((c) => c.id === listing?.campusId)?.timezone,
+    [slotsQuery.data?.timezone, campusesQuery.data, listing?.campusId],
   );
 
-  const isAuction = listing?.saleType === 'auction';
+  const isLegacyAuction = listing?.saleType === 'auction';
+  const isSellerView = listing?.viewerRole === 'seller';
 
-  const bidsQuery = trpc.bid.forListing.useQuery(
+  const offersQuery = trpc.offer.forListing.useQuery(
     { listingId: id! },
-    { enabled: !!id && isAuction },
+    { enabled: !!id && !!listing && authStatus === 'signedIn' && !isLegacyAuction },
+  );
+  const offers = offersQuery.data;
+
+  const meetupsQuery = trpc.reservation.forListing.useQuery(
+    { listingId: id! },
+    { enabled: !!id && isSellerView },
   );
 
-  const auctionClock = useCountdown(isAuction ? (listing?.expiresAt ?? null) : null);
-
-  const refreshAuction = useCallback(async () => {
+  const refreshOffers = useCallback(async () => {
     if (!id) return;
     await Promise.all([
+      utils.offer.forListing.invalidate({ listingId: id }),
+      utils.offer.mine.invalidate(),
       utils.listing.byId.invalidate({ id }),
-      utils.bid.forListing.invalidate({ listingId: id }),
-      utils.listing.feed.invalidate(),
+      utils.reservation.slots.invalidate({ listingId: id }),
     ]);
   }, [id, utils]);
 
-  const placeBidMutation = trpc.bid.place.useMutation({
-    onSuccess: async (res) => {
-      setBidOpen(false);
-      setBidError(null);
-      await refreshAuction();
-      Alert.alert(
-        res.extended ? 'Bid placed — auction extended' : 'Bid placed',
-        res.extended
-          ? 'Your bid landed in the final 2 minutes, so the auction was extended by 2 minutes. This is a prototype — no money moves.'
-          : 'You are the top bidder. A bid is a commitment to buy. This is a prototype — no money moves.',
-      );
+  const createOfferMutation = trpc.offer.create.useMutation({
+    onSuccess: async () => {
+      setOfferOpen(false);
+      setOfferError(null);
+      await refreshOffers();
     },
-    onError: (err) => setBidError(err.message),
+    onError: (err) => setOfferError(err),
   });
-
-  const buyoutMutation = trpc.bid.buyout.useMutation({
-    onSuccess: async (res) => {
-      await refreshAuction();
-      await utils.reservation.mine.invalidate();
-      if (res.reservationId) router.push(`/reservation/${res.reservationId}`);
-      else Alert.alert('Bought', 'The seller will be in touch to arrange the handoff.');
-    },
-    onError: (err) => Alert.alert('Could not buy it now', err.message),
+  const withdrawOfferMutation = trpc.offer.withdraw.useMutation({
+    onSuccess: refreshOffers,
+    onError: (err) => setOffersActionError(err),
+  });
+  const acceptOfferMutation = trpc.offer.accept.useMutation({
+    onSuccess: refreshOffers,
+    onError: (err) => setOffersActionError(err),
+    onSettled: () => setBusyOfferId(null),
+  });
+  const declineOfferMutation = trpc.offer.decline.useMutation({
+    onSuccess: refreshOffers,
+    onError: (err) => setOffersActionError(err),
+    onSettled: () => setBusyOfferId(null),
   });
 
   const sellerTrustQuery = trpc.user.trustSummary.useQuery(
@@ -168,29 +190,68 @@ export default function ListingDetailScreen() {
     openConversationMutation.mutate({ listingId: id });
   }, [id, requireAuth, openConversationMutation]);
 
-  const onRequestMeetup = useCallback(() => {
-    if (!id) return;
-    if (!requireAuth(`/listing/${id}`)) return;
-    router.push({ pathname: '/reservation/request', params: { listingId: id } });
-  }, [id, requireAuth, router]);
+  const onBook = useCallback(
+    (offerId?: string, offerCents?: number) => {
+      if (!id) return;
+      if (!requireAuth(`/listing/${id}`)) return;
+      router.push({
+        pathname: '/reservation/request',
+        params: {
+          listingId: id,
+          ...(offerId ? { offerId, offerCents: String(offerCents ?? '') } : {}),
+        },
+      });
+    },
+    [id, requireAuth, router],
+  );
 
-  const onPlaceBid = useCallback(() => {
+  const onMakeOffer = useCallback(() => {
     if (!id) return;
     if (!requireAuth(`/listing/${id}`)) return;
-    setBidError(null);
-    setBidOpen(true);
+    setOfferError(null);
+    setOfferOpen(true);
   }, [id, requireAuth]);
 
-  const onBuyItNow = useCallback(() => {
-    if (!id || !listing?.buyoutPriceCents) return;
-    if (!requireAuth(`/listing/${id}`)) return;
-    confirmAction(
-      `Buy it now for ${formatPrice(listing.buyoutPriceCents)}?`,
-      'This ends the auction and commits you to meeting the seller. No money moves in this prototype.',
-      'Buy it now',
-      () => buyoutMutation.mutate({ listingId: id }),
-    );
-  }, [id, listing?.buyoutPriceCents, requireAuth, buyoutMutation]);
+  const onAcceptOffer = useCallback(
+    (offer: { id: string; amountCents: number; buyer: { displayName: string } }) => {
+      confirmAction(
+        `Accept ${formatPrice(offer.amountCents)} from ${offer.buyer.displayName}?`,
+        'The item is held for them for one hour so they can book a meetup time. Nobody else can book meanwhile.',
+        'Accept offer',
+        () => {
+          setOffersActionError(null);
+          setBusyOfferId(offer.id);
+          acceptOfferMutation.mutate({ id: offer.id });
+        },
+        { destructive: false },
+      );
+    },
+    [acceptOfferMutation],
+  );
+
+  const onDeclineOffer = useCallback(
+    (offer: { id: string; amountCents: number; buyer: { displayName: string } }) => {
+      confirmAction(
+        `Decline ${formatPrice(offer.amountCents)} from ${offer.buyer.displayName}?`,
+        'They will be told. They can make a new offer.',
+        'Decline offer',
+        () => {
+          setOffersActionError(null);
+          setBusyOfferId(offer.id);
+          declineOfferMutation.mutate({ id: offer.id });
+        },
+      );
+    },
+    [declineOfferMutation],
+  );
+
+  const onWithdrawOffer = useCallback(
+    (offerId: string) => {
+      setOffersActionError(null);
+      withdrawOfferMutation.mutate({ id: offerId });
+    },
+    [withdrawOfferMutation],
+  );
 
   const onReport = useCallback(() => {
     if (!id) return;
@@ -234,20 +295,30 @@ export default function ListingDetailScreen() {
   }
 
   const upcomingWindows = (listing.availabilityWindows ?? [])
-    .filter((w) => new Date(w.endsAt).getTime() > Date.now())
+    .filter((w) => new Date(w.endsAt).getTime() > now)
     .slice(0, 3);
 
   const isSeller = listing.viewerRole === 'seller';
-  const unavailableCopy =
-    listing.status === 'reserved'
-      ? 'This item is reserved by another buyer right now.'
+  const isAuction = listing.saleType === 'auction';
+  const legacyAuctionNote = slotsQuery.data?.closedReason ?? 'This was posted as an auction and closes at its original end time.';
+  const unavailableCopy = isAuction
+    ? legacyAuctionNote
+    : listing.status === 'reserved'
+      ? 'This item is already booked by another buyer.'
       : listing.status === 'sold'
         ? 'This item has already been sold.'
         : listing.status === 'expired'
-          ? listing.saleType === 'auction'
-            ? 'This auction ended with no bids.'
-            : 'This listing has expired.'
-          : undefined;
+          ? 'This listing has expired.'
+          : slotsQuery.data && !slotsQuery.data.open
+            ? (slotsQuery.data.closedReason ?? undefined)
+            : undefined;
+  const bookable = !isAuction && listing.status === 'active' && slotsQuery.data?.open !== false;
+  const noOpenTimes =
+    bookable && !!slotsQuery.data && slotsQuery.data.slots.every((sl) => !sl.available);
+  const heldByOther = !!offers?.heldByOther;
+  const heldByViewer = !!offers?.heldByViewer;
+  const heldOffer = heldByViewer ? offers?.offers.find((o) => o.status === 'accepted') : undefined;
+  const bookingPriceCents = heldOffer?.amountCents ?? listing.priceCents;
 
   const messageIconButton = (
     <Pressable
@@ -275,7 +346,14 @@ export default function ListingDetailScreen() {
           <StatusBanner status={listing.status} />
 
           <View style={styles.priceRow}>
-            <PriceText cents={isAuction ? listing.currentPriceCents : listing.priceCents} />
+            <View>
+              <PriceText cents={listing.priceCents} />
+              {!isAuction ? (
+                <Text variant="caption" color="inkMuted">
+                  Asking price
+                </Text>
+              ) : null}
+            </View>
             <View style={styles.iconRow}>
               <Pressable
                 accessibilityRole="button"
@@ -312,16 +390,26 @@ export default function ListingDetailScreen() {
             <Badge kind="status" label={categoryLabel(listing.category)} tone="neutral" />
           </View>
 
-          {listing.saleType === 'auction' ? (
-            <View style={styles.auctionWrap}>
-              <AuctionPanel
-                currentPriceCents={listing.currentPriceCents}
-                startPriceCents={listing.startPriceCents}
-                buyoutPriceCents={listing.buyoutPriceCents}
-                bidCount={listing.bidCount}
-                expiresAt={listing.expiresAt}
-                bids={bidsQuery.data ?? []}
-              />
+          {isAuction ? (
+            <View style={styles.noticeBox}>
+              <Text variant="body" color="inkMuted">
+                {legacyAuctionNote}
+              </Text>
+            </View>
+          ) : null}
+
+          {!isAuction && !isSeller && offers ? (
+            <BuyerOfferCard
+              data={offers}
+              timeZone={timeZone}
+              withdrawing={withdrawOfferMutation.isPending}
+              onWithdraw={onWithdrawOffer}
+              onBook={(offerId, cents) => onBook(offerId, cents)}
+            />
+          ) : null}
+          {!isAuction && !isSeller && offersActionError ? (
+            <View style={styles.noticeBox}>
+              <ServerErrorNote error={offersActionError} />
             </View>
           ) : null}
 
@@ -361,7 +449,7 @@ export default function ListingDetailScreen() {
 
           <View style={styles.windowsWrap}>
             <Text variant="label" color="inkMuted">
-              Next available times
+              Open times (campus time)
             </Text>
             {upcomingWindows.length === 0 ? (
               // Say what the buyer can do, not just what is missing. Requesting
@@ -370,8 +458,8 @@ export default function ListingDetailScreen() {
               // sitting directly above the primary button.
               <Text variant="body" color="inkFaint" style={styles.noWindows}>
                 {isSeller
-                  ? "You haven't posted pickup times. Adding some lets buyers pick a slot instead of asking."
-                  : "This seller hasn't posted times yet — propose one when you request a meetup."}
+                  ? "You haven't posted meetup times. Edit the listing to add a window buyers can book."
+                  : 'No open times on this listing right now. Message the seller.'}
               </Text>
             ) : (
               upcomingWindows.map((w) => (
@@ -382,6 +470,70 @@ export default function ListingDetailScreen() {
               ))
             )}
           </View>
+
+          {isSeller && !isAuction ? (
+            <>
+              <Divider style={styles.divider} />
+              <Text variant="heading" style={styles.sectionTitle}>
+                Offers
+              </Text>
+              {offersActionError ? (
+                <View style={styles.sectionGap}>
+                  <ServerErrorNote error={offersActionError} />
+                </View>
+              ) : null}
+              {offersQuery.isPending ? (
+                <Skeleton height={72} />
+              ) : offersQuery.isError ? (
+                <ErrorState message={offersQuery.error.message} onRetry={() => offersQuery.refetch()} />
+              ) : (
+                <SellerOffersList
+                  offers={offers?.offers ?? []}
+                  timeZone={timeZone}
+                  busyId={busyOfferId}
+                  onAccept={onAcceptOffer}
+                  onDecline={onDeclineOffer}
+                />
+              )}
+
+              <Text variant="heading" style={[styles.sectionTitle, styles.sectionGap]}>
+                Booked meetups
+              </Text>
+              {meetupsQuery.isPending ? (
+                <Skeleton height={56} />
+              ) : (meetupsQuery.data ?? []).length === 0 ? (
+                <Text variant="body" color="inkMuted">
+                  No one has booked a time yet.
+                </Text>
+              ) : (
+                <View style={styles.meetupList}>
+                  {(meetupsQuery.data ?? []).map((m) => (
+                    <Pressable
+                      key={m.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open meetup ${exactMeetupTime(m.startsAt, timeZone)}`}
+                      onPress={() => router.push(`/reservation/${m.id}`)}
+                      style={styles.meetupRow}
+                    >
+                      <View style={styles.flex}>
+                        <Text variant="label" weight="600">
+                          {exactMeetupTime(m.startsAt, timeZone)}
+                        </Text>
+                        <Text variant="caption" color="inkMuted">
+                          {m.buyer.displayName}
+                        </Text>
+                        <Text variant="caption" color="inkMuted">
+                          {formatPrice(m.priceCents)}
+                          {m.offerId ? ' · agreed offer' : ''}
+                        </Text>
+                      </View>
+                      <ReservationStatusPill status={m.status} />
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </>
+          ) : null}
 
           {moreFromSeller.length > 0 ? (
             <>
@@ -432,12 +584,6 @@ export default function ListingDetailScreen() {
               onPress={() => router.push(`/listing/${listing.id}/edit`)}
               style={styles.footerBtnFlex}
             />
-            <Button
-              title="Requests"
-              variant="ghost"
-              onPress={() => router.push('/(tabs)/inbox')}
-              style={styles.footerBtnFlex}
-            />
           </View>
         ) : (
           <>
@@ -445,69 +591,57 @@ export default function ListingDetailScreen() {
               <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
                 {unavailableCopy}
               </Text>
+            ) : heldByOther ? (
+              <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
+                Another buyer&apos;s offer was accepted; this may open up again.
+              </Text>
+            ) : noOpenTimes ? (
+              <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
+                No open times — message the seller.
+              </Text>
             ) : null}
-            {isAuction && listing.status === 'active' && !auctionClock.ended ? (
-              <>
-                <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
-                  A bid is a commitment to buy, not a reservation.
-                </Text>
-                <View style={styles.footerRow}>
-                  {messageIconButton}
-                  {listing.buyoutPriceCents != null ? (
+            <View style={styles.footerRow}>
+              {messageIconButton}
+              {isAuction ? null : (
+                <>
+                  {heldByViewer ? null : (
                     <Button
-                      // "Buy now $60" does not fit beside "Place bid" and the
-                      // message icon on a 375pt bar; it ellipsised to "Buy now
-                      // ...", hiding the one number that matters. The price
-                      // earns the space, "now" does not.
-                      title={`Buy ${formatPrice(listing.buyoutPriceCents)}`}
-                      accessibilityLabel={`Buy it now for ${formatPrice(listing.buyoutPriceCents)}`}
+                      title="Offer"
                       variant="secondary"
-                      onPress={onBuyItNow}
-                      loading={buyoutMutation.isPending}
-                      style={styles.footerBtnFlex}
+                      onPress={onMakeOffer}
+                      disabled={!bookable || heldByOther || offers?.offers[0]?.status === 'pending'}
+                      style={styles.footerBtnOffer}
+                      accessibilityLabel="Make an offer below the asking price"
                     />
-                  ) : null}
+                  )}
                   <Button
-                    title="Place bid"
-                    onPress={onPlaceBid}
-                    style={styles.footerBtnFlex}
-                    accessibilityLabel={`Place bid, current price ${formatPrice(listing.currentPriceCents)}`}
+                    title={heldByViewer && heldOffer ? `Book at ${formatPrice(bookingPriceCents)}` : 'Book meetup'}
+                    onPress={() => onBook(heldOffer?.id, heldOffer?.amountCents)}
+                    disabled={!bookable || heldByOther}
+                    style={styles.footerBtnBook}
+                    accessibilityLabel={
+                      !bookable || heldByOther
+                        ? `Book a meetup, unavailable${unavailableCopy ? `: ${unavailableCopy}` : ''}`
+                        : `Book a meetup at ${formatPrice(bookingPriceCents)}`
+                    }
                   />
-                </View>
-              </>
-            ) : (
-              <View style={styles.footerRow}>
-                {messageIconButton}
-                <Button
-                  title={isAuction ? 'Auction ended' : 'Request meetup'}
-                  onPress={onRequestMeetup}
-                  disabled={isAuction || listing.status !== 'active'}
-                  accessibilityLabel={
-                    listing.status !== 'active' ? `Request meetup, unavailable: ${unavailableCopy}` : 'Request meetup'
-                  }
-                  style={styles.footerBtnPrimary}
-                />
-              </View>
-            )}
+                </>
+              )}
+            </View>
           </>
         )}
       </View>
 
-      <BidSheet
-        visible={bidOpen}
-        onClose={() => setBidOpen(false)}
-        minimumCents={
-          listing.bidCount > 0
-            ? listing.currentPriceCents + Math.max(100, Math.ceil(listing.currentPriceCents * 0.05))
-            : listing.currentPriceCents
-        }
-        buyoutPriceCents={listing.buyoutPriceCents}
-        submitting={placeBidMutation.isPending}
-        serverError={bidError}
-        onSubmit={(amountCents) => {
+      <OfferSheet
+        visible={offerOpen}
+        onClose={() => setOfferOpen(false)}
+        askingPriceCents={listing.priceCents}
+        submitting={createOfferMutation.isPending}
+        serverError={offerError}
+        onSubmit={(amountCents, message) => {
           if (!id) return;
-          setBidError(null);
-          placeBidMutation.mutate({ listingId: id, amountCents });
+          setOfferError(null);
+          createOfferMutation.mutate({ listingId: id, amountCents, message });
         }}
       />
 
@@ -557,6 +691,9 @@ const styles = StyleSheet.create({
   },
   footerRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   footerBtnFlex: { flex: 1 },
+  // "Offer" is short; give "Book meetup" the room so neither label truncates at 375pt.
+  footerBtnOffer: { flex: 2 },
+  footerBtnBook: { flex: 3 },
   footerBtnPrimary: { flex: 2 },
   // Message is an icon, not a text button (docs/DESIGN.md). A "Message" label
   // costs ~90px of a 343px bar, which is exactly what pushed "Buy now $60"
@@ -571,5 +708,18 @@ const styles = StyleSheet.create({
   },
   footerIconBtnPressed: { opacity: 0.6 },
   unavailableNote: { marginBottom: space.sm },
-  auctionWrap: { marginTop: space.lg },
+  noticeBox: { marginTop: space.lg },
+  sectionGap: { marginTop: space.lg, marginBottom: space.sm },
+  meetupList: { gap: space.sm },
+  meetupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    minHeight: 48,
+    padding: space.md,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+  },
 });

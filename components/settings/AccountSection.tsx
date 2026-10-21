@@ -1,6 +1,6 @@
 /**
  * Account section of the Settings screen: editable display name + bio
- * (`user.updateMe`), and read-only campus / verification rows. Server
+ * (`user.updateMe`), and a read-only campus row. Server
  * validation errors are shown verbatim under the field that caused them.
  */
 import React, { useEffect, useState } from 'react';
@@ -8,7 +8,6 @@ import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { Input, TextArea } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { trpc } from '@/lib/trpc';
@@ -109,21 +108,6 @@ export function AccountSection() {
         <Text variant="body">{meQuery.data.campus?.name ?? '—'}</Text>
       </View>
 
-      <View style={styles.readOnlyRow}>
-        <Text variant="label" color="inkMuted" style={styles.verifiedLabel}>
-          Campus email
-        </Text>
-        {meQuery.data.campusEmailVerifiedAt ? (
-          <Badge kind="verified" />
-        ) : (
-          <Text variant="body" color="inkFaint">
-            Not verified
-          </Text>
-        )}
-      </View>
-      <Text variant="caption" color="inkFaint" style={styles.verifiedCaption}>
-        Verified @arizona.edu email — not an identity check
-      </Text>
     </View>
   );
 }
@@ -141,8 +125,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
   },
-  verifiedLabel: { flexShrink: 0 },
-  verifiedCaption: { marginTop: -space.xs },
 });
 
 export default AccountSection;

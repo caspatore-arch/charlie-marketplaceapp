@@ -1,5 +1,5 @@
 /**
- * Payment screen for the buyer who won an auction.
+ * Payment screen for the buyer of a booked meetup.
  *
  * Shows the item, the price, the fee breakdown, the 24-hour deadline, and a
  * Pay action. In `simulated` mode (where this app is today — there is no

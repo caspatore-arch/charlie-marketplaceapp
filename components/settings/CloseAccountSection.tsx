@@ -5,7 +5,7 @@
  * typing DELETE to enable the button, then a confirmAction() confirmation
  * (Alert.alert with buttons silently no-ops on web — see utils/confirm.ts)
  * before firing the mutation. A CONFLICT response (an open accepted meetup)
- * is shown verbatim with a link to Inbox → Requests.
+ * is shown verbatim with a link to Meetups & messages → Meetups.
  */
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -72,9 +72,9 @@ export function CloseAccountSection() {
             {conflictMessage}
           </Text>
           <Button
-            title="Go to Inbox → Requests"
+            title="Go to Meetups & messages → Meetups"
             variant="secondary"
-            onPress={() => router.push('/(tabs)/inbox')}
+            onPress={() => router.push('/inbox')}
             style={styles.conflictLink}
           />
         </View>

@@ -139,7 +139,8 @@ export async function bulkSeed(sizing: BulkSizing): Promise<void> {
     const active = i < activeCount;
     // Active listings are the recent ones, so keyset pagination walks them
     // first exactly as it would in production.
-    const ageDays = active ? rand() * 14 : 14 + rand() * 150;
+    // A listing lives 24h, so live ones were posted within the last day.
+    const ageDays = active ? rand() * 0.9 : 1 + rand() * 150;
     return {
       id: idFor(2, i),
       sellerId: idFor(1, Math.floor(rand() * sizing.users)),
@@ -154,6 +155,7 @@ export async function bulkSeed(sizing: BulkSizing): Promise<void> {
       isDemo: true,
       createdAt: new Date(now - ageDays * DAY),
       updatedAt: new Date(now - ageDays * DAY),
+      expiresAt: new Date(now - ageDays * DAY + DAY),
     };
   });
   await insertChunked('listings', listings, listingRows);
@@ -161,8 +163,9 @@ export async function bulkSeed(sizing: BulkSizing): Promise<void> {
   /* ------------------------------------------- spots + pickup windows */
   const spotRows: { listingId: string; spotId: string }[] = [];
   const windowRows: { listingId: string; startsAt: Date; endsAt: Date }[] = [];
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // Windows sit on the :00/:30 grid inside now -> now+24h (the booking rule).
+  const SLOT = 30 * 60 * 1000;
+  const firstSlot = Math.ceil(now / SLOT) * SLOT;
 
   for (let i = 0; i < activeCount; i += 1) {
     const listingId = idFor(2, i);
@@ -176,9 +179,7 @@ export async function bulkSeed(sizing: BulkSizing): Promise<void> {
     if (rand() < 0.67) {
       const windows = 1 + Math.floor(rand() * 2);
       for (let w = 0; w < windows; w += 1) {
-        const dayOffset = Math.floor(rand() * 5);
-        const startHour = 9 + Math.floor(rand() * 10);
-        const startsAt = new Date(todayStart.getTime() + dayOffset * DAY + startHour * HOUR);
+        const startsAt = new Date(firstSlot + Math.floor(rand() * 36) * SLOT); // up to +18h
         windowRows.push({ listingId, startsAt, endsAt: new Date(startsAt.getTime() + 3 * HOUR) });
       }
     }

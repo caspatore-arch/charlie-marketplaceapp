@@ -18,6 +18,20 @@ export type ListingDetail = RouterOutputs['listing']['byId'];
 export type Reservation = RouterOutputs['reservation']['request'];
 export type ReservationDetail = RouterOutputs['reservation']['byId'];
 
+/** Bookable slot chart for a listing (reservation.slots). */
+export type SlotChart = RouterOutputs['reservation']['slots'];
+export type BookableSlot = SlotChart['slots'][number];
+export type ReservationHistoryEvent = RouterOutputs['reservation']['history'][number];
+
+// ---- offers ----
+export type OfferWithContext = RouterOutputs['offer']['mine'][number];
+export type ListingOffers = RouterOutputs['offer']['forListing'];
+export type OfferStatus = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'expired' | 'booked';
+
+// ---- community ----
+export type CommunityPost = RouterOutputs['community']['feed']['items'][number];
+export type CommunityPostKind = 'buying' | 'selling';
+
 // ---- conversation / messages ----
 export type ConversationSummary = RouterOutputs['conversation']['list'][number];
 export type Conversation = RouterOutputs['conversation']['open'];
@@ -25,6 +39,8 @@ export type Message = RouterOutputs['conversation']['messages']['items'][number]
 
 // ---- user ----
 export type AuthUser = RouterOutputs['auth']['me'];
+export type ContactSettings = RouterOutputs['user']['contactSettings'];
+export type PhoneVerifyResult = RouterOutputs['auth']['verifyPhoneCode'];
 export type PublicProfile = RouterOutputs['user']['byId'];
 /** Derived reputation summary — see docs/CONTRACT.md "Trust summary". */
 export type TrustSummary = RouterOutputs['user']['trustSummary'];

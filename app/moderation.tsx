@@ -1,5 +1,5 @@
 /**
- * Moderation screen (moderators only): segmented Open / Reviewed list of
+ * Moderation screen (moderators only; community-post reports get a Remove post action): segmented Open / Reviewed list of
  * reports from `moderation.reports`, with Dismiss / Remove listing / Add
  * note actions on open reports via `moderation.reviewReport`. Gated by
  * `moderation.isModerator` — non-moderators (or a FORBIDDEN response) see an
@@ -88,6 +88,27 @@ function ModeratorReports() {
     onError: (err) => setActionError(err.message),
   });
 
+  const [removingPostId, setRemovingPostId] = useState<string | null>(null);
+  const removePostMutation = trpc.community.moderatorRemove.useMutation({
+    onError: (err) => setActionError(err.message),
+  });
+  const onRemovePost = (report: ModerationReport) => {
+    const postId = report.targetPostId;
+    if (!postId) return;
+    confirmAction('Remove this community post?', 'It disappears from the feed for everyone.', 'Remove', () => {
+      setActionError(null);
+      setRemovingPostId(report.id);
+      removePostMutation.mutate(
+        { id: postId },
+        {
+          onSuccess: () =>
+            reviewMutation.mutate({ id: report.id, action: 'note', note: 'Community post removed.' }),
+          onSettled: () => setRemovingPostId(null),
+        },
+      );
+    });
+  };
+
   const [dismissingId, setDismissingId] = useState<string | null>(null);
 
   const goToTarget = (report: ModerationReport) => {
@@ -169,6 +190,8 @@ function ModeratorReports() {
                         reviewMutation.isPending &&
                         actionSheet?.report.id === item.id &&
                         actionSheet.mode === 'remove_listing',
+                      removingPost: removingPostId === item.id,
+                      onRemovePost: () => onRemovePost(item),
                       onDismiss: () => onDismiss(item),
                       onRemoveListing: () => {
                         setActionError(null);

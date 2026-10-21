@@ -4,7 +4,7 @@
  * Renders nothing. Two jobs:
  *
  * 1. Watches every tRPC mutation for the first one that implies "I want to
- *    hear back" — placing a bid, sending a message, requesting a meetup —
+ *    hear back" — making an offer, sending a message, booking a meetup —
  *    and only then asks for notification permission (never on launch). This
  *    is done generically via react-query's MutationCache rather than by
  *    editing the bid sheet / composer / request-meetup screens, none of
@@ -40,7 +40,7 @@ if (Platform.OS !== 'web') {
 }
 
 /** tRPC paths whose first successful call should prompt for permission. */
-const TRIGGER_PATHS = new Set(['bid.place', 'bid.buyout', 'conversation.send', 'reservation.request']);
+const TRIGGER_PATHS = new Set(['offer.create', 'reservation.book', 'conversation.send', 'reservation.request']);
 
 export function NotificationPermissionGate() {
   const queryClient = useQueryClient();

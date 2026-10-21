@@ -3,8 +3,7 @@
  *
  *   npx tsx scripts/geo-check.ts
  *
- * Deliberately separate from `scripts/e2e.ts` (owned by the auctions agent —
- * not edited here) so the two scripts never collide. Boots its own in-process
+ * Deliberately separate from `scripts/e2e.ts` (kept separate) so the two scripts never collide. Boots its own in-process
  * backend on a random port with a throwaway PGlite data dir, and forces
  * `GEOCODER=stub` so this never depends on a third-party geocoding service
  * being reachable.
@@ -140,9 +139,14 @@ async function main(): Promise<number> {
   assert(spots.length > 0, 'campus should have seeded meetup spots');
   const spotId = spots[0]!.id;
 
-  const windowStart = new Date(Date.now() + 5 * 60 * 1000);
-  const windowEnd = new Date(Date.now() + 4 * 60 * 60 * 1000);
-  const startsAt = new Date(Date.now() + 30 * 60 * 1000);
+  // Meetups are 30-minute slots on :00/:30, within the next 24h and inside a
+  // seller window, so derive every time from the slot grid.
+  const SLOT_MS = 30 * 60 * 1000;
+  const alignedIn = (hours: number) =>
+    new Date(Math.ceil((Date.now() + hours * 60 * 60 * 1000) / SLOT_MS) * SLOT_MS);
+  const windowStart = alignedIn(0.5);
+  const windowEnd = alignedIn(5);
+  const startsAt = alignedIn(1);
 
   const listing = await maya.listing.create.mutate({
     title: 'Geo-check test listing',
@@ -261,6 +265,36 @@ async function main(): Promise<number> {
     await expectTrpcError('FORBIDDEN', 'This request is not yours.', () =>
       sam.reservation.byId.query({ id: inRadiusReservationId }),
     );
+  });
+
+  /* ------------------------------------------------------------------ 6 */
+
+  await criterion('6. Counter-proposals accept a custom address (aligned future time) and validate it', async () => {
+    const counterTime = alignedIn(2);
+    await expectTrpcError('BAD_REQUEST', 'That address is outside the 2-mile campus area.', () =>
+      maya.reservation.counter.mutate({
+        id: inRadiusReservationId,
+        customAddress: OUT_OF_RADIUS_ADDRESS,
+        startsAt: counterTime,
+      }),
+    );
+    // Off the 30-minute grid is refused before the address is even resolved.
+    await expectTrpcError('BAD_REQUEST', 'Meetups start on the hour or half hour (30-minute slots).', () =>
+      maya.reservation.counter.mutate({
+        id: inRadiusReservationId,
+        customAddress: IN_RADIUS_ADDRESS,
+        startsAt: new Date(counterTime.getTime() + 7 * 60 * 1000),
+      }),
+    );
+    const countered = await maya.reservation.counter.mutate({
+      id: inRadiusReservationId,
+      customAddress: IN_RADIUS_ADDRESS,
+      startsAt: counterTime,
+    });
+    assertEqual(countered.status, 'countered', 'the counter moves the request to countered');
+    assertEqual(countered.spotId, null, 'a custom-address counter has no spotId');
+    assert(countered.customAddress, 'the counter stores the resolved address');
+    assertEqual(countered.startsAt.getTime(), counterTime.getTime(), 'the counter stores the new time');
   });
 
   server.close();

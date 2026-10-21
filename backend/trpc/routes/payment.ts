@@ -94,7 +94,8 @@ async function ensureStripeAccount(db: Db, userId: string) {
   try {
     account = await gateway().createExpressAccount({
       userId,
-      email: user.email,
+      // Phone-first accounts may have no email yet; Stripe collects it during onboarding.
+      email: user.email ?? `user+${user.id}@account.invalid`,
       payoutDelayDays: env.payoutDelayDays,
     });
   } catch (err) {

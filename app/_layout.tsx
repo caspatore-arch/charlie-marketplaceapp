@@ -64,6 +64,7 @@ export default function RootLayout() {
                   options={{ presentation: 'modal', title: 'Request meetup' }}
                 />
                 <Stack.Screen name="reservation/[id]" options={{ title: 'Meetup' }} />
+                <Stack.Screen name="inbox" options={{ title: 'Meetups & messages' }} />
                 <Stack.Screen name="conversation/[id]" options={{ title: 'Conversation' }} />
                 <Stack.Screen name="user/[id]" options={{ title: 'Profile' }} />
                 <Stack.Screen name="moderation" options={{ title: 'Moderation' }} />

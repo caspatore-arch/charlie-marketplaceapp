@@ -71,7 +71,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "env:lan": "node -e \"const fs=require('fs');const ip=require('child_process').execSync('ipconfig getifaddr en0').toString().trim();let e=fs.readFileSync('.env','utf8');e=e.replace(/EXPO_PUBLIC_RORK_API_BASE_URL=.*/,'EXPO_PUBLIC_RORK_API_BASE_URL=http://'+ip+':3000');fs.writeFileSync('.env',e);console.log('API base URL set to http://'+ip+':3000')\"",
-    "loadtest": "tsx scripts/loadtest.ts"
+    "loadtest": "tsx scripts/loadtest.ts",
+    "test:workstreams": "tsx scripts/workstreams-check.ts"
   },
   "private": true,
   "allowScripts": {

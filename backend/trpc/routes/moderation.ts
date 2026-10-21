@@ -9,7 +9,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { env } from '../../env';
-import { listings, reports, reservations, users } from '../../db/schema';
+import { communityPosts, listings, reports, reservations, users } from '../../db/schema';
 import { toListingCards, toPublicUser, type ListingCard, type PublicUser } from '../lib';
 import { moderatorProcedure, protectedProcedure, router } from '../trpc';
 
@@ -17,6 +17,8 @@ export type ModerationReport = typeof reports.$inferSelect & {
   reporter: PublicUser;
   targetUser: PublicUser | null;
   targetListing: ListingCard | null;
+  /** Community post a report names (kept visible to moderators even after expiry/removal). */
+  targetPost: { id: string; kind: 'buying' | 'selling'; body: string; createdAt: Date; expiresAt: Date; removedAt: Date | null } | null;
 };
 
 export const moderationRouter = router({
@@ -55,6 +57,11 @@ export const moderationRouter = router({
       const reporterById = new Map(reporters.map((u) => [u.id, u]));
       const targetUserById = new Map(targetUsers.map((u) => [u.id, u]));
       const listingCards = await toListingCards(ctx.db, targetListingRows);
+      const postIds = [...new Set(rows.map((r) => r.targetPostId).filter((id): id is string => id != null))];
+      const postRows = postIds.length
+        ? await ctx.db.select().from(communityPosts).where(inArray(communityPosts.id, postIds))
+        : [];
+      const postById = new Map(postRows.map((p) => [p.id, p]));
       const listingCardById = new Map(listingCards.map((l) => [l.id, l]));
 
       return rows.map((r) => ({
@@ -62,6 +69,12 @@ export const moderationRouter = router({
         reporter: toPublicUser(reporterById.get(r.reporterId)!),
         targetUser: r.targetUserId ? toPublicUser(targetUserById.get(r.targetUserId)!) : null,
         targetListing: r.targetListingId ? (listingCardById.get(r.targetListingId) ?? null) : null,
+        targetPost: (() => {
+          const p = r.targetPostId ? postById.get(r.targetPostId) : undefined;
+          return p
+            ? { id: p.id, kind: p.kind, body: p.body, createdAt: p.createdAt, expiresAt: p.expiresAt, removedAt: p.removedAt }
+            : null;
+        })(),
       }));
     }),
 

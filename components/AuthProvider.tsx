@@ -22,6 +22,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const requestCodeMutation = trpc.auth.requestCode.useMutation();
   const verifyCodeMutation = trpc.auth.verifyCode.useMutation();
+  const requestPhoneCodeMutation = trpc.auth.requestPhoneCode.useMutation();
+  const verifyPhoneCodeMutation = trpc.auth.verifyPhoneCode.useMutation();
   const devSignInMutation = trpc.auth.devSignIn.useMutation();
   const signOutMutation = trpc.auth.signOut.useMutation();
 
@@ -54,6 +56,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await applySession(result.token);
     },
     [verifyCodeMutation, applySession],
+  );
+
+  const requestPhoneCode = useCallback(
+    (phone: string) => requestPhoneCodeMutation.mutateAsync({ phone }),
+    [requestPhoneCodeMutation],
+  );
+
+  const verifyPhoneCode = useCallback(
+    async (input: Parameters<typeof verifyPhoneCodeMutation.mutateAsync>[0]) => {
+      const result = await verifyPhoneCodeMutation.mutateAsync(input);
+      if (result.status === 'signed_in') await applySession(result.token);
+      return result;
+    },
+    [verifyPhoneCodeMutation, applySession],
   );
 
   const devSignIn = useCallback(
@@ -97,10 +113,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: meQuery.data ?? null,
       requestCode,
       signInWithCode,
+      requestPhoneCode,
+      verifyPhoneCode,
+      applyToken: applySession,
       devSignIn,
       signOut,
     }),
-    [status, meQuery.data, requestCode, signInWithCode, devSignIn, signOut],
+    [status, meQuery.data, requestCode, signInWithCode, requestPhoneCode, verifyPhoneCode, applySession, devSignIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

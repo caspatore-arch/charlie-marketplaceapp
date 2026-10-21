@@ -44,7 +44,6 @@ import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { resolveMediaUrl } from '@/lib/trpc';
 import { conditionLabel, formatPickupWindow } from '@/utils/format';
-import { useCountdown } from '@/components/auction/useCountdown';
 import type { ListingCard as ListingCardType } from '@/types';
 
 const SWIPE_THRESHOLD_RATIO = 0.3;
@@ -91,10 +90,7 @@ function SwipeCard({
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
 
-  const isAuction = item.saleType === 'auction';
-  const { shortLabel, ended } = useCountdown(isAuction ? item.expiresAt : null);
-  const price = isAuction ? item.currentPriceCents : item.priceCents;
-  const auctionNote = isAuction ? (ended ? 'Auction · Ended' : `Auction · ${shortLabel} left`) : null;
+  const price = item.priceCents;
   const pickup = item.nextPickup;
   const pickupLabel = pickup ? formatPickupWindow(pickup.startsAt, pickup.endsAt) : null;
   const pickupIsToday = item.hasAvailabilityToday;
@@ -230,11 +226,6 @@ function SwipeCard({
 
         <View style={styles.info}>
           <PriceText cents={price} />
-          {auctionNote ? (
-            <Text variant="caption" color={ended ? 'inkFaint' : 'inkMuted'} numberOfLines={1}>
-              {auctionNote}
-            </Text>
-          ) : null}
           <Text variant="heading" numberOfLines={1} style={styles.title}>
             {item.title}
           </Text>

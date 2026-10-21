@@ -15,7 +15,9 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ListingForm, type ListingFormInitialValues, type ListingFormSubmitValues } from '@/components/sell/ListingForm';
-import { SellTodayToggle } from '@/components/sell/SellTodayToggle';
+import { WindowEditor, type WindowItem } from '@/components/sell/WindowEditor';
+import { useAuth } from '@/hooks/useAuth';
+import { DAY_MS, nextSlotBoundary, SLOT_MS } from '@/components/booking/time';
 import { trpc } from '@/lib/trpc';
 import { space } from '@/constants/theme';
 import type { ListingDetail } from '@/types';
@@ -24,6 +26,7 @@ export default function EditListingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const utils = trpc.useUtils();
+  const { user } = useAuth();
 
   const listingQuery = trpc.listing.byId.useQuery({ id: id! }, { enabled: !!id });
 
@@ -108,12 +111,19 @@ export default function EditListingScreen() {
     );
   }
 
+  // Windows already in the past can't be re-saved (the server requires future
+  // windows), so trim them to start no earlier than the next half hour.
+  const earliest = nextSlotBoundary().getTime();
+  const editableWindows = listing.availabilityWindows
+    .map((w) => ({
+      key: w.id,
+      startsAt: new Date(Math.max(new Date(w.startsAt).getTime(), earliest)).toISOString(),
+      endsAt: new Date(w.endsAt).toISOString(),
+    }))
+    .filter((w) => new Date(w.endsAt).getTime() - new Date(w.startsAt).getTime() >= SLOT_MS);
+
   const initialValues: Partial<ListingFormInitialValues> = {
     photos: listing.photos.map((p) => ({ key: p.id, url: p.url, status: 'done' as const })),
-    saleType: listing.saleType,
-    startPriceCents: listing.startPriceCents,
-    buyoutPriceCents: listing.buyoutPriceCents,
-    bidCount: listing.bidCount,
     title: listing.title,
     category: listing.category,
     condition: listing.condition,
@@ -122,12 +132,7 @@ export default function EditListingScreen() {
     brand: listing.brand ?? '',
     description: listing.description ?? '',
     spotIds: listing.spots.map((s) => s.id),
-    windows: listing.availabilityWindows.map((w) => ({
-      key: w.id,
-      startsAt: new Date(w.startsAt).toISOString(),
-      endsAt: new Date(w.endsAt).toISOString(),
-    })),
-    isSellToday: listing.isSellToday,
+    windows: editableWindows,
   };
 
   const canRelist = listing.status === 'expired' || listing.status === 'removed';
@@ -141,6 +146,7 @@ export default function EditListingScreen() {
         submitLabel="Save changes"
         submitting={updateMutation.isPending}
         submitError={submitError}
+        until={listing.expiresAt ? new Date(listing.expiresAt) : undefined}
         onSubmit={handleSubmit}
         footer={
           <View>
@@ -155,9 +161,9 @@ export default function EditListingScreen() {
                   This listing is {listing.status}. Relist it to make it visible again.
                 </Text>
                 <RelistControl
-                  isAuction={listing.saleType === 'auction'}
-                  onRelist={(isSellToday) => relistMutation.mutate({ id: listing.id, isSellToday })}
+                  onRelist={(windows) => relistMutation.mutate({ id: listing.id, isSellToday: true, windows })}
                   loading={relistMutation.isPending}
+                  timeZone={user?.campus?.timezone}
                 />
               </View>
             ) : null}
@@ -178,26 +184,29 @@ export default function EditListingScreen() {
 }
 
 function RelistControl({
-  isAuction,
   onRelist,
   loading,
+  timeZone,
 }: {
-  isAuction: boolean;
-  onRelist: (isSellToday: boolean) => void;
+  onRelist: (windows: { startsAt: string; endsAt: string }[]) => void;
   loading: boolean;
+  timeZone?: string;
 }) {
-  const [sellToday, setSellToday] = useState(false);
+  const [windows, setWindows] = useState<WindowItem[]>([]);
+  const [until] = useState(() => new Date(Date.now() + DAY_MS));
   return (
     <View style={styles.relistWrap}>
-      {isAuction ? (
-        <Text variant="caption" color="inkMuted">
-          Relisting starts a brand-new 24-hour auction at the same start price. Bids from the last
-          run are cleared.
-        </Text>
-      ) : (
-        <SellTodayToggle value={sellToday} onChange={setSellToday} />
-      )}
-      <Button title="Relist" onPress={() => onRelist(sellToday)} loading={loading} style={styles.relistButton} />
+      <Text variant="caption" color="inkMuted">
+        Relisting makes it live for another 24 hours at the same asking price. Pick the times buyers can book.
+      </Text>
+      <WindowEditor windows={windows} onChange={setWindows} until={until} timeZone={timeZone} />
+      <Button
+        title="Relist"
+        onPress={() => onRelist(windows.map((w) => ({ startsAt: w.startsAt, endsAt: w.endsAt })))}
+        loading={loading}
+        disabled={windows.length === 0}
+        style={styles.relistButton}
+      />
     </View>
   );
 }

@@ -31,15 +31,21 @@ export interface ReportCardProps {
     removing: boolean;
     onDismiss: () => void;
     onRemoveListing: () => void;
+    /** Shown only for community-post reports. */
+    removingPost?: boolean;
+    onRemovePost?: () => void;
     onAddNote: () => void;
   };
 }
 
 export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) {
   const hasListing = !!report.targetListing;
+  const isPost = !!report.targetPostId && !hasListing;
   const targetLabel = hasListing
     ? report.targetListing!.title
-    : (report.targetUser?.displayName ?? 'Deleted account');
+    : isPost
+      ? `Community post by ${report.targetUser?.displayName ?? 'a deleted account'}`
+      : (report.targetUser?.displayName ?? 'Deleted account');
 
   return (
     <Card style={styles.card}>
@@ -75,6 +81,24 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
         </Text>
       </Pressable>
 
+      {report.targetPost ? (
+        <View style={styles.postBox}>
+          <View style={styles.headerRow}>
+            <Text variant="caption" weight="600" color="inkMuted">
+              {report.targetPost.kind === 'buying' ? 'Looking to buy' : 'Selling'}
+            </Text>
+            {report.targetPost.removedAt ? (
+              <Text variant="caption" weight="600" color="danger">
+                Removed
+              </Text>
+            ) : null}
+          </View>
+          <Text variant="body" color="inkMuted" numberOfLines={6}>
+            {`“${report.targetPost.body}”`}
+          </Text>
+        </View>
+      ) : null}
+
       {report.details ? (
         <Text variant="body" color="inkMuted" style={styles.details}>
           {report.details}
@@ -109,6 +133,16 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
               style={styles.actionBtn}
             />
           ) : null}
+          {isPost && actions.onRemovePost ? (
+            <Button
+              title="Remove post"
+              variant="danger"
+              size="md"
+              onPress={actions.onRemovePost}
+              loading={actions.removingPost}
+              style={styles.actionBtn}
+            />
+          ) : null}
           <Button
             title="Add note"
             variant="ghost"
@@ -137,6 +171,7 @@ const styles = StyleSheet.create({
   thumb: { width: 40, height: 40, borderRadius: radius.sm, backgroundColor: colors.line },
   targetLabel: { flex: 1 },
   details: { marginTop: -space.xs },
+  postBox: { gap: space.xs, borderLeftWidth: 2, borderLeftColor: colors.line, paddingLeft: space.sm },
   reviewedNote: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.md,

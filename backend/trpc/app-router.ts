@@ -2,10 +2,12 @@ import { router } from './trpc';
 import { authRouter } from './routes/auth';
 import { bidRouter } from './routes/bid';
 import { campusRouter } from './routes/campus';
+import { communityRouter } from './routes/community';
 import { conversationRouter } from './routes/conversation';
 import { listingRouter } from './routes/listing';
 import { moderationRouter } from './routes/moderation';
 import { notificationRouter } from './routes/notification';
+import { offerRouter } from './routes/offer';
 import { paymentRouter } from './routes/payment';
 import { reservationRouter } from './routes/reservation';
 import { userRouter } from './routes/user';
@@ -15,6 +17,8 @@ export const appRouter = router({
   campus: campusRouter,
   listing: listingRouter,
   bid: bidRouter,
+  offer: offerRouter,
+  community: communityRouter,
   conversation: conversationRouter,
   reservation: reservationRouter,
   user: userRouter,

@@ -6,13 +6,17 @@ import {
   blocks,
   campuses,
   emailCodes,
+  communityPosts,
   listings,
+  offers,
+  phoneCodes,
   reports,
   reservations,
   savedListings,
   sessions,
   users,
 } from '../../db/schema';
+import { cancelUserSms } from '../../sms/outbox';
 import { applyExpiry,
   applyExpiryForRead, toPublicUser, type PublicUser } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
@@ -258,6 +262,38 @@ export const userRouter = router({
       return { ok: true as const };
     }),
 
+  /** Private contact + SMS consent for the caller. Never public. */
+  contactSettings: protectedProcedure.query(({ ctx }) => ({
+    phone: ctx.user.phone,
+    phoneVerified: ctx.user.phoneVerifiedAt != null,
+    email: ctx.user.email,
+    campusEmailVerified: ctx.user.campusEmailVerifiedAt != null,
+    smsOptIn: ctx.user.smsOptIn,
+    smsOptInAt: ctx.user.smsOptInAt,
+    smsOptOutAt: ctx.user.smsOptOutAt,
+  })),
+
+  /**
+   * Transactional SMS consent. Opting in needs a verified phone. Opting out
+   * cancels every text still queued for the caller. Verification codes are
+   * unaffected — they are only ever sent when the user asks for one.
+   */
+  updateSmsPreferences: protectedProcedure
+    .input(z.object({ smsOptIn: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.smsOptIn && !ctx.user.phoneVerifiedAt) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Add and verify a phone number first.' });
+      }
+      const now = new Date();
+      const [row] = await ctx.db
+        .update(users)
+        .set(input.smsOptIn ? { smsOptIn: true, smsOptInAt: now } : { smsOptIn: false, smsOptOutAt: now })
+        .where(eq(users.id, ctx.user.id))
+        .returning();
+      if (!input.smsOptIn) await cancelUserSms(ctx.db, ctx.user.id);
+      return { smsOptIn: row!.smsOptIn };
+    }),
+
   /**
    * Account closure (docs/CONTRACT.md "Account closure"). This is
    * anonymization, not erasure: the user row stays so existing threads,
@@ -309,8 +345,28 @@ export const userRouter = router({
             email: `deleted+${userId}@account.invalid`,
             avatarUrl: null,
             bio: null,
+            // Frees the number so the person can sign up again with it.
+            phone: null,
+            phoneVerifiedAt: null,
+            smsOptIn: false,
+            smsOptOutAt: now,
           })
           .where(eq(users.id, userId));
+
+        await tx
+          .update(offers)
+          .set({ status: 'withdrawn', closeReason: 'account_closed', updatedAt: now })
+          .where(
+            and(
+              or(eq(offers.buyerId, userId), eq(offers.sellerId, userId)),
+              inArray(offers.status, ['pending', 'accepted']),
+            ),
+          );
+        await tx
+          .update(communityPosts)
+          .set({ removedAt: now, removedById: userId })
+          .where(and(eq(communityPosts.authorId, userId), sql`${communityPosts.removedAt} is null`));
+        await tx.delete(phoneCodes).where(eq(phoneCodes.userId, userId));
 
         await tx
           .update(listings)
@@ -340,8 +396,9 @@ export const userRouter = router({
         await tx
           .delete(blocks)
           .where(or(eq(blocks.blockerId, userId), eq(blocks.blockedId, userId)));
-        await tx.delete(emailCodes).where(eq(emailCodes.email, oldEmail));
+        if (oldEmail) await tx.delete(emailCodes).where(eq(emailCodes.email, oldEmail));
       });
+      await cancelUserSms(ctx.db, userId);
 
       return { ok: true as const };
     }),

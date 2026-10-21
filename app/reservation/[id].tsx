@@ -24,12 +24,14 @@ import { MeetupCard } from '@/components/MeetupCard';
 import { DemoBadge } from '@/components/DemoBadge';
 import { ReservationPaymentRow } from '@/components/payments/ReservationPaymentRow';
 import { SpotPicker, type ResolvedCustomAddress } from '@/components/SpotPicker';
-import { TimeSlotPicker } from '@/components/TimeSlotPicker';
+import { TimeSlotPicker, type ChartSlot } from '@/components/TimeSlotPicker';
+import { exactMeetupTime, rollingDaySlotStarts, shortWhen } from '@/components/booking/time';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/hooks/useAuth';
 import { confirmAction } from '@/utils/confirm';
 import { colors, radius, space, minTouchHeight } from '@/constants/theme';
-import type { ReportReason } from '@/types';
+import { formatPrice } from '@/utils/format';
+import type { ReportReason, ReservationHistoryEvent } from '@/types';
 
 const POLL_MS = 8_000;
 
@@ -50,6 +52,10 @@ export default function ReservationScreen() {
 
   const query = trpc.reservation.byId.useQuery({ id }, { enabled: !!id, refetchInterval: isFocused ? POLL_MS : false });
 
+  const contactQuery = trpc.user.contactSettings.useQuery();
+  const textsOn = !!(contactQuery.data?.smsOptIn && contactQuery.data?.phoneVerified);
+  const historyQuery = trpc.reservation.history.useQuery({ id }, { enabled: !!id });
+
   const [actionError, setActionError] = useState<string | null>(null);
   const [proposeOpen, setProposeOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -57,6 +63,8 @@ export default function ReservationScreen() {
 
   const invalidateAll = useCallback(() => {
     utils.reservation.byId.invalidate({ id });
+    utils.reservation.history.invalidate({ id });
+    utils.reservation.slots.invalidate();
     utils.reservation.mine.invalidate();
     utils.listing.byId.invalidate({ id: query.data?.listingId ?? '' });
     utils.conversation.list.invalidate();
@@ -168,6 +176,7 @@ export default function ReservationScreen() {
         startsAt={reservation.startsAt.toISOString()}
         timeZone={timeZone}
         status={reservation.status}
+        agreedOffer={!!reservation.offerId}
         onPressDirections={
           reservation.directionsUrl ? () => Linking.openURL(reservation.directionsUrl!) : undefined
         }
@@ -210,10 +219,28 @@ export default function ReservationScreen() {
           </View>
         </View>
         <Divider style={styles.infoDivider} />
-        <Text variant="caption" color="inkFaint">
-          Reminder: reminders are not yet implemented in this prototype.
-        </Text>
+        {textsOn ? (
+          <Text variant="caption" color="inkFaint">
+            We&apos;ll text you a reminder 30 minutes before.
+          </Text>
+        ) : (
+          <Pressable accessibilityRole="link" onPress={() => router.push('/settings')} hitSlop={8}>
+            <Text variant="caption" color="inkFaint">
+              Turn on text notifications in Settings to get a reminder 30 minutes before.
+            </Text>
+          </Pressable>
+        )}
       </Card>
+
+      <Button
+        title={`Message ${otherParty?.displayName ?? ''}`.trim()}
+        variant="secondary"
+        onPress={goToConversation}
+        loading={openConversationMutation.isPending}
+        accessibilityLabel={`Message ${otherParty?.displayName ?? 'the other person'} about this meetup`}
+      />
+
+      <HistorySection events={historyQuery.data} loading={historyQuery.isPending} timeZone={timeZone} />
 
       <View style={styles.actionArea}>
         {actionError ? (
@@ -278,7 +305,7 @@ export default function ReservationScreen() {
         ) : null}
 
         {reservation.status === 'declined' || reservation.status === 'cancelled' || reservation.status === 'expired' ? (
-          <ClosedActions status={reservation.status} reason={reservation.cancelReason} onMessage={goToConversation} />
+          <ClosedActions status={reservation.status} reason={reservation.cancelReason} />
         ) : null}
       </View>
 
@@ -517,11 +544,9 @@ function CompletedActions({ onReport }: { onReport: () => void }) {
 function ClosedActions({
   status,
   reason,
-  onMessage,
 }: {
   status: 'declined' | 'cancelled' | 'expired';
   reason: string | null;
-  onMessage: () => void;
 }) {
   const copy: Record<typeof status, string> = {
     declined: 'The seller declined this request.',
@@ -539,7 +564,48 @@ function ClosedActions({
           Reason: {reason}
         </Text>
       ) : null}
-      <Button title="Message" variant="secondary" onPress={onMessage} />
+    </View>
+  );
+}
+
+const EVENT_LABEL: Record<string, string> = {
+  booked: 'Booked',
+  requested: 'Requested',
+  accepted: 'Accepted',
+  rescheduled: 'Rescheduled',
+  cancelled: 'Cancelled',
+  completed: 'Handed off',
+  expired: 'Expired',
+  imported: 'Imported',
+};
+
+function HistorySection({
+  events,
+  loading,
+  timeZone,
+}: {
+  events: ReservationHistoryEvent[] | undefined;
+  loading: boolean;
+  timeZone?: string;
+}) {
+  if (loading) return <Skeleton height={48} />;
+  if (!events || events.length === 0) return null;
+  return (
+    <View style={styles.history} accessibilityLabel="Meetup history">
+      <Text variant="heading">History</Text>
+      {events.map((e) => (
+        <View key={e.id} style={styles.historyRow}>
+          <Text variant="label" weight="600">
+            {EVENT_LABEL[e.kind] ?? e.kind}
+          </Text>
+          <Text variant="caption" color="inkMuted">
+            {shortWhen(e.createdAt, timeZone)}
+            {e.kind === 'booked' || e.kind === 'rescheduled'
+              ? ` · for ${exactMeetupTime(e.startsAt, timeZone).split(' – ')[0]} · ${formatPrice(e.priceCents)}`
+              : ''}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -566,6 +632,15 @@ function ProposeSheet({
   onSubmit: (location: { spotId: string } | { customAddress: string }, startsAt: Date, note?: string) => void;
 }) {
   const listingQuery = trpc.listing.byId.useQuery({ id: listingId }, { enabled: visible });
+  const slotsQuery = trpc.reservation.slots.useQuery({ listingId }, { enabled: visible });
+  // While the listing is still open, offer its real availability chart. After
+  // it expires (confirmed meetups outlive the listing) fall back to every
+  // 30-minute step in the next 24 hours.
+  const chart = slotsQuery.data;
+  const chartSlots: ChartSlot[] = chart?.open && chart.slots.length > 0
+    ? chart.slots
+    : rollingDaySlotStarts().map((d) => ({ startsAt: d, available: true }));
+  const currentIso = currentStartsAt.toISOString();
   const [spotId, setSpotId] = useState<string | undefined>(currentSpotId ?? undefined);
   const [customAddress, setCustomAddress] = useState<ResolvedCustomAddress | null>(
     currentCustomAddress ? { address: currentCustomAddress, lat: 0, lng: 0, distanceMeters: 0 } : null,
@@ -576,8 +651,8 @@ function ProposeSheet({
   const canSubmit = (!!spotId || !!customAddress) && !!startsIso;
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Propose a time">
-      {listingQuery.isPending ? (
+    <Sheet visible={visible} onClose={onClose} title="Pick a new time">
+      {listingQuery.isPending || slotsQuery.isPending ? (
         <Skeleton height={160} />
       ) : listingQuery.isError ? (
         <ErrorState message={listingQuery.error.message} onRetry={() => listingQuery.refetch()} />
@@ -602,13 +677,11 @@ function ProposeSheet({
             Time
           </Text>
           <TimeSlotPicker
-            windows={listingQuery.data.availabilityWindows.map((w) => ({
-              startsAt: w.startsAt.toISOString(),
-              endsAt: w.endsAt.toISOString(),
-            }))}
+            slots={chartSlots}
             selectedIso={startsIso}
             onSelect={setStartsIso}
-            timeZone={timeZone}
+            timeZone={chart?.timezone ?? timeZone}
+            currentIso={currentIso}
           />
 
           <TextArea
@@ -620,7 +693,7 @@ function ProposeSheet({
           />
 
           <Button
-            title="Send proposal"
+            title="Send new time"
             onPress={() =>
               startsIso &&
               onSubmit(
@@ -765,5 +838,7 @@ const styles = StyleSheet.create({
   reasonText: { marginTop: -space.xs },
   sheetContent: { paddingBottom: space.xl, gap: space.xs },
   sheetSectionSpacing: { marginTop: space.md },
+  history: { gap: space.sm },
+  historyRow: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
   reasonChips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
 });

@@ -6,6 +6,7 @@ import { db, dbKind } from './db/client';
 import { env } from './env';
 import { callerKey, rateLimit } from './ratelimit';
 import { paymentsMode } from './stripe/client';
+import { resolveSmsMode } from './sms/provider';
 import {
   processSimulatedEvent,
   processWebhook,
@@ -61,6 +62,7 @@ app.get('/api/health', (c) => {
       simulated: mode === 'simulated',
       banner: mode === 'simulated' ? 'Simulated — no money moves.' : '',
     },
+    sms: { mode: resolveSmsMode().mode, simulated: resolveSmsMode().mode === 'simulated' },
   });
 });
 
@@ -133,6 +135,22 @@ app.use(
 app.use(
   '/api/trpc/auth.requestCode',
   rateLimit('auth.requestCode', env.rateLimitAuthRequestCodePerMinute, 60_000),
+);
+app.use(
+  '/api/trpc/auth.requestPhoneCode*',
+  rateLimit('auth.requestPhoneCode', env.rateLimitPhoneRequestPerMinute, 60_000),
+);
+app.use(
+  '/api/trpc/auth.requestPhoneLinkCode*',
+  rateLimit('auth.requestPhoneCode', env.rateLimitPhoneRequestPerMinute, 60_000),
+);
+app.use(
+  '/api/trpc/auth.verifyPhoneCode*',
+  rateLimit('auth.verifyPhoneCode', env.rateLimitPhoneVerifyPerMinute, 60_000),
+);
+app.use(
+  '/api/trpc/auth.confirmPhoneLink*',
+  rateLimit('auth.verifyPhoneCode', env.rateLimitPhoneVerifyPerMinute, 60_000),
 );
 app.use(
   '/api/trpc/auth.verifyCode',

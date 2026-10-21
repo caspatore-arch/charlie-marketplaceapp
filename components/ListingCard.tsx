@@ -13,7 +13,6 @@ import { PriceText } from './ui/PriceText';
 import { Avatar } from './ui/Avatar';
 import { resolveMediaUrl } from '@/lib/trpc';
 import { conditionLabel, formatPickupWindow } from '@/utils/format';
-import { useCountdown } from './auction/useCountdown';
 import type { ListingCard as ListingCardType } from '@/types';
 
 export interface ListingCardProps {
@@ -28,14 +27,7 @@ export interface ListingCardProps {
 }
 
 export function ListingCard({ listing, onPress, showSeller = true }: ListingCardProps) {
-  const isAuction = listing.saleType === 'auction';
-  const { shortLabel, ended } = useCountdown(isAuction ? listing.expiresAt : null);
-  const price = isAuction ? listing.currentPriceCents : listing.priceCents;
-  const auctionNote = isAuction
-    ? ended
-      ? 'Auction · Ended'
-      : `Auction · ${shortLabel} left`
-    : null;
+  const price = listing.priceCents;
 
   // The pickup line is the card's reason to exist: it answers "when and where
   // could I actually get this" from the grid, without opening the listing or
@@ -50,9 +42,7 @@ export function ListingCard({ listing, onPress, showSeller = true }: ListingCard
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${listing.title}, ${conditionLabel(listing.condition)}, ${
-        isAuction ? `auction, current bid` : 'price'
-      } $${(price / 100).toFixed(0)}${auctionNote ? `, ${auctionNote}` : ''}${
+      accessibilityLabel={`${listing.title}, ${conditionLabel(listing.condition)}, price $${(price / 100).toFixed(0)}${
         pickupLabel ? `, pickup ${pickupLabel}` : ', no pickup times listed'
       }`}
       onPress={onPress}
@@ -74,11 +64,6 @@ export function ListingCard({ listing, onPress, showSeller = true }: ListingCard
 
       <View style={styles.info}>
         <PriceText cents={price} />
-        {auctionNote ? (
-          <Text variant="caption" color={ended ? 'inkFaint' : 'inkMuted'} numberOfLines={1}>
-            {auctionNote}
-          </Text>
-        ) : null}
         <Text variant="label" numberOfLines={1} style={styles.title}>
           {listing.title}
         </Text>
@@ -99,7 +84,7 @@ export function ListingCard({ listing, onPress, showSeller = true }: ListingCard
             numberOfLines={1}
             style={styles.pickupText}
           >
-            {pickupLabel ?? 'Ask for a time'}
+            {pickupLabel ?? 'Times on the listing'}
           </Text>
         </View>
         {showSeller ? (

@@ -4,7 +4,7 @@
  */
 import { createContext, useContext } from 'react';
 import { useRouter } from 'expo-router';
-import type { AuthUser } from '@/types';
+import type { AuthUser, PhoneVerifyResult } from '@/types';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
 
@@ -15,6 +15,25 @@ export interface AuthContextValue {
   requestCode: (email: string) => Promise<void>;
   /** Step 2: verify the code (and optionally set a display name on first sign-in). */
   signInWithCode: (email: string, code: string, displayName?: string) => Promise<void>;
+  /** Phone step 1: text a 6-digit code (printed to the server log when simulated). */
+  requestPhoneCode: (phone: string) => Promise<{
+    simulated: boolean;
+    resendAfterSeconds: number;
+    expiresInSeconds: number;
+  }>;
+  /**
+   * Phone step 2. Resolves `{ status: 'needs_profile' }` for a new number (call again with the
+   * same code plus displayName + campusId), or signs in and resolves `{ status: 'signed_in' }`.
+   */
+  verifyPhoneCode: (input: {
+    phone: string;
+    code: string;
+    displayName?: string;
+    campusId?: string;
+    smsOptIn?: boolean;
+  }) => Promise<PhoneVerifyResult>;
+  /** Store a session token returned by the server (e.g. `auth.confirmEmailLink` with switchedAccount). */
+  applyToken: (token: string) => Promise<void>;
   /** Dev-only shortcut, enabled when EXPO_PUBLIC_DEV_LOGIN === '1'. */
   devSignIn: (userId: string) => Promise<void>;
   signOut: () => Promise<void>;

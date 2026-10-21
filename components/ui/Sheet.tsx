@@ -51,12 +51,17 @@ export function Sheet({ visible, onClose, title, children }: SheetProps) {
 }
 
 const styles = StyleSheet.create({
+  // Absolute-fill so the avoider spans the full window: `maxHeight: '85%'` on
+  // the sheet is then relative to the window, not to a content-sized parent
+  // (which on web clipped the sheet and let its content spill out the bottom).
   backdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(22,21,19,0.4)',
   },
   avoider: {
+    flex: 1,
     width: '100%',
+    justifyContent: 'flex-end',
   },
   sheet: {
     backgroundColor: colors.surface,

@@ -155,6 +155,13 @@ Go through this before letting anyone outside your test group use the app.
 - [ ] Visit `/api/health` on the deployed URL and confirm `"ok": true` and the payments mode is what you expect.
 - [ ] Everything in `docs/HANDOFF.md` §3 ("Simulated or unfinished") still applies — deploying the backend does **not** turn on real payments, real email delivery, or anything else marked simulated there. Read that section again before a real launch, not just this one.
 - [ ] Decide, in writing somewhere you'll remember, what campus/community you're piloting with and who is responsible for checking the moderation queue (`MODERATOR_USER_IDS`) — nothing technical enforces this, it's a people problem.
+- [ ] **Migration 0009 pre-check** (hosted DB only, run it BEFORE deploying the new backend): the migration adds unique indexes that fail if anyone holds two accepted meetups at the same instant. Run, and resolve any rows by hand (never automatically):
+  ```sql
+  select seller_id, starts_at, count(*) from reservations where status='accepted' group by 1,2 having count(*) > 1;
+  select buyer_id,  starts_at, count(*) from reservations where status='accepted' group by 1,2 having count(*) > 1;
+  ```
+  (The migration's own header only lists the seller query; the buyer index needs the second one.) Nothing else in 0009 is destructive: no auction, bid, reservation or payment row is changed.
+- [ ] **SMS** (only if turning on real texting): the Transactional SMS section below is done end to end — Twilio account, A2P 10DLC (or toll-free) registration approved, all four of `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, `SMS_LIVE_ACK=1` set with `SMS_MODE=live`, `SMS_APP_LINK_BASE` set, and a test text received on a real phone. Until then the app signs people in with simulated codes that nobody receives, so **phone sign-in is not usable by real students without it**.
 - [ ] If you expect more than a handful of concurrent users, re-read the rate-limiting note below — the built-in limiter is intentionally simple and has a real limitation once you scale.
 
 ---
@@ -208,6 +215,28 @@ For context, 5,000 DAU bursts to roughly 13 simultaneous requests. You have abou
 1. Response times creeping up while traffic is flat — usually a query that lost its index.
 2. "too many connections" errors — `DB_POOL_MAX` too high for your tier, or too many instances.
 3. Storage bandwidth cost — photos, and the first bill that grows faster than users.
+
+---
+
+## 6b. Transactional SMS (Twilio) — setup when ready
+
+Phone sign-in codes and three event texts (listing posted, booking confirmed, 30-minute meetup reminder) are built, tested against a simulated provider, and **have never been sent through Twilio** (there is no account yet). Until you finish this section the app stays in `SMS_MODE=simulated`: codes are printed to the server log and nobody receives a text.
+
+**What to buy / register**
+1. A **Twilio account** (twilio.com), with billing enabled. Note the Account SID and Auth Token.
+2. A **sender**: a US long-code number, or a toll-free number, or a Messaging Service (its SID starts with `MG`; put that in `TWILIO_FROM`).
+3. **US carriers block unregistered texting**, so register before launch (can take days to weeks, plus fees):
+   - **A2P 10DLC** for a long-code number: register your brand, then a campaign (use case: account notifications / 2FA and transactional meetup updates), or
+   - **Toll-free verification** for a toll-free number.
+4. Keep the Auth Token in your host's secret store. Set on the deployed backend only: `SMS_MODE=live`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, `SMS_LIVE_ACK=1`, and `SMS_APP_LINK_BASE` (your public site URL, used in text links). Any one missing and the backend quietly stays simulated and says why. Never set these locally; tests always simulate.
+
+**STOP / HELP**: enable Twilio's **Advanced Opt-Out** on the Messaging Service or number so STOP, UNSUBSCRIBE and HELP replies are handled by Twilio (carriers require it). Texts that need it end with "Reply STOP to opt out."
+
+**Known gap — STOP is not synced back.** A person who texts STOP is blocked by Twilio (later sends fail permanently and the row is marked `failed`), but nothing tells our database, so `users.sms_opt_in` stays `true` and the Settings toggle will still show "on". Fix before launch if that matters: add an inbound-message webhook (or poll Twilio's opt-out list) that sets `sms_opt_in = false` and `sms_opt_out_at`, then cancels queued texts. Until then, in-app opt-out (Settings, `user.updateSmsPreferences`) is the only thing that updates our records.
+
+**How sending works (and its limit)**: events write rows to the `sms_messages` table; a dispatcher **inside the backend process** wakes every 30 seconds (`SMS_DISPATCH_INTERVAL_MS`) and sends what is due, retrying failures after 1, 2, 4 and 8 minutes and giving up after 5 attempts. Rows are claimed with `FOR UPDATE SKIP LOCKED`, so two copies would not double-send, but like the rate limiter (§7) this is designed and tested for a **single instance**. A restart loses nothing (reminders are rows with a future send time). Check `failed` and long-`scheduled` rows in `sms_messages` after launch; there is no dashboard yet.
+
+**Not covered**: verification codes are texted directly (not through the table) and are not retried; international numbers beyond a plain `+` number are not handled specially; the campus-email code is still simulated (see §8).
 
 ---
 

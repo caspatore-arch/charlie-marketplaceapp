@@ -16,6 +16,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Divider } from '@/components/ui/Divider';
+import { InboxLinkRow } from '@/components/inbox/InboxLinkRow';
 import { ListingCard } from '@/components/ListingCard';
 import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
@@ -95,6 +96,10 @@ function SignedInProfile({
           </Text>
         ) : null}
         {meQuery.data?.campusEmailVerifiedAt ? <Badge kind="verified" /> : null}
+      </View>
+
+      <View style={styles.inboxLink}>
+        <InboxLinkRow />
       </View>
 
       <Section title="My listings">
@@ -228,6 +233,7 @@ const styles = StyleSheet.create({
   loadingWrap: { alignItems: 'center', gap: space.sm, paddingTop: space.huge },
   header: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
   name: { marginTop: space.sm },
+  inboxLink: { marginBottom: space.sm },
   section: { marginTop: space.md },
   sectionTitle: { marginBottom: space.md },
   sectionDivider: { marginTop: space.xl },

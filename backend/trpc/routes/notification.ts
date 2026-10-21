@@ -68,6 +68,7 @@ export const notificationRouter = router({
         messages: true,
         meetups: true,
         auctions: true,
+        offers: true,
         updatedAt: null as Date | null,
       }
     );
@@ -79,7 +80,9 @@ export const notificationRouter = router({
       z.object({
         messages: z.boolean().optional(),
         meetups: z.boolean().optional(),
+        /** Legacy — auctions were retired. Accepted so old clients don't break. */
         auctions: z.boolean().optional(),
+        offers: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -95,6 +98,7 @@ export const notificationRouter = router({
         messages: input.messages ?? existing?.messages ?? true,
         meetups: input.meetups ?? existing?.meetups ?? true,
         auctions: input.auctions ?? existing?.auctions ?? true,
+        offers: input.offers ?? existing?.offers ?? true,
         updatedAt: now,
       };
 
@@ -107,6 +111,7 @@ export const notificationRouter = router({
             messages: merged.messages,
             meetups: merged.meetups,
             auctions: merged.auctions,
+            offers: merged.offers,
             updatedAt: now,
           },
         })

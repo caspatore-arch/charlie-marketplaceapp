@@ -2,6 +2,8 @@
 
 The app is named **Dibbs** (decided; no longer a placeholder). This is a locally runnable prototype: a real iPhone app (Expo) talking to a real backend (Hono + tRPC + Postgres‑compatible database) with clearly labeled demo data. It is **not** an App Store release and moves **no money**.
 
+> **Update 2026-10-20.** This document records build 1 and later passes as they were verified. Since then: auctions were retired and replaced by asking prices + offers; meetups are booked into exact 30-minute slots (`reservation.book`); the tab bar is Browse · Sell · Community · Profile (messages and meetups live at the "Meetups & messages" screen, `app/inbox.tsx`); sign-in is phone-first (campus email still works); and transactional SMS exists (simulated by default). Where this document still says "auction", "Inbox tab" or "request then accept", read `docs/CONTRACT.md` instead. Run `npm run test:workstreams` for the new server behaviour.
+
 ## 1. Run it on your iPhone (Expo Go)
 
 Prerequisites: this Mac, your iPhone on the **same Wi‑Fi**, and the free **Expo Go** app from the App Store.
@@ -50,7 +52,7 @@ Prints PASS/FAIL for acceptance criteria 1–8.
 | 8. Report / block / access control | PASS (FORBIDDEN / UNAUTHORIZED / moderator checks) | ✅ report + block from profile and item page; blocked user's listings vanish from feed; unblock restores; saved items; signed‑out gating; email code sign‑in |
 | 9. Works at iPhone sizes incl. keyboard/photo picker | — | Layout verified at 390×844 in web preview; **keyboard + native photo picker still need a real‑device pass** |
 | 10. This document | — | — |
-| A. Auctions (opt-in per listing) | PASS (`test:e2e` 1/2/5/7/8; simultaneous equal bids → exactly one winner; double settlement → one reservation) | ✅ signed-out "Place bid" correctly routes to sign-in; bid sheet copy "a bid is a commitment to buy"; bid placed at $25 → panel updated live to "Current bid $25 · 1 bid" with the bidder in Recent bids |
+| A. Auctions (opt-in per listing) — **RETIRED 2026-10-20, replaced by offers; row kept as history of what was tested** | PASS (`test:e2e` 1/2/5/7/8; simultaneous equal bids → exactly one winner; double settlement → one reservation) | ✅ signed-out "Place bid" correctly routes to sign-in; bid sheet copy "a bid is a commitment to buy"; bid placed at $25 → panel updated live to "Current bid $25 · 1 bid" with the bidder in Recent bids |
 | B. Custom meetup addresses | PASS (`npm run test:geo` 5/5, `GEOCODER=stub`) | ✅ verified against **live** Nominatim at 390×844: campus spots listed first, safety line shown before the field; "1 E Congress St, Tucson, AZ" resolved and reported "1.4 mi from campus center · within range"; "100 N Central Ave, Phoenix, AZ" rejected with "That address is outside the 2-mile campus area." |
 | C. Payments (Stripe direct charges) | PASS (`npx tsx scripts/payments-check.ts` 39/39, fake gateway only) | ❌ **Not clicked through.** No Stripe key exists; `backend/stripe/real.ts` has never been executed. |
 
