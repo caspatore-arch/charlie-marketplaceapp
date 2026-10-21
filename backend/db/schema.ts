@@ -656,6 +656,15 @@ export const offers = pgTable(
     /** Asking price when the offer was made, so a later price edit is visible. */
     askingPriceCents: integer('asking_price_cents').notNull(),
     message: text('message'),
+    /**
+     * The meetup the buyer proposed alongside the price, stored structured so
+     * accepting can book it without anyone re-typing it. Validated on write
+     * against the listing's availability windows and chosen spots. Null for an
+     * offer made without a proposal — both columns are set together or not at
+     * all (`offers_proposal_both_or_neither`).
+     */
+    proposedStartsAt: ts('proposed_starts_at'),
+    proposedSpotId: uuid('proposed_spot_id').references(() => meetupSpots.id),
     status: offerStatusEnum('status').notNull().default('pending'),
     /** Why it closed: 'item_reserved' | 'listing_expired' | 'listing_removed' | 'hold_lapsed' | … */
     closeReason: text('close_reason'),
@@ -680,6 +689,11 @@ export const offers = pgTable(
     index('offers_seller_idx').on(t.sellerId, t.status),
     index('offers_buyer_idx').on(t.buyerId, t.status),
     check('offers_amount_positive', sql`${t.amountCents} > 0`),
+    // A proposal is a time AND a place, or neither — never half of one.
+    check(
+      'offers_proposal_both_or_neither',
+      sql`(${t.proposedStartsAt} is null) = (${t.proposedSpotId} is null)`,
+    ),
   ],
 );
 

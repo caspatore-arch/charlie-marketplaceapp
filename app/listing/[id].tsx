@@ -37,7 +37,7 @@ import { BuyerOfferCard } from '@/components/offers/BuyerOfferCard';
 import { SellerOffersList } from '@/components/offers/SellerOffersList';
 import { ServerErrorNote, type ServerErrorLike } from '@/components/offers/ServerErrorNote';
 import { ReservationStatusPill } from '@/components/ReservationStatusPill';
-import { exactMeetupTime } from '@/components/booking/time';
+import { clockTime, exactMeetupTime, relativeDayLabel } from '@/components/booking/time';
 import { ReportSheet } from '@/components/browse/ReportSheet';
 import { trpc } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
@@ -213,10 +213,23 @@ export default function ListingDetailScreen() {
   }, [id, requireAuth]);
 
   const onAcceptOffer = useCallback(
-    (offer: { id: string; amountCents: number; buyer: { displayName: string } }) => {
+    (offer: {
+      id: string;
+      amountCents: number;
+      buyer: { displayName: string };
+      proposedStartsAt?: Date | null;
+      proposedSpot?: { name: string } | null;
+    }) => {
+      const proposedWhen = offer.proposedStartsAt
+        ? `${relativeDayLabel(offer.proposedStartsAt, timeZone)} ${clockTime(offer.proposedStartsAt, timeZone)}`
+        : null;
       confirmAction(
         `Accept ${formatPrice(offer.amountCents)} from ${offer.buyer.displayName}?`,
-        'The item is held for them for one hour so they can book a meetup time. Nobody else can book meanwhile.',
+        proposedWhen
+          ? `This books your meetup for ${proposedWhen}${
+              offer.proposedSpot ? ` at ${offer.proposedSpot.name}` : ''
+            }. The item is then off the feed.`
+          : 'The item is held for them for one hour so they can book a meetup time. Nobody else can book meanwhile.',
         'Accept offer',
         () => {
           setOffersActionError(null);
@@ -226,7 +239,7 @@ export default function ListingDetailScreen() {
         { destructive: false },
       );
     },
-    [acceptOfferMutation],
+    [acceptOfferMutation, timeZone],
   );
 
   const onDeclineOffer = useCallback(

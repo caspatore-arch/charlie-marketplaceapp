@@ -16,12 +16,25 @@
  * listing + partial unique index `offers_one_accepted_per_listing`).
  */
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import crypto from 'node:crypto';
+import { and, desc, eq, inArray, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
-import { availabilityWindows, campuses, listingSpots, listings, meetupSpots, offers, users, type Offer } from '../../db/schema';
+import {
+  availabilityWindows,
+  listingSpots,
+  listings,
+  meetupSpots,
+  offers,
+  reservations,
+  users,
+  type Listing,
+  type Offer,
+  type Reservation,
+} from '../../db/schema';
 import { notifyOfferEvent } from '../../notifications/events';
+import { enqueueBookingSms } from '../../sms/outbox';
 import {
   AVAILABILITY_HORIZON_MS,
   LEGACY_AUCTION_MESSAGE,
@@ -29,7 +42,11 @@ import {
   applyExpiry,
   applyExpiryForRead,
   isBlockedBetween,
+  isSlotAligned,
   isUniqueViolation,
+  lockPeople,
+  recordReservationEvent,
+  slotConflicts,
   slotStartsFor,
   toListingCards,
   toPublicUser,
@@ -38,6 +55,138 @@ import { campusVerifiedProcedure, protectedProcedure, router } from '../trpc';
 
 /** $1 floor, same as the old auction floor: below that a fee can't round sensibly. */
 export const MIN_OFFER_CENTS = 100;
+
+/** Maps a unique-index violation inside the accept transaction to the right message. */
+function conflictFromUnique(err: unknown): TRPCError | null {
+  if (!isUniqueViolation(err)) return null;
+  const text = JSON.stringify(err, Object.getOwnPropertyNames(err as object)) ?? '';
+  if (text.includes('slot_uq')) {
+    return new TRPCError({
+      code: 'CONFLICT',
+      message: 'That meetup time was just taken. Ask the buyer for another time.',
+    });
+  }
+  if (text.includes('reservations_one_accepted')) {
+    return new TRPCError({ code: 'CONFLICT', message: 'This item was just booked by someone else.' });
+  }
+  return new TRPCError({ code: 'CONFLICT', message: 'You already accepted another offer on this item.' });
+}
+
+/**
+ * The buyer's proposed meetup, re-validated under the listing lock: the spot is
+ * still one the seller meets at, the slot still falls inside their published
+ * windows, and neither person has another meetup then. Returns null when the
+ * proposal can no longer be booked — accepting then falls back to the plain
+ * one-hour hold and the buyer picks a time again.
+ */
+async function bookableProposal(
+  tx: Db,
+  offer: Offer,
+  listing: Listing,
+  now: Date,
+): Promise<{ startsAt: Date; spotId: string } | null> {
+  if (!offer.proposedStartsAt || !offer.proposedSpotId) return null;
+  const startsAt = offer.proposedStartsAt;
+  if (
+    !isSlotAligned(startsAt) ||
+    startsAt.getTime() <= now.getTime() ||
+    startsAt.getTime() > now.getTime() + AVAILABILITY_HORIZON_MS
+  ) {
+    return null;
+  }
+  const [spotOk] = await tx
+    .select({ spotId: listingSpots.spotId })
+    .from(listingSpots)
+    .innerJoin(meetupSpots, eq(meetupSpots.id, listingSpots.spotId))
+    .where(
+      and(
+        eq(listingSpots.listingId, listing.id),
+        eq(listingSpots.spotId, offer.proposedSpotId),
+        eq(meetupSpots.isActive, true),
+      ),
+    )
+    .limit(1);
+  if (!spotOk) return null;
+  const windows = await tx
+    .select()
+    .from(availabilityWindows)
+    .where(eq(availabilityWindows.listingId, listing.id));
+  const slotOk = slotStartsFor(windows, {
+    now,
+    until: new Date(now.getTime() + AVAILABILITY_HORIZON_MS),
+  }).some((d) => d.getTime() === startsAt.getTime());
+  if (!slotOk) return null;
+  const clash = await slotConflicts(tx, {
+    sellerId: offer.sellerId,
+    buyerId: offer.buyerId,
+    startsAt,
+  });
+  if (clash.seller || clash.buyer) return null;
+  if (await isBlockedBetween(tx, offer.sellerId, offer.buyerId)) return null;
+  return { startsAt, spotId: offer.proposedSpotId };
+}
+
+/**
+ * Books the buyer's proposal: the reservation is final at once, exactly as
+ * `reservation.book` leaves one, and the offer it came from becomes `booked`.
+ * Runs inside the accept transaction, under the listing row lock.
+ */
+async function bookProposal(
+  tx: Db,
+  offer: Offer,
+  listing: Listing,
+  proposal: { startsAt: Date; spotId: string },
+  now: Date,
+): Promise<{ offer: Offer; reservation: Reservation }> {
+  const [reservation] = await tx
+    .insert(reservations)
+    .values({
+      listingId: listing.id,
+      buyerId: offer.buyerId,
+      sellerId: offer.sellerId,
+      status: 'accepted',
+      // A curated campus spot, so the custom-address trio stays null
+      // (reservations_spot_xor_custom).
+      spotId: proposal.spotId,
+      startsAt: proposal.startsAt,
+      // The buyer named this time; the seller just took it.
+      proposedById: offer.buyerId,
+      priceCents: offer.amountCents,
+      offerId: offer.id,
+      handoffCode: String(crypto.randomInt(0, 10_000)).padStart(4, '0'),
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+  await tx.update(listings).set({ status: 'reserved', updatedAt: now }).where(eq(listings.id, listing.id));
+  await tx
+    .update(reservations)
+    .set({ status: 'declined', cancelReason: 'item_reserved', updatedAt: now })
+    .where(
+      and(
+        eq(reservations.listingId, listing.id),
+        ne(reservations.id, reservation!.id),
+        inArray(reservations.status, ['requested', 'countered']),
+      ),
+    );
+  const [used] = await tx
+    .update(offers)
+    .set({ status: 'booked', respondedAt: now, reservationId: reservation!.id, updatedAt: now })
+    .where(eq(offers.id, offer.id))
+    .returning();
+  // Every other open offer on the item closes, same as a booking does.
+  await tx
+    .update(offers)
+    .set({ status: 'declined', closeReason: 'item_reserved', updatedAt: now })
+    .where(
+      and(
+        eq(offers.listingId, listing.id),
+        inArray(offers.status, ['pending', 'accepted']),
+        ne(offers.id, offer.id),
+      ),
+    );
+  return { offer: used!, reservation: reservation! };
+}
 
 async function loadOffer(db: Db, id: string) {
   const [o] = await db.select().from(offers).where(eq(offers.id, id)).limit(1);
@@ -58,21 +207,34 @@ function notify(db: Db, offer: Offer, recipientId: string, kind: 'received' | 'a
   })();
 }
 
-/** Offers decorated with the listing card and the other party, for list screens. */
+/**
+ * Offers decorated with the listing card, the other party, and the proposed
+ * meetup spot's name — so a proposal reads as a time and a place on screen
+ * without anyone parsing the note text.
+ */
 async function decorate(db: Db, rows: Offer[]) {
   if (rows.length === 0) return [];
-  const [listingRows, people] = await Promise.all([
+  const spotIds = [...new Set(rows.map((r) => r.proposedSpotId).filter((id): id is string => id != null))];
+  const [listingRows, people, spots] = await Promise.all([
     db.select().from(listings).where(inArray(listings.id, [...new Set(rows.map((r) => r.listingId))])),
     db.select().from(users).where(inArray(users.id, [...new Set(rows.flatMap((r) => [r.buyerId, r.sellerId]))])),
+    spotIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({ id: meetupSpots.id, name: meetupSpots.name, description: meetupSpots.description })
+          .from(meetupSpots)
+          .where(inArray(meetupSpots.id, spotIds)),
   ]);
   const cards = await toListingCards(db, listingRows);
   const cardById = new Map(cards.map((c) => [c.id, c]));
   const userById = new Map(people.map((u) => [u.id, toPublicUser(u)]));
+  const spotById = new Map(spots.map((s) => [s.id, s]));
   return rows.map((o) => ({
     ...o,
     listing: cardById.get(o.listingId) ?? null,
     buyer: userById.get(o.buyerId)!,
     seller: userById.get(o.sellerId)!,
+    proposedSpot: (o.proposedSpotId ? spotById.get(o.proposedSpotId) : null) ?? null,
   }));
 }
 
@@ -122,7 +284,6 @@ export const offerRouter = router({
 
       // Price and meetup are one proposal: validate the time and place on the
       // server so a time or spot the seller did not offer is never accepted.
-      let proposalLine: string | null = null;
       if ((input.proposedStartsAt == null) !== (input.proposedSpotId == null)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -131,14 +292,13 @@ export const offerRouter = router({
       }
       if (input.proposedStartsAt && input.proposedSpotId) {
         const startsAt = input.proposedStartsAt;
-        const [windows, [spotRow], [campus]] = await Promise.all([
+        const [windows, [spotRow]] = await Promise.all([
           ctx.db.select().from(availabilityWindows).where(eq(availabilityWindows.listingId, listing.id)),
           ctx.db
-            .select({ name: meetupSpots.name })
+            .select({ spotId: listingSpots.spotId })
             .from(listingSpots)
             .innerJoin(meetupSpots, eq(meetupSpots.id, listingSpots.spotId))
             .where(and(eq(listingSpots.listingId, listing.id), eq(listingSpots.spotId, input.proposedSpotId))),
-          ctx.db.select({ timezone: campuses.timezone }).from(campuses).where(eq(campuses.id, listing.campusId)),
         ]);
         if (!spotRow) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'The seller does not meet at that spot.' });
@@ -153,17 +313,7 @@ export const offerRouter = router({
             message: 'Pick a time the seller is available. Their times may have changed.',
           });
         }
-        const when = new Intl.DateTimeFormat('en-US', {
-          timeZone: campus?.timezone,
-          weekday: 'short',
-          month: 'short',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-        }).format(startsAt);
-        proposalLine = `Proposed meetup: ${when} at ${spotRow.name}.`;
       }
-      const storedMessage = [input.message, proposalLine].filter(Boolean).join('\n\n') || null;
 
       try {
         const [created] = await ctx.db
@@ -174,7 +324,11 @@ export const offerRouter = router({
             sellerId: listing.sellerId,
             amountCents: input.amountCents,
             askingPriceCents: listing.priceCents,
-            message: storedMessage,
+            message: input.message || null,
+            // Structured, so accepting can book exactly this without anyone
+            // re-reading a sentence and re-entering it.
+            proposedStartsAt: input.proposedStartsAt ?? null,
+            proposedSpotId: input.proposedSpotId ?? null,
             status: 'pending',
             // A pending offer can never outlive the listing.
             expiresAt: listing.expiresAt ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
@@ -195,7 +349,13 @@ export const offerRouter = router({
       }
     }),
 
-  /** Seller accepts: price agreed, item held for the buyer for one hour to book. */
+  /**
+   * Seller accepts. When the offer carries a meetup proposal that still holds,
+   * accepting books it outright at the buyer's chosen time and spot — nobody
+   * re-enters anything. Otherwise (no proposal, or the seller's times or spots
+   * changed under it) the price is agreed and the item is held for the buyer
+   * for one hour so they can pick a time.
+   */
   accept: protectedProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
     await applyExpiry(ctx.db);
     const preview = await loadOffer(ctx.db, input.id);
@@ -204,8 +364,9 @@ export const offerRouter = router({
     }
 
     let accepted: Offer;
+    let booked: Reservation | null = null;
     try {
-      accepted = await ctx.db.transaction(async (tx) => {
+      const out = await ctx.db.transaction(async (tx) => {
         // Same lock order as reservation.book, so accept and book serialize.
         const [listing] = await tx
           .select()
@@ -243,6 +404,16 @@ export const offerRouter = router({
             .set({ status: 'expired', closeReason: 'hold_lapsed', updatedAt: now })
             .where(eq(offers.id, other.id));
         }
+
+        // The buyer already named a time and a spot: book that, in this same
+        // transaction, under the same listing lock `reservation.book` takes.
+        if (offer.proposedStartsAt && offer.proposedSpotId) {
+          const txDb = tx as unknown as Db;
+          await lockPeople(txDb, [offer.sellerId, offer.buyerId]);
+          const proposal = await bookableProposal(txDb, offer, listing, now);
+          if (proposal) return bookProposal(txDb, offer, listing, proposal, now);
+        }
+
         const holdUntil = new Date(
           Math.min(now.getTime() + OFFER_HOLD_MS, listing.expiresAt?.getTime() ?? Infinity),
         );
@@ -251,19 +422,19 @@ export const offerRouter = router({
           .set({ status: 'accepted', respondedAt: now, holdExpiresAt: holdUntil, updatedAt: now })
           .where(eq(offers.id, offer.id))
           .returning();
-        return row!;
+        return { offer: row!, reservation: null };
       });
+      accepted = out.offer;
+      booked = out.reservation;
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: 'You already accepted another offer on this item.',
-        });
-      }
-      throw err;
+      throw conflictFromUnique(err) ?? err;
+    }
+    if (booked) {
+      await recordReservationEvent(ctx.db, booked, 'booked', ctx.user.id);
+      await enqueueBookingSms(ctx.db, booked.id);
     }
     notify(ctx.db, accepted, accepted.buyerId, 'accepted');
-    return accepted;
+    return { ...accepted, reservation: booked };
   }),
 
   decline: protectedProcedure

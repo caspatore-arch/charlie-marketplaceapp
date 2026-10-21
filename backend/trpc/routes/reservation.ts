@@ -50,6 +50,7 @@ import {
   isBlockedBetween,
   isSlotAligned,
   isUniqueViolation,
+  lockPeople,
   recordReservationEvent,
   slotConflicts,
   slotStartsFor,
@@ -81,13 +82,6 @@ function assertBookableTime(startsAt: Date, now = new Date()) {
   }
   if (startsAt.getTime() > now.getTime() + AVAILABILITY_HORIZON_MS) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'Pick a time within the next 24 hours.' });
-  }
-}
-
-/** Locks both users' rows in a stable order so concurrent bookings for either person serialize. */
-async function lockPeople(tx: Db, ids: string[]) {
-  for (const id of [...new Set(ids)].sort()) {
-    await tx.select({ id: users.id }).from(users).where(eq(users.id, id)).for('update');
   }
 }
 

@@ -333,12 +333,13 @@ Resolve any rows by hand (never automatically). The same applies to `buyer_id`. 
 
 An offer agrees a **price** and holds the item briefly. It never reserves the item by itself; `reservation.book` does (see "Booking").
 
-**Table `offers`**: id, listingId, buyerId, sellerId, amountCents (> 0, CHECK), askingPriceCents (snapshot), message?, status, closeReason?, expiresAt (a pending offer never outlives the listing: the listing's `expiresAt`), holdExpiresAt? (set on accept), respondedAt?, reservationId? (set when booked), createdAt, updatedAt.
+**Table `offers`**: id, listingId, buyerId, sellerId, amountCents (> 0, CHECK), askingPriceCents (snapshot), message?, proposedStartsAt?, proposedSpotId? (the meetup the buyer proposed with the price — both set or both null, CHECK `offers_proposal_both_or_neither`; FK to `meetup_spots`), status, closeReason?, expiresAt (a pending offer never outlives the listing: the listing's `expiresAt`), holdExpiresAt? (set on accept), respondedAt?, reservationId? (set when booked), createdAt, updatedAt.
 **Indexes**: partial unique `offers_one_accepted_per_listing (listingId) WHERE status='accepted'`; partial unique `offers_one_open_per_buyer (listingId, buyerId) WHERE status IN ('pending','accepted')`; `offers_seller_idx (sellerId, status)`; `offers_buyer_idx (buyerId, status)`.
 
 **States**
 ```
 pending ──(seller accept)──▶ accepted ──(buyer reservation.book)──▶ booked
+pending with a live proposal ──(seller accept)──▶ booked   (the proposal is booked at once)
 pending ──(seller decline)─▶ declined
 pending|accepted ──(buyer withdraw)──▶ withdrawn
 pending, listing expiry passes ──▶ expired        (closeReason offer_expired)
@@ -351,15 +352,22 @@ Lapses are applied lazily by `expireOffers()` (called from `applyExpiry` and the
 
 **Hold rule.** `offer.accept` sets `holdExpiresAt = min(now + OFFER_HOLD_MS, listing.expiresAt)`; `OFFER_HOLD_MS` = 1 hour (`backend/trpc/lib.ts`). While the hold is live nobody else can book the item (`reservation.book` -> CONFLICT "The seller accepted another offer on this item…") and the seller cannot accept a second offer. The listing row lock plus `offers_one_accepted_per_listing` serialize accept vs book. If the buyer books in time, the booking uses the offer's `amountCents`.
 
+**Proposed meetup.** `offer.create` takes an optional `proposedStartsAt` + `proposedSpotId` (both or neither, else BAD_REQUEST "Pick both a meetup time and a meetup spot, or neither."). The server validates the time against the listing's availability windows (future, on the 30-minute grid, inside the rolling 24h) and the spot against the seller's `listing_spots`, then stores them on the offer as columns — never as text in `message`.
+
+**Accepting a proposal books it.** When the accepted offer carries a proposal that still holds, `offer.accept` creates the reservation itself, in the same transaction and under the same listing row lock `reservation.book` takes: `status: 'accepted'`, `startsAt`/`spotId` from the proposal, `priceCents` = the offer's amount, `proposedById` = the buyer (they named the time), handoff code issued, listing `reserved`, the offer `booked` with `reservationId` set, every other open offer and request on the item closed. Nobody re-enters the time or spot. If the proposal no longer holds (the seller changed their windows or spots, the spot went inactive, the slot is now taken), accept falls back to the plain one-hour hold below and the buyer picks a time again.
+
 ```
-offer.create    C    { listingId, amountCents, message? (<=280) } → Offer   (buyer)
-offer.accept    P    { id }                  → Offer   (seller only; status accepted, holdExpiresAt set)
+offer.create    C    { listingId, amountCents, message? (<=280), proposedStartsAt?, proposedSpotId? } → Offer   (buyer)
+offer.accept    P    { id }                  → Offer + { reservation: Reservation | null }
+                                               (seller only; with a live proposal: status booked and the
+                                                reservation; otherwise status accepted, holdExpiresAt set)
 offer.decline   P    { id, reason? }         → Offer   (seller only; pending only)
 offer.withdraw  P    { id }                  → Offer   (buyer only; pending or accepted, i.e. also releases a hold)
 offer.forListing P   { listingId }           → { viewerRole: 'seller'|'buyer', offers: DecoratedOffer[], heldUntil, heldByViewer, heldByOther }
       Seller sees every offer on the listing; anyone else sees only their own. NOTE: protected (signed in), not public.
 offer.mine      P    { role?: 'buyer'|'seller' } → DecoratedOffer[]   (newest-updated first, max 100)
 DecoratedOffer = Offer + listing: ListingCard | null + buyer: PublicUser + seller: PublicUser
+                       + proposedSpot: { id, name, description } | null
 ```
 
 **Validation / errors** (all human-readable): `amountCents` >= 100 ("Offers start at $1.") and < the asking price ("That is at or above the asking price — just book it at the asking price instead.") and <= $5,000; not your own listing (BAD_REQUEST); blocked either way (FORBIDDEN); legacy auction, or listing not `active`/past expiry (CONFLICT); a second open offer by the same buyer (CONFLICT "You already have an open offer on this item. Withdraw it to make a new one."); accept/decline/withdraw on an offer already closed (CONFLICT "This offer is already <status>."); only the seller may accept/decline and only the buyer may withdraw (FORBIDDEN). Offers push to the `offers` notification category (received -> seller; accepted/declined -> buyer).
