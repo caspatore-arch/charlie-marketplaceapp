@@ -17,8 +17,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
     enabled: hasToken === true,
-    retry: false,
+    // Sign-ins last indefinitely, so only the server saying "not signed in"
+    // ends one. Network drops, restarts and 5xx/429 just retry with backoff.
+    retry: (_count, err) => err.data?.code !== 'UNAUTHORIZED',
   });
+  const signedOutByServer = meQuery.isError && meQuery.error.data?.code === 'UNAUTHORIZED';
 
   const requestCodeMutation = trpc.auth.requestCode.useMutation();
   const verifyCodeMutation = trpc.auth.verifyCode.useMutation();
@@ -95,16 +98,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (hasToken === null) return 'loading';
     if (!hasToken) return 'signedOut';
     if (meQuery.isPending) return 'loading';
-    if (meQuery.isError) return 'signedOut';
+    if (signedOutByServer) return 'signedOut';
     return meQuery.data ? 'signedIn' : 'loading';
-  }, [hasToken, meQuery.isPending, meQuery.isError, meQuery.data]);
+  }, [hasToken, meQuery.isPending, signedOutByServer, meQuery.data]);
 
-  // If the token turns out to be invalid/expired, fall back to signed-out.
+  // Only a token the server rejects is thrown away — never on a network error.
   useEffect(() => {
-    if (hasToken === true && meQuery.isError) {
+    if (hasToken === true && signedOutByServer) {
       authStorage.clearToken().then(() => setHasToken(false));
     }
-  }, [hasToken, meQuery.isError]);
+  }, [hasToken, signedOutByServer]);
 
   const value = useMemo(
     () => ({

@@ -21,6 +21,7 @@ import {
   sanitizeFileName,
   storage,
 } from './storage';
+import { adminApp } from './admin/routes';
 import { appRouter } from './trpc/app-router';
 import { createContext, userFromAuthHeader } from './trpc/create-context';
 
@@ -228,5 +229,8 @@ app.onError((err, c) => {
   console.error('[api error]', err);
   return c.json({ error: 'Something went wrong on our end.' }, 500);
 });
+
+/** Founder dashboard — password-protected, see backend/admin/routes.ts. */
+app.route('/admin', adminApp);
 
 export default app;

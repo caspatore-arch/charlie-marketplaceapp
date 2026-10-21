@@ -27,11 +27,10 @@ import { codesMatch, hasActivity, hashPhoneCode, newPhoneCode, retireEmptyAccoun
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
 import { resolveSmsMode, smsProvider } from '../../sms/provider';
 import { codeEmail, emailProvider, resolveEmailMode } from '../../email/provider';
-import { hashToken, newSessionToken } from '../create-context';
+import { SESSION_TTL_MS, hashToken, newSessionToken } from '../create-context';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const PHONE_CODE_TTL_MS = 10 * 60 * 1000;
 export const PHONE_RESEND_COOLDOWN_MS = 30 * 1000;
 export const PHONE_MAX_CODES_PER_HOUR = 5;

@@ -13,6 +13,15 @@ export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * Sign-ins last indefinitely: a session only ends when the user signs out,
+ * closes their account, or the token is lost. Stored as a far-future date
+ * because `sessions.expires_at` is NOT NULL.
+ */
+export const SESSION_TTL_MS = 100 * 365 * 24 * 60 * 60 * 1000; // ~100 years
+/** Sessions issued before sign-ins became permanent are pushed out on next use. */
+const RENEW_IF_EXPIRING_WITHIN_MS = 365 * 24 * 60 * 60 * 1000;
+
 export function newSessionToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -23,7 +32,7 @@ export async function userFromAuthHeader(header: string | null | undefined): Pro
   if (!match) return null;
 
   const [row] = await db
-    .select({ user: users })
+    .select({ user: users, sessionId: sessions.id, expiresAt: sessions.expiresAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.tokenHash, hashToken(match[1]!)), gt(sessions.expiresAt, new Date())))
@@ -33,6 +42,13 @@ export async function userFromAuthHeader(header: string | null | undefined): Pro
   // signed-out rather than a live user — deleteAccount also removes the
   // sessions themselves, but this is the defense-in-depth backstop.
   if (row?.user.deletedAt != null) return null;
+
+  if (row && row.expiresAt.getTime() - Date.now() < RENEW_IF_EXPIRING_WITHIN_MS) {
+    await db
+      .update(sessions)
+      .set({ expiresAt: new Date(Date.now() + SESSION_TTL_MS) })
+      .where(eq(sessions.id, row.sessionId));
+  }
 
   return row?.user ?? null;
 }
