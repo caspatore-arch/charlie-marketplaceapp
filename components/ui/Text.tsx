@@ -4,17 +4,21 @@
  */
 import React from 'react';
 import { Text as RNText, type TextProps as RNTextProps, StyleSheet } from 'react-native';
-import { colors, type as typeScale } from '@/constants/theme';
+import { colors, fontFamilyFor, type as typeScale, type FontWeight } from '@/constants/theme';
 
 export type TextVariant = keyof typeof typeScale;
 
 export interface TextProps extends RNTextProps {
   variant?: TextVariant;
   color?: keyof typeof colors | string;
-  weight?: '400' | '500' | '600' | '700';
+  weight?: FontWeight;
 }
 
 export function Text({ variant = 'body', color = 'ink', weight, style, ...rest }: TextProps) {
+  const base = typeScale[variant] as { fontWeight: FontWeight };
+  // Resolve weight to its own font family, and strip fontWeight so RN/web
+  // doesn't try to synthesise bold on top of an already-weighted face.
+  const family = fontFamilyFor(weight ?? base.fontWeight);
   const resolvedColor = (colors as Record<string, string>)[color as string] ?? color;
   return (
     <RNText
@@ -24,7 +28,7 @@ export function Text({ variant = 'body', color = 'ink', weight, style, ...rest }
         styles.base,
         typeScale[variant] as object,
         { color: resolvedColor },
-        weight ? { fontWeight: weight } : null,
+        { fontFamily: family, fontWeight: 'normal' },
         style,
       ]}
       {...rest}
@@ -33,9 +37,7 @@ export function Text({ variant = 'body', color = 'ink', weight, style, ...rest }
 }
 
 const styles = StyleSheet.create({
-  base: {
-    fontFamily: undefined, // system font (SF on iOS)
-  },
+  base: {},
 });
 
 export default Text;

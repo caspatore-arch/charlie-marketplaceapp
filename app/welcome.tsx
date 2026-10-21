@@ -8,7 +8,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
+import { Logo } from '@/components/ui/Logo';
 import { Stack, useRouter } from 'expo-router';
 import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
@@ -16,7 +16,6 @@ import { AuthMethods } from '@/components/auth/AuthMethods';
 import { useAuth } from '@/hooks/useAuth';
 import { breakpoints, colors, radius, shadow, space } from '@/constants/theme';
 
-const LOGO = require('../assets/branding/dibbs-campus-marketplace-logo.png');
 
 const STEPS = [
   {
@@ -95,7 +94,7 @@ export default function WelcomeScreen() {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={[styles.inner, isDesktop ? styles.innerDesktop : null]}>
           <View style={styles.nav}>
-            <Image source={LOGO} style={styles.logo} contentFit="cover" accessibilityLabel="Dibbs" />
+            <Logo variant="lockup" width={96} />
             <View style={styles.navActions}>
               <Pressable onPress={browse} accessibilityRole="link" style={styles.navLink}>
                 <Text variant="label" weight="600">
@@ -196,7 +195,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: space.md,
   },
-  logo: { width: 72, height: 48, borderRadius: radius.md },
   navActions: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   navLink: { minHeight: 48, justifyContent: 'center', paddingHorizontal: space.sm },
   hero: { gap: space.xxl, paddingTop: space.lg },

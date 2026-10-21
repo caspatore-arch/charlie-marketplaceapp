@@ -88,7 +88,34 @@ export const space = {
   huge: 40,
 } as const;
 
-/** Type scale. Use with Text component's `variant` prop. */
+/**
+ * Brand typeface: Montserrat, matching the geometric sans of the logo tagline.
+ * React Native cannot synthesise weights from a custom font, so each weight is
+ * its own loaded family (see app/_layout.tsx). Select with `fontFamilyFor`.
+ * The stack after the family is the fallback if the fonts fail to load.
+ */
+export type FontWeight = '400' | '500' | '600' | '700';
+
+const fallbackStack = Platform.select({
+  web: ', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  default: '',
+});
+
+const familyByWeight: Record<FontWeight, string> = {
+  '400': 'Montserrat_400Regular',
+  '500': 'Montserrat_500Medium',
+  '600': 'Montserrat_600SemiBold',
+  '700': 'Montserrat_700Bold',
+};
+
+/** fontFamily for a weight. On web includes a system sans fallback stack;
+ *  natively an unloaded family falls back to the system font automatically. */
+export function fontFamilyFor(weight: FontWeight): string {
+  return `${familyByWeight[weight]}${fallbackStack}`;
+}
+
+/** Type scale. Use with Text component's `variant` prop. fontWeight is kept
+ *  alongside (Text maps it to the matching family and drops it). */
 export const type = {
   display: { fontSize: 34, fontWeight: '700' as const, letterSpacing: -0.5 },
   title: { fontSize: 22, fontWeight: '700' as const },
@@ -96,6 +123,8 @@ export const type = {
   body: { fontSize: 16, fontWeight: '400' as const },
   label: { fontSize: 14, fontWeight: '500' as const },
   caption: { fontSize: 12, fontWeight: '500' as const },
+  // Montserrat's default figures are proportional; tabular-nums keeps price
+  // columns aligned (Montserrat ships a `tnum` feature, honoured on web/iOS).
   price: { fontSize: 17, fontWeight: '700' as const, fontVariant: ['tabular-nums'] as const },
 };
 
