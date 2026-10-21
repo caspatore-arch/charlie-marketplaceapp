@@ -1,8 +1,9 @@
 /**
  * Create-listing modal route. Requires auth (redirects to sign-in with
  * returnTo if signed out). Publishes via `listing.create`, then invalidates
- * the feed/mine/byId caches and replaces navigation into the new listing's
- * detail page so back doesn't return to this form.
+ * the feed/mine/byId caches and shows the post-publish celebration modal,
+ * whose buttons replace navigation into the listing (or the feed) so back
+ * doesn't return to this form.
  */
 import React, { useEffect, useState } from 'react';
 import { Pressable } from 'react-native';
@@ -13,6 +14,7 @@ import { ListingForm, type ListingFormSubmitValues } from '@/components/sell/Lis
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { confirmAction } from '@/utils/confirm';
+import { PostPublishModal, type PublishedListing } from '@/components/share/PostPublishModal';
 
 export default function NewListingScreen() {
   const router = useRouter();
@@ -22,6 +24,7 @@ export default function NewListingScreen() {
 
   const [dirty, setDirty] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [published, setPublished] = useState<PublishedListing | null>(null);
 
   useEffect(() => {
     if (status === 'signedOut') {
@@ -37,7 +40,14 @@ export default function NewListingScreen() {
         utils.listing.mine.invalidate(),
         utils.listing.byId.invalidate({ id: listing.id }),
       ]);
-      router.replace(`/listing/${listing.id}`);
+      // Celebrate first; the modal's buttons navigate. The form stays mounted
+      // behind it only until one of them is pressed.
+      setPublished({
+        id: listing.id,
+        title: listing.title,
+        priceCents: listing.priceCents,
+        coverPhotoUrl: listing.coverPhotoUrl ?? null,
+      });
     },
     onError: (err) => setSubmitError(err.message),
   });
@@ -55,6 +65,18 @@ export default function NewListingScreen() {
     } else {
       router.back();
     }
+  }
+
+  function viewPublished() {
+    if (!published) return;
+    const id = published.id;
+    setPublished(null);
+    router.replace(`/listing/${id}`);
+  }
+
+  function backToFeed() {
+    setPublished(null);
+    router.replace('/');
   }
 
   if (status !== 'signedIn') {
@@ -82,6 +104,7 @@ export default function NewListingScreen() {
         onSubmit={handleSubmit}
         onDirtyChange={setDirty}
       />
+      <PostPublishModal listing={published} onViewListing={viewPublished} onBackToFeed={backToFeed} />
     </Screen>
   );
 }

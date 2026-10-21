@@ -31,6 +31,70 @@ function webBaseUrl(): string {
   return '';
 }
 
+/**
+ * The link to hand to other people. https:// whenever we know the public
+ * origin (always on web; on native only when EXPO_PUBLIC_WEB_BASE_URL is set),
+ * otherwise the dibbs:// deep link. Third-party intent URLs need the https form.
+ */
+export function listingShareUrl(id: string): string {
+  const base = webBaseUrl();
+  if (base) return `${base}/listing/${id}`;
+  return `dibbs://listing/${id}`;
+}
+
+/** True when the OS share sheet can be opened (all native, or web with navigator.share). */
+export function canUseShareSheet(): boolean {
+  if (Platform.OS !== 'web') return true;
+  return typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+}
+
+export type ShareOutcome = 'shared' | 'cancelled' | 'failed';
+
+/**
+ * Opens the OS share sheet with no alerts, so callers can show their own
+ * confirmation. Returns 'cancelled' when the user closes the sheet.
+ */
+export async function openShareSheet(args: { title: string; text: string; url: string }): Promise<ShareOutcome> {
+  try {
+    if (Platform.OS !== 'web') {
+      const result = await Share.share({ title: args.title, message: `${args.text}\n${args.url}`, url: args.url });
+      return result.action === Share.dismissedAction ? 'cancelled' : 'shared';
+    }
+    await navigator.share({ title: args.title, text: args.text, url: args.url });
+    return 'shared';
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') return 'cancelled';
+    return 'failed';
+  }
+}
+
+/** Copies text to the clipboard (web). Returns whether it actually worked. */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through to legacy path
+  }
+  try {
+    if (typeof document === 'undefined') return false;
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function shareListing(listing: { id: string; title: string }): Promise<void> {
   if (Platform.OS !== 'web') {
     // Native iOS / Android — keep existing behaviour unchanged.
@@ -48,7 +112,7 @@ export async function shareListing(listing: { id: string; title: string }): Prom
   }
 
   // Web: build a real https:// URL.
-  const url = `${webBaseUrl()}/listing/${listing.id}`;
+  const url = listingShareUrl(listing.id);
   const shareData: ShareData = { title: listing.title, url };
 
   if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
