@@ -836,7 +836,7 @@ async function main(): Promise<number> {
 
   /* ------------------------------------------------------------------ 9 */
 
-  await criterion('11. An offer carries a meetup time and spot the seller actually offered', async () => {
+  await criterion('11. An offer carries a meetup the seller offered, and accepting books it', async () => {
     const listing = await maya.listing.create.mutate({
       title: 'Bookshelf (offer proposal test)',
       category: 'dorm',
@@ -847,7 +847,9 @@ async function main(): Promise<number> {
       spotIds: [spotAId],
       windows: [stdWindow()],
     });
-    const goodTime = alignedIn(2);
+    // A slot no earlier criterion has booked for Maya or Jordan, so accepting
+    // can really book it rather than falling back to a hold.
+    const goodTime = alignedIn(6);
 
     // A spot the seller did not choose is refused.
     const badSpot = await expectTrpcError('BAD_REQUEST', () =>
@@ -900,8 +902,70 @@ async function main(): Promise<number> {
       proposedSpotId: spotAId,
     });
     assertEqual(ok.status, 'pending', 'a valid proposal creates a pending offer');
-    assert(/Proposed meetup:/.test(ok.message ?? ''), 'the proposal is recorded on the offer');
-    assert((ok.message ?? '').includes('Can carry it myself'), "the buyer's note is kept");
+
+    // The proposal is structured data, not a sentence glued onto the note.
+    assertEqual(ok.message, 'Can carry it myself', "the buyer's note is kept verbatim");
+    assert(!/Proposed meetup:/.test(ok.message ?? ''), 'the note is not rewritten with the proposal');
+    assertEqual(
+      ok.proposedStartsAt?.getTime(),
+      goodTime.getTime(),
+      'the proposed time is stored on the offer',
+    );
+    assertEqual(ok.proposedSpotId, spotAId, 'the proposed spot is stored on the offer');
+
+    // It round-trips as structured data through the seller's read, spot and all.
+    const sellerSees = await maya.offer.forListing.query({ listingId: listing.id });
+    const pending = sellerSees.offers.find((o) => o.id === ok.id)!;
+    assertEqual(
+      pending.proposedStartsAt?.getTime(),
+      goodTime.getTime(),
+      'the seller reads the proposed time as a date',
+    );
+    assertEqual(pending.proposedSpot?.id, spotAId, 'the seller reads the proposed spot');
+    assert(!!pending.proposedSpot?.name, 'the proposed spot carries its name for the UI');
+
+    // Accepting books that exact time and spot — nobody re-enters anything.
+    const accepted = await maya.offer.accept.mutate({ id: ok.id });
+    assertEqual(accepted.status, 'booked', 'accepting a proposal books it outright');
+    assert(accepted.reservation != null, 'acceptance produces a reservation');
+    const res = accepted.reservation!;
+    assertEqual(res.startsAt.getTime(), goodTime.getTime(), 'the meetup is at the proposed time');
+    assertEqual(res.spotId, spotAId, 'the meetup is at the proposed spot');
+    assertEqual(res.customAddress, null, 'a spot booking carries no custom address');
+    assertEqual(res.priceCents, 6000, 'the meetup is priced at the accepted offer');
+    assertEqual(res.buyerId, JORDAN_ID, 'the reservation belongs to the offering buyer');
+    assertEqual(res.status, 'accepted', 'the reservation is confirmed, not pending');
+    assertEqual(accepted.reservationId, res.id, 'the offer points at the booking it produced');
+
+    // And the buyer sees the confirmed meetup, with no booking step left.
+    const buyerView = await jordan.reservation.byId.query({ id: res.id });
+    assertEqual(buyerView.startsAt.getTime(), goodTime.getTime(), 'the buyer sees the proposed time');
+    assertEqual(buyerView.spot?.id, spotAId, 'the buyer sees the proposed spot');
+    const reserved = await guest.listing.byId.query({ id: listing.id });
+    assertEqual(reserved.status, 'reserved', 'accepting the proposal reserves the item');
+    const history = await jordan.reservation.history.query({ id: res.id });
+    assert(
+      history.some((h) => h.kind === 'booked'),
+      'the reservation history records the booking',
+    );
+
+    // An offer with no proposal still just agrees the price and holds the item.
+    const plain = await maya.listing.create.mutate({
+      title: 'Desk lamp (no proposal)',
+      category: 'dorm',
+      condition: 'good',
+      priceCents: 4000,
+      isSellToday: false,
+      photoUrls: PHOTOS,
+      spotIds: [spotAId],
+      windows: [stdWindow()],
+    });
+    const bare = await jordan.offer.create.mutate({ listingId: plain.id, amountCents: 3000 });
+    assertEqual(bare.proposedStartsAt, null, 'an offer without a proposal stores no time');
+    const heldOnly = await maya.offer.accept.mutate({ id: bare.id });
+    assertEqual(heldOnly.status, 'accepted', 'without a proposal the offer is only accepted');
+    assertEqual(heldOnly.reservation, null, 'without a proposal nothing is booked yet');
+    assert(heldOnly.holdExpiresAt != null, 'the buyer gets the hold to pick a time');
   });
 
   await criterion('9. Reporting, blocking and access controls hold', async () => {

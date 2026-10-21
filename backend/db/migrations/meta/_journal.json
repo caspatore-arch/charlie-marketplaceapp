@@ -71,6 +71,13 @@
       "when": 1792554217954,
       "tag": "0009_offers_booking_community_sms",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792616981089,
+      "tag": "0010_offer_proposed_meetup",
+      "breakpoints": true
     }
   ]
 }

@@ -95,6 +95,13 @@ export function slotStartsFor(
   return [...out].sort((a, b) => a - b).map((t) => new Date(t));
 }
 
+/** Locks both users' rows in a stable order so concurrent bookings for either person serialize. */
+export async function lockPeople(tx: Db, ids: string[]): Promise<void> {
+  for (const id of [...new Set(ids)].sort()) {
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, id)).for('update');
+  }
+}
+
 /**
  * Accepted meetups that would overlap a slot at `startsAt` for either person.
  * App-level check (any overlap, including legacy unaligned rows); the partial

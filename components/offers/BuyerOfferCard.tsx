@@ -1,6 +1,8 @@
 /**
  * The buyer's own offer state on a listing, from `offer.forListing`.
  * pending  -> "Offer sent: $X — waiting for the seller" + Withdraw
+ * booked   -> "Seller accepted $X — your meetup is booked for <time>" (the
+ *             buyer proposed a meetup with the offer, so accepting booked it)
  * accepted -> "Seller accepted $X — book a time before <time>" + Book
  * declined / expired / withdrawn -> a plain note; a new offer is allowed.
  * heldByOther -> another buyer's accepted offer holds the item.
@@ -36,12 +38,36 @@ export function BuyerOfferCard({ data, timeZone, withdrawing, onWithdraw, onBook
 
   const amount = formatPrice(latest.amountCents);
 
+  const proposed = latest.proposedStartsAt
+    ? `${relativeDayLabel(latest.proposedStartsAt, timeZone)} ${clockTime(latest.proposedStartsAt, timeZone)}${
+        latest.proposedSpot ? ` at ${latest.proposedSpot.name}` : ''
+      }`
+    : null;
+
+  if (latest.status === 'booked' && proposed) {
+    return (
+      <Box tone="success">
+        <Text variant="body" weight="600">
+          Seller accepted {amount} — your meetup is booked for {proposed}
+        </Text>
+        <Text variant="caption" color="inkMuted">
+          Nothing left to pick. Find it under your meetups.
+        </Text>
+      </Box>
+    );
+  }
+
   if (latest.status === 'pending') {
     return (
       <Box tone="neutral">
         <Text variant="body" weight="600">
           Offer sent: {amount} — waiting for the seller
         </Text>
+        {proposed ? (
+          <Text variant="caption" color="inkMuted">
+            For {proposed}. If they accept, that meetup is booked.
+          </Text>
+        ) : null}
         <Button
           title="Withdraw offer"
           variant="secondary"

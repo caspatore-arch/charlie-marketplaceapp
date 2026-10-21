@@ -1,6 +1,8 @@
 /**
- * Seller's view of offers on their listing: buyer, amount vs asking, note,
- * status, hold expiry, and Accept / Decline for pending offers.
+ * Seller's view of offers on their listing: buyer, amount vs asking, note, the
+ * meetup the buyer proposed (if any), status, hold expiry, and Accept /
+ * Decline for pending offers. Accepting an offer that proposes a meetup books
+ * that exact time and spot.
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -63,6 +65,14 @@ export function SellerOffersList({ offers, timeZone, busyId, onAccept, onDecline
             {o.message ? (
               <Text variant="body" color="inkMuted">
                 &ldquo;{o.message}&rdquo;
+              </Text>
+            ) : null}
+            {o.proposedStartsAt ? (
+              <Text variant="caption" color="inkMuted">
+                Proposed meetup: {relativeDayLabel(o.proposedStartsAt, timeZone)}{' '}
+                {clockTime(o.proposedStartsAt, timeZone)}
+                {o.proposedSpot ? ` at ${o.proposedSpot.name}` : ''}
+                {o.status === 'pending' ? ' — accepting books this time.' : ''}
               </Text>
             ) : null}
             {hold ? (

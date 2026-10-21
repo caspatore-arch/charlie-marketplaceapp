@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Divider } from '@/components/ui/Divider';
+import { clockTime, relativeDayLabel } from '@/components/booking/time';
 import { SegmentedTabs } from '@/components/inbox/SegmentedTabs';
 import { OfferRow } from '@/components/inbox/OfferRow';
 import { ConversationRow } from '@/components/inbox/ConversationRow';
@@ -86,6 +87,9 @@ function SignedInInbox() {
   const afterOfferChange = () => {
     void utils.offer.mine.invalidate();
     void utils.listing.byId.invalidate();
+    // Accepting an offer that proposed a meetup books it, so the meetup lists
+    // above are stale too.
+    void utils.reservation.invalidate();
   };
   const acceptMutation = trpc.offer.accept.useMutation({
     onSuccess: afterOfferChange,
@@ -100,7 +104,11 @@ function SignedInInbox() {
   const onAccept = (o: OfferWithContext) =>
     confirmAction(
       'Accept this offer?',
-      `${o.buyer.displayName} would get first chance to book this item for an hour.`,
+      o.proposedStartsAt
+        ? `This books your meetup for ${relativeDayLabel(o.proposedStartsAt)} ${clockTime(o.proposedStartsAt)}${
+            o.proposedSpot ? ` at ${o.proposedSpot.name}` : ''
+          }.`
+        : `${o.buyer.displayName} would get first chance to book this item for an hour.`,
       'Accept',
       () => {
         setOfferError(null);
