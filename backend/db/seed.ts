@@ -24,7 +24,7 @@ import {
 } from './schema';
 import { LocalDiskStorage } from '../storage';
 import { refuseIfBackendRunning } from './guard';
-import { localDayBounds } from '../trpc/lib';
+import { LISTING_LIFETIME_MS, localDayBounds } from '../trpc/lib';
 
 const TIMEZONE = 'America/Phoenix';
 
@@ -560,12 +560,14 @@ export async function seed(): Promise<void> {
         brand: l.brand ?? null,
         status: 'active' as const,
         isSellToday: l.isSellToday ?? false,
+        // Every listing expires 24h after seed time so the demo feed is
+        // correctly populated and non-expired right after a seed.
+        // Auctions keep their custom end-time (endsInHours); fixed-price
+        // listings all use LISTING_LIFETIME_MS.
         expiresAt:
           l.saleType === 'auction'
             ? new Date(Date.now() + (l.endsInHours ?? 24) * HOUR)
-            : l.isSellToday
-              ? new Date(Date.now() + 24 * HOUR)
-              : null,
+            : new Date(Date.now() + LISTING_LIFETIME_MS),
       })),
     )
     .onConflictDoNothing();
@@ -600,11 +602,15 @@ export async function seed(): Promise<void> {
   });
   if (windowRows.length > 0) await db.insert(availabilityWindows).values(windowRows);
 
-  // "Sell today" expiry is relative to now, so refresh it on every seed run.
-  for (const l of SEED_LISTINGS.filter((x) => x.isSellToday)) {
+  // All fixed-price listings expire 24h from seed time; refresh on every run so
+  // a re-seed never leaves the demo feed stale. (onConflictDoNothing skips the
+  // insert after the first run, so the expiresAt from that first run must be
+  // reset here.)
+  const fixedSeeds = SEED_LISTINGS.filter((l) => !l.saleType || l.saleType === 'fixed');
+  for (const l of fixedSeeds) {
     await db
       .update(listings)
-      .set({ expiresAt: new Date(Date.now() + 24 * HOUR) })
+      .set({ expiresAt: new Date(Date.now() + LISTING_LIFETIME_MS) })
       .where(eq(listings.id, l.id));
   }
 

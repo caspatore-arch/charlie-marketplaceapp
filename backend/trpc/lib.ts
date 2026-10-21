@@ -60,6 +60,9 @@ export function localDayBounds(timeZone: string, at: Date = new Date()): { start
 /** Every auction runs for 24 hours (docs/AUCTIONS.md §1). */
 export const AUCTION_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** Every listing (fixed-price or auction) expires 24 hours after it was created. */
+export const LISTING_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
 /** A bid inside the final 2 minutes pushes the end time out to now + 2 minutes. */
 export const ANTI_SNIPE_MS = 2 * 60 * 1000;
 

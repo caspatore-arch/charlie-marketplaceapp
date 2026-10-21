@@ -22,7 +22,7 @@ const external = process.env.E2E_URL;
 let tempRoot: string | null = null;
 
 if (!external) {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-swap-e2e-'));
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dibbs-e2e-'));
   process.env.PGLITE_DIR = path.join(tempRoot, 'pg');
   process.env.UPLOADS_DIR = path.join(tempRoot, 'uploads');
   process.env.PORT = '0';
@@ -1238,6 +1238,65 @@ async function main(): Promise<number> {
       assertEqual(closedRes3.status, 'completed', 'a completed reservation is never touched');
       const closedListing3 = await guest.listing.byId.query({ id: listing3.id });
       assertEqual(closedListing3.status, 'sold', "the completed sale's listing stays 'sold'");
+    }
+  });
+
+  /* ------------------------------------------------------------------ 9 */
+
+  await criterion('9. Every new listing expires 24h after creation', async () => {
+    if (!external) {
+      const { db } = await import('../backend/db/client');
+      const { eq: eqOp, lt: ltOp } = await import('drizzle-orm');
+      const { listings: listingsTable } = await import('../backend/db/schema');
+      const { applyExpiry } = await import('../backend/trpc/lib');
+
+      // (a) A plain fixed-price listing (not isSellToday, not an auction) must
+      //     be created with a non-null expiresAt roughly 24h out.
+      const plain = await maya.listing.create.mutate({
+        title: 'Lifetime test: plain fixed price',
+        category: 'other',
+        condition: 'good',
+        priceCents: 1000,
+        isSellToday: false,
+        photoUrls: ['/api/uploads/demo-tech.svg'],
+        spotIds: [spotAId],
+        windows: [],
+      });
+
+      assert(plain.expiresAt != null, 'a plain fixed-price listing must have a non-null expiresAt');
+      const hoursOut = (plain.expiresAt!.getTime() - Date.now()) / (60 * 60 * 1000);
+      assert(
+        hoursOut > 23.5 && hoursOut <= 24.1,
+        `plain fixed-price listing should expire ~24h out, got ${hoursOut}h`,
+      );
+
+      // (b) Editing the listing must NOT reset its expiry clock.
+      const beforeEdit = plain.expiresAt!.getTime();
+      await maya.listing.update.mutate({ id: plain.id, priceCents: 999 });
+      const afterEdit = await guest.listing.byId.query({ id: plain.id });
+      assert(afterEdit.expiresAt != null, 'expiresAt must still be set after an edit');
+      // Allow ±1s for timing noise; any larger shift means the clock was reset.
+      assert(
+        Math.abs(afterEdit.expiresAt!.getTime() - beforeEdit) < 1000,
+        `editing must not reset the expiry clock (before=${beforeEdit}, after=${afterEdit.expiresAt!.getTime()})`,
+      );
+
+      // (c) A listing whose expiresAt is in the past must not appear in the feed.
+      // Wind back the clock directly in the DB, then run the sweep.
+      await db
+        .update(listingsTable)
+        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .where(eqOp(listingsTable.id, plain.id));
+      await applyExpiry(db);
+
+      const feed = await guest.listing.feed.query({ campusId: CAMPUS_ID, limit: 50 });
+      assert(
+        feed.items.every((i) => i.id !== plain.id),
+        'a listing past its expiresAt must not appear in the feed',
+      );
+
+      const expired = await guest.listing.byId.query({ id: plain.id });
+      assertEqual(expired.status, 'expired', 'the listing status must be expired after the sweep');
     }
   });
 

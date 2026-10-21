@@ -14,6 +14,7 @@ import {
 } from '../../db/schema';
 import {
   AUCTION_TTL_MS,
+  LISTING_LIFETIME_MS,
   applyExpiry,
   applyExpiryForRead,
   blockedUserIds,
@@ -22,8 +23,6 @@ import {
   toListingDetail,
 } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
-
-const SELL_TODAY_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** docs/AUCTIONS.md §1: below $1 a platform fee cannot round sensibly. */
 const MIN_START_PRICE_CENTS = 100;
@@ -314,11 +313,11 @@ export const listingRouter = router({
         status: 'active',
         // An auction always runs 24h; "Sell today" is a fixed-price idea.
         isSellToday: isAuction ? false : input.isSellToday,
+        // Every listing expires 24h after creation — auctions via AUCTION_TTL_MS,
+        // fixed-price via LISTING_LIFETIME_MS. Both happen to equal 24h today.
         expiresAt: isAuction
           ? new Date(now.getTime() + AUCTION_TTL_MS)
-          : input.isSellToday
-            ? new Date(now.getTime() + SELL_TODAY_TTL_MS)
-            : null,
+          : new Date(now.getTime() + LISTING_LIFETIME_MS),
         createdAt: now,
         updatedAt: now,
       })
@@ -395,13 +394,13 @@ export const listingRouter = router({
         patch.startPriceCents = null;
         patch.buyoutPriceCents = null;
         if (input.priceCents !== undefined) patch.priceCents = input.priceCents;
-        if (input.isSellToday !== undefined) {
-          patch.isSellToday = input.isSellToday;
-          patch.expiresAt = input.isSellToday
-            ? new Date(existing.createdAt.getTime() + SELL_TODAY_TTL_MS)
-            : null;
-        } else if (existing.saleType === 'auction') {
-          patch.expiresAt = null;
+        if (input.isSellToday !== undefined) patch.isSellToday = input.isSellToday;
+        // Deliberately do NOT recompute expiresAt here. An edit must never extend
+        // or reset the listing's expiry clock — the 24h window started at creation.
+        // Exception: if a listing is being converted FROM an auction to fixed-price,
+        // set expiresAt relative to the original createdAt so the clock is consistent.
+        if (existing.saleType === 'auction') {
+          patch.expiresAt = new Date(existing.createdAt.getTime() + LISTING_LIFETIME_MS);
         }
       }
 
@@ -491,9 +490,7 @@ export const listingRouter = router({
           expiresAt:
             saleType === 'auction'
               ? new Date(now.getTime() + AUCTION_TTL_MS)
-              : input.isSellToday
-                ? new Date(now.getTime() + SELL_TODAY_TTL_MS)
-                : null,
+              : new Date(now.getTime() + LISTING_LIFETIME_MS),
           createdAt: now,
           updatedAt: now,
         })
@@ -502,8 +499,11 @@ export const listingRouter = router({
       return toListingDetail(ctx.db, updated!, ctx.user.id);
     }),
 
+  // Without `saved` this flips the current state (the heart button). With it,
+  // it sets that state — a swipe says "save this", and swiping right on an
+  // item you had already saved must not quietly unsave it.
   toggleSave: protectedProcedure
-    .input(z.object({ id: z.uuid() }))
+    .input(z.object({ id: z.uuid(), saved: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
       const [listing] = await ctx.db
         .select({ id: listings.id })
@@ -519,11 +519,17 @@ export const listingRouter = router({
         eq(savedListings.listingId, input.id),
       );
       const existing = await ctx.db.select().from(savedListings).where(where).limit(1);
-      if (existing.length > 0) {
-        await ctx.db.delete(savedListings).where(where);
+      const want = input.saved ?? existing.length === 0;
+      if (!want) {
+        if (existing.length > 0) await ctx.db.delete(savedListings).where(where);
         return { saved: false };
       }
-      await ctx.db.insert(savedListings).values({ userId: ctx.user.id, listingId: input.id });
+      if (existing.length === 0) {
+        await ctx.db
+          .insert(savedListings)
+          .values({ userId: ctx.user.id, listingId: input.id })
+          .onConflictDoNothing();
+      }
       return { saved: true };
     }),
 
