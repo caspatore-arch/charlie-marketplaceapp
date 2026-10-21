@@ -1,6 +1,6 @@
 # Handoff — Campus marketplace MVP (build 1, 2026‑09‑14)
 
-Working name **Campus Swap** (placeholder). This is a locally runnable prototype: a real iPhone app (Expo) talking to a real backend (Hono + tRPC + Postgres‑compatible database) with clearly labeled demo data. It is **not** an App Store release and moves **no money**.
+The app is named **Dibbs** (decided; no longer a placeholder). This is a locally runnable prototype: a real iPhone app (Expo) talking to a real backend (Hono + tRPC + Postgres‑compatible database) with clearly labeled demo data. It is **not** an App Store release and moves **no money**.
 
 ## 1. Run it on your iPhone (Expo Go)
 
@@ -159,7 +159,7 @@ Added after everything above; nothing earlier in this document was rewritten.
 |---|---|
 | `eas.json` | Added at the repo root — `development`, `preview`, `production` build profiles, plus an iOS `submit` block with three placeholders (`appleId`, `ascAppId`, `appleTeamId`) that are **not filled in** — they're the founder's Apple account details and don't exist yet. |
 | App identity (name, slug, bundle identifier, scheme, version) | Now centralized in **`app.config.ts`** (new file) instead of scattered — one commented block at the top of that file is the only place to edit any of them. `app.json` still exists and still carries the same placeholder values (some tooling reads it directly), but `app.config.ts` is what actually applies at build time. Verified with `npx expo config --type public` before and after: byte-identical output, so nothing changed behaviorally — see the report from this pass for the full diff command and result. |
-| Brand name / bundle identifier | Still **`Campus Swap (dev)`** / **`com.placeholder.campusswap`** — deliberately not decided by this pass. `app.config.ts`'s comment block explains the one-time, permanent nature of the bundle identifier (cannot change after first Apple submission) and points at `docs/APP-STORE.md`. |
+| Brand name / bundle identifier | The brand name is **decided: Dibbs** — it is no longer a placeholder, and the repo uses it throughout. The **bundle identifier is still a placeholder** awaiting the founder's confirmation; it is a separate decision. `app.config.ts`'s comment block explains the one-time, permanent nature of the bundle identifier (cannot change after first Apple submission) and points at `docs/APP-STORE.md`. |
 | `assets/icon.png` | Verified 1024×1024, RGB, **no alpha channel** — meets Apple's store-icon requirement as-is. Not regenerated. |
 | `docs/APP-STORE.md` | New — a founder-readable guide to the Apple Developer Program ($99/yr), what `eas build`/`eas submit` do, TestFlight, a drafted (placeholder) App Store listing, an App Privacy "nutrition label" table derived from `backend/db/schema.ts`, and the specific App Review guidelines this app touches (5.1.1(v) account deletion, 1.2 report/block, no IAP needed, safety-feature scrutiny). |
 | Verification run this pass | `npm run typecheck` — clean. `npm run test:e2e` — 8/8. `npx expo-doctor` — 18/21 checks pass; the 3 failures (an `app.json` schema warning for `newArchEnabled`, a missing `react-native-worklets` peer dependency, and two packages slightly behind the SDK's expected patch version) all **pre-exist this pass** and were not introduced by it — no packages were installed or changed, per this pass's constraints. |

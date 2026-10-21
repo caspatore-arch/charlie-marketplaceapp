@@ -109,7 +109,7 @@ bid.buyout            P    { listingId }           → { listingId, pricePaidCen
 bid.forListing        pub  { listingId, limit? }   → { id, listingId, amountCents, createdAt, bidder: PublicUser }[]
       Newest first. Bidders are display names only — never an email.
 bid.mine              P    –                       → { id, amountCents, createdAt, listing: ListingCard, isTopBid }[]
-listing.toggleSave    P    { id }                   → { saved: boolean }
+listing.toggleSave    P    { id, saved? }           → { saved: boolean }   (no `saved` = flip; with it = set)
 listing.saved         P    –                        → ListingCard[]
 
 conversation.list     P    –                        → { id, listing: ListingCard, otherUser, lastMessage?, unreadCount }[]

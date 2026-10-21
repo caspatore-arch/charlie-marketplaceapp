@@ -100,7 +100,7 @@ function createDb(): Db {
       statement_timeout: env.dbStatementTimeoutMs,
       // Names the connections in pg_stat_activity, which is the first place
       // anyone looks when the database is the suspect.
-      application_name: 'campus-swap',
+      application_name: 'dibbs',
     });
 
     // An idle client that errors (a database restart, a failover, an idle

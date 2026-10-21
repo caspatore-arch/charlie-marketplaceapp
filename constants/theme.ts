@@ -1,5 +1,5 @@
 /**
- * Design tokens for Campus Swap. Source of truth: docs/DESIGN.md.
+ * Design tokens for Dibbs. Source of truth: docs/DESIGN.md.
  * Keep these as plain StyleSheet-ready objects (no styling library).
  */
 import { Platform, type ViewStyle } from 'react-native';

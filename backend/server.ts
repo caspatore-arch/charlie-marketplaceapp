@@ -22,7 +22,7 @@ async function main() {
   const port = env.port;
   serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
     const lan = lanAddress();
-    console.log(`campus-swap backend (${dbKind}) listening on http://localhost:${port}`);
+    console.log(`dibbs backend (${dbKind}) listening on http://localhost:${port}`);
     console.log(`  health: http://localhost:${port}/api/health`);
     if (lan) {
       console.log(`  on your phone, set EXPO_PUBLIC_RORK_API_BASE_URL=http://${lan}:${port}`);

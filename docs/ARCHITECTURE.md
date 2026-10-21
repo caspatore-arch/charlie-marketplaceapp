@@ -1,6 +1,6 @@
 # Architecture
 
-Working name: **campus-swap** (placeholder; brand undecided). iPhone-first campus secondhand marketplace. See `docs/BRIEF.md` for the product brief, `docs/CONTRACT.md` for the data model + API contract, `docs/DESIGN.md` for the visual system.
+Name: **Dibbs** (decided). iPhone-first campus secondhand marketplace. See `docs/BRIEF.md` for the product brief, `docs/CONTRACT.md` for the data model + API contract, `docs/DESIGN.md` for the visual system.
 
 ## Stack (Rork-compatible)
 

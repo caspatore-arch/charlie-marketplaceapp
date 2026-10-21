@@ -50,7 +50,7 @@ This is new: the backend can now write uploaded photos to S3-compatible storage 
 
 Steps (Cloudflare R2):
 1. Sign up / log into Cloudflare, go to **R2** in the dashboard.
-2. Create a bucket (pick any name, e.g. `campus-swap-photos`).
+2. Create a bucket (pick any name, e.g. `dibbs-photos`).
 3. Under **R2 → Manage API Tokens**, create an API token scoped to that bucket with **read + write** permission. This gives you an **Access Key ID** and a **Secret Access Key** — copy both immediately, the secret is shown once.
 4. Your **endpoint** is shown on the bucket's page — it looks like `https://<account-id>.r2.cloudflarestorage.com`.
 5. (Optional, recommended once you're past the earliest testing) Turn on **public access** for the bucket, or put a Cloudflare custom domain in front of it, and use that URL as `S3_PUBLIC_BASE_URL` (see below) — this makes photo loading faster and cheaper because your server stops relaying every photo byte itself.
@@ -134,8 +134,8 @@ The same warning applies to the database: if `DATABASE_URL` is empty, the backen
 
 The Expo app already reads one variable for this: `EXPO_PUBLIC_RORK_API_BASE_URL`.
 
-1. Take the public URL your host gave you in step 4 (e.g. `https://campus-swap-api.onrender.com`).
-2. Set `EXPO_PUBLIC_RORK_API_BASE_URL=https://campus-swap-api.onrender.com` (no trailing slash) wherever you build/publish the app — in Rork, this is an environment variable in the project's settings; for a plain Expo build it's the `.env` used at build time.
+1. Take the public URL your host gave you in step 4 (e.g. `https://dibbs-api.onrender.com`).
+2. Set `EXPO_PUBLIC_RORK_API_BASE_URL=https://dibbs-api.onrender.com` (no trailing slash) wherever you build/publish the app — in Rork, this is an environment variable in the project's settings; for a plain Expo build it's the `.env` used at build time.
 3. Rebuild/republish the app. Because this value is baked in at build time, changing it means a new build, not just a server restart.
 
 This is exactly the same mechanism that currently points your phone at your Mac's LAN IP (`npm run env:lan`) — you're just changing it from "my laptop" to "the internet."

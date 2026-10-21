@@ -58,8 +58,8 @@ change*, not because it is right.
 | **Geocoding provider** | OpenStreetMap Nominatim (free) | Its usage policy forbids production/commercial volume. Fine for a pilot, must be swapped before real traffic. One file: `backend/geocode.ts`. |
 | **Object storage provider** | Local disk (not shippable) | Photos must move to S3-compatible storage before the app can be installed from TestFlight. See `docs/DEPLOY.md`. |
 | **Database and container host** | PGlite on your Mac | Roughly $5-10/month once hosted. See `docs/DEPLOY.md`. |
-| **Brand name** | "Campus Swap (dev)" placeholder | Needed for the App Store listing. |
-| **Bundle identifier** | `com.placeholder.campusswap` | **Cannot be changed after first submission to Apple.** Pick deliberately. |
+| **Brand name** | **Dibbs** — decided | Settled. Use it as-is for the App Store listing; nothing further is needed from you here. |
+| **Bundle identifier** | Still the `com.placeholder.*` value in `app.config.ts` | **Cannot be changed after first submission to Apple.** Pick deliberately. Still open — deciding the brand name did not decide this. |
 | **Commission rate** | 10% (`PLATFORM_FEE_PERCENT`) | On a $30 item that is $3.00 to you under direct charges. A single chargeback costs the item value plus Stripe's $15 dispute fee. |
 
 ### Things the app now does that the Terms and Privacy text does not yet mention

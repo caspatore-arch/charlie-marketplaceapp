@@ -5,9 +5,9 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * APP IDENTITY — the ONLY place in this codebase to change these five values.
  * ============================================================================
  *
- * Everything below is a deliberate placeholder. The brand name and the iOS
- * bundle identifier are the founder's decision, not something to be guessed
- * by an AI assistant or an engineer — so they have not been guessed here.
+ * The brand name is DECIDED: the app is called Dibbs (double "b" — not the
+ * dictionary spelling "dibs"). The iOS bundle identifier below is still the
+ * founder's to confirm; see the ⚠️ note under BUNDLE_IDENTIFIER.
  *
  * `app.json` still exists (Expo/EAS tooling expects a config file to be
  * present) and still carries the same placeholder identity values for
@@ -21,10 +21,18 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  *
  * - DISPLAY_NAME       The name under the app icon on a phone's home screen,
  *                       and the name shown in TestFlight / the App Store
- *                       listing. Currently "Campus Swap (dev)" — deliberately
- *                       an obvious placeholder so nobody mistakes a dev build
- *                       for a real release. Change this once the brand name
- *                       is decided.
+ *                       listing.
+ *
+ *                       ⚠️  "Dibbs" alone is ALREADY TAKEN on the App Store by
+ *                       at least two unrelated apps, including a local-deals
+ *                       app from Dibbs Technologies LLC and a collectibles
+ *                       marketplace from Collectible Holdings Inc. App Store
+ *                       names must be unique, so the *store listing* name will
+ *                       have to be differentiated (e.g. "Dibbs — Campus
+ *                       Resale"). That is a separate field in App Store
+ *                       Connect; this constant is the home-screen name, which
+ *                       has no uniqueness requirement and can stay "Dibbs".
+ *                       See docs/APP-STORE.md.
  *
  * - SLUG                The URL-friendly project identifier Expo/EAS uses
  *                       internally (project dashboard URL, `expo start`
@@ -38,18 +46,19 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  *                       certificates, in-app purchase products.
  *
  *                       ⚠️  A bundle identifier CANNOT be changed after the
- *                       app's first submission to Apple. "com.placeholder
- *                       .campusswap" will build and install fine for
- *                       internal/TestFlight testing — there is no rush to
- *                       change it for that — but it MUST be your real,
- *                       final choice before you ever run
- *                       `eas submit --platform ios` against a
- *                       production build. See docs/APP-STORE.md.
+ *                       app's first submission to Apple. "com.aspatore.dibbs"
+ *                       is a reasonable default and will build and install
+ *                       fine for internal/TestFlight testing — but CONFIRM it
+ *                       is what you want (e.g. swap the middle segment for a
+ *                       real company name if you incorporate) before you ever
+ *                       run `eas submit --platform ios` against a production
+ *                       build. See docs/APP-STORE.md.
  *
  * - SCHEME              The URL scheme used for deep links inside the app
- *                       (e.g. "campusswap://listing/123"). Should generally
- *                       match the brand once one is chosen; not visible to
- *                       users otherwise.
+ *                       ("dibbs://listing/123"). Not visible to users, but it
+ *                       is NOT free-floating: `app/listing/[id].tsx` builds
+ *                       share links with this exact prefix. Change one and
+ *                       you must change the other, or shared links die.
  *
  * - VERSION             The user-facing version string (e.g. "1.0.0") shown
  *                       in the App Store listing. This is separate from the
@@ -61,10 +70,10 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * Full submission walkthrough: docs/APP-STORE.md.
  * ============================================================================
  */
-const DISPLAY_NAME = 'Campus Swap (dev)'; // 🔴 PLACEHOLDER — brand name undecided, founder's call
-const SLUG = 'campus-swap';
-const BUNDLE_IDENTIFIER = 'com.placeholder.campusswap'; // 🔴 PLACEHOLDER — cannot change after first Apple submission
-const SCHEME = 'campusswap';
+const DISPLAY_NAME = 'Dibbs';
+const SLUG = 'dibbs';
+const BUNDLE_IDENTIFIER = 'com.aspatore.dibbs'; // 🟡 CONFIRM BEFORE FIRST APPLE SUBMISSION — permanent after that
+const SCHEME = 'dibbs'; // must match the dibbs:// share links in app/listing/[id].tsx
 const VERSION = '1.0.0';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({

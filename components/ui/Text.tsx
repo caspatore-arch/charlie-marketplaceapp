@@ -1,5 +1,5 @@
 /**
- * Themed text. Usage: <Text variant="title">Campus Swap</Text>
+ * Themed text. Usage: <Text variant="title">Dibbs</Text>
  * Defaults to `body`. `color` accepts any theme color key or a raw hex string.
  */
 import React from 'react';

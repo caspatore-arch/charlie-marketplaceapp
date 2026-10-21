@@ -30,7 +30,7 @@ import type { AppRouter } from '../backend/trpc/app-router';
 
 /* ------------------------------------------------- isolated env (set first) */
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-swap-geo-check-'));
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dibbs-geo-check-'));
 process.env.PGLITE_DIR = path.join(tempRoot, 'pg');
 process.env.UPLOADS_DIR = path.join(tempRoot, 'uploads');
 process.env.PORT = '0';

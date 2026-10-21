@@ -15,7 +15,7 @@ import type { AppRouter } from '@/backend/trpc/app-router';
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const AUTH_TOKEN_KEY = 'campus-swap-auth-token';
+const AUTH_TOKEN_KEY = 'dibbs-auth-token';
 
 /** Base URL of the backend API (no trailing slash), e.g. http://localhost:3000. */
 export const apiBaseUrl: string =

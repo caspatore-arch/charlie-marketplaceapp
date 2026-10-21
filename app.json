@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "Campus Swap (dev)",
-    "slug": "campus-swap",
+    "name": "Dibbs",
+    "slug": "dibbs",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.placeholder.campusswap",
+      "bundleIdentifier": "com.aspatore.dibbs",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Choose photos of the item you are listing.",
         "NSCameraUsageDescription": "Take photos of the item you are listing."
@@ -34,7 +34,7 @@
       "expo-splash-screen",
       "expo-notifications"
     ],
-    "scheme": "campusswap",
+    "scheme": "dibbs",
     "newArchEnabled": true,
     "experiments": {
       "typedRoutes": true

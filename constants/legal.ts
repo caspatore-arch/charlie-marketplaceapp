@@ -30,7 +30,7 @@
  */
 export const MINIMUM_AGE = 18; // [FOUNDER TO CONFIRM]
 
-export const LEGAL_ENTITY_NAME = '[FOUNDER TO CONFIRM: legal entity name, e.g. "Campus Swap, Inc." or the founder\'s own name if unincorporated]';
+export const LEGAL_ENTITY_NAME = '[FOUNDER TO CONFIRM: legal entity name, e.g. "Dibbs, Inc." or the founder\'s own name if unincorporated]';
 export const OPERATOR_CONTACT_EMAIL = '[FOUNDER TO CONFIRM: operator contact email, e.g. support@example.com]';
 export const GOVERNING_JURISDICTION = '[FOUNDER TO CONFIRM: governing law / jurisdiction, e.g. "the State of Arizona, USA"]';
 export const DATA_RETENTION_PERIOD = '[FOUNDER TO CONFIRM: how long account, message, and transaction data is kept after account closure]';

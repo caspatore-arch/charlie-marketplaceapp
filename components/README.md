@@ -3,7 +3,7 @@
 ## UI primitives (`components/ui/`)
 
 - `Screen` — `<Screen scroll><YourContent /></Screen>` — safe-area + themed background wrapper.
-- `Text` — `<Text variant="title">Campus Swap</Text>` — themed text with the DESIGN.md type scale.
+- `Text` — `<Text variant="title">Dibbs</Text>` — themed text with the DESIGN.md type scale.
 - `Button` — `<Button title="Send request" onPress={submit} loading={isPending} />`
 - `Chip` — `<Chip label="Clothing" selected={cat === 'clothing'} onPress={() => setCat('clothing')} />`
 - `Badge` — `<Badge kind="demo" />` / `<Badge kind="verified" />` / `<Badge kind="status" label="Reserved" tone="warning" />`

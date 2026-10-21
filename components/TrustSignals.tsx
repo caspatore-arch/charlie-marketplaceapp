@@ -59,7 +59,7 @@ export function TrustBlock({ summary, style }: TrustSignalsProps) {
   return (
     <Card style={style}>
       <Text variant="label" weight="600">
-        Activity on Campus Swap
+        Activity on Dibbs
       </Text>
 
       <View style={styles.row}>

@@ -159,7 +159,7 @@ export default function ListingDetailScreen() {
 
   const onShare = useCallback(async () => {
     if (!listing) return;
-    const link = `campusswap://listing/${listing.id}`;
+    const link = `dibbs://listing/${listing.id}`;
     try {
       await Share.share({
         title: listing.title,

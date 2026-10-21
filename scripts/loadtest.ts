@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-swap-load-'));
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dibbs-load-'));
 if (!process.env.DATABASE_URL) {
   process.env.PGLITE_DIR = path.join(tempRoot, 'pg');
 }
@@ -101,7 +101,7 @@ async function main(): Promise<number> {
   type AppRouter = import('../backend/trpc/app-router').AppRouter;
 
   const sizing = sizingForScale(SCALE);
-  console.log(`\ncampus-swap load test — driver: ${dbKind}, scale ${SCALE}`);
+  console.log(`\ndibbs load test — driver: ${dbKind}, scale ${SCALE}`);
   console.log(
     `dataset: ${sizing.users.toLocaleString()} users, ${sizing.listings.toLocaleString()} listings ` +
       `(${Math.round(sizing.listings * sizing.activeShare).toLocaleString()} active)\n`,

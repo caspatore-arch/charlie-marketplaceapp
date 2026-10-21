@@ -45,7 +45,7 @@ export class StripeGateway implements PaymentGateway {
   constructor(secretKey: string) {
     this.stripe = new Stripe(secretKey, {
       // Identifies this integration in Stripe's dashboard logs.
-      appInfo: { name: 'campus-swap', version: '1.0.0' },
+      appInfo: { name: 'dibbs', version: '1.0.0' },
     });
   }
 

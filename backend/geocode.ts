@@ -39,7 +39,7 @@ export class GeocodeError extends Error {
   }
 }
 
-const USER_AGENT = 'CampusSwap/1.0 (student campus marketplace prototype; contact: founder@campus-swap.example)';
+const USER_AGENT = 'Dibbs/1.0 (student campus marketplace prototype; contact: founder@dibbs.example)';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const TIMEOUT_MS = 4_000;
 

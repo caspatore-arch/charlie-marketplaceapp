@@ -14,10 +14,12 @@ those are handled and focuses on the app-store-specific mechanics.
 
 ## 0. Two things this document will not do
 
-1. **Pick your app name or bundle identifier.** Those are your decisions —
-   see `app.config.ts` (the single file that controls both) for exactly what
-   to change and why. The bundle identifier **cannot be changed after your
-   first submission to Apple**, so decide it deliberately, not in a hurry.
+1. **Pick your bundle identifier.** That one is still your decision — see
+   `app.config.ts` for exactly what to change and why. The bundle identifier
+   **cannot be changed after your first submission to Apple**, so decide it
+   deliberately, not in a hurry. (The app *name* is already decided — it is
+   **Dibbs** — but that does not settle the bundle identifier, which is a
+   separate, permanent choice.)
 2. **Run a build or submit one for you.** This Mac has no Apple Developer
    account, no Xcode, and no registered EAS project. Every `eas` command
    below is something *you* run, the first time, from a terminal — not
@@ -144,10 +146,10 @@ in later, not a hard blocker to get a build going.
 ## 5. Drafted App Store listing (edit before you use it)
 
 Everything below is a first draft for you to edit — none of it should be
-treated as final copy. Anywhere the brand name would go, it says
-`[APP NAME]` because that's undecided (see `app.config.ts`).
+treated as final copy. The brand name is decided, so it appears as **Dibbs**
+throughout.
 
-> **Name:** [APP NAME] — placeholder, brand undecided
+> **Name:** Dibbs
 >
 > **Subtitle** (30 characters max): `Buy & sell with your campus`
 >
@@ -157,7 +159,7 @@ treated as final copy. Anywhere the brand name would go, it says
 >
 > **Description:**
 >
-> [APP NAME] is a secondhand marketplace built for your campus. Browse
+> Dibbs is a secondhand marketplace built for your campus. Browse
 > listings from other verified-campus-email students, message a seller
 > directly, and agree on a time and place to meet up in person.
 >
@@ -168,7 +170,7 @@ treated as final copy. Anywhere the brand name would go, it says
 > - Simple handoff confirmation when the item changes hands
 > - Report or block another user at any time
 >
-> [APP NAME] connects you with other members of your campus email
+> Dibbs connects you with other members of your campus email
 > community, but it does not verify anyone's identity, and it does not
 > process or protect payment for items — buyers and sellers arrange payment
 > and the handoff themselves, in person. Always meet in a public place.
@@ -293,9 +295,11 @@ checking for.
 
 ## 8. Before you submit for real — a short checklist
 
-- [ ] `app.config.ts`'s `DISPLAY_NAME` and `BUNDLE_IDENTIFIER` changed from
-      their placeholders to your real, final choices (bundle identifier
-      cannot change after this point).
+- [ ] `app.config.ts`'s `DISPLAY_NAME` reads the decided brand name, **Dibbs**
+      (no `(dev)` suffix on a store build).
+- [ ] `app.config.ts`'s `BUNDLE_IDENTIFIER` changed from its placeholder to
+      your real, final choice (it cannot change after this point). Still
+      undecided — the brand name being settled does not settle this.
 - [ ] Every item in `docs/LEGAL-TODO.md`'s "What specifically blocks App
       Store submission" section resolved: hosted privacy policy URL, App
       Privacy questionnaire (§6 above is your starting draft), age rating,
@@ -305,7 +309,7 @@ checking for.
 - [ ] `assets/icon.png` still 1024×1024 with no alpha channel if it's ever
       regenerated (verified as of this writing — see the report that
       accompanied this document).
-- [ ] The App Store listing draft in §5 rewritten with your real app name
-      and reviewed against the "what NOT to say" rules.
+- [ ] The App Store listing draft in §5 reviewed against the "what NOT to
+      say" rules before you paste it into App Store Connect.
 - [ ] `docs/HANDOFF.md` §3's "Simulated or unfinished" table re-read in
       full — none of the App Store work above turns any of those items on.

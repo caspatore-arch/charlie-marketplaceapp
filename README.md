@@ -1,4 +1,4 @@
-# Campus Swap (working name)
+# Dibbs
 
 iPhone‑first marketplace for college students to buy and sell small secondhand items nearby, with fast same‑day campus meetups. Prototype — demo data, simulated payments, simulated email delivery.
 
