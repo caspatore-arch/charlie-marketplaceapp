@@ -4,12 +4,13 @@
  * loading, and empty/error states. Works signed-out — every query here is
  * `listing.feed` (public) plus `campus.list` (public).
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { LayoutGrid, Layers, Search } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
+import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { ListingCard } from '@/components/ListingCard';
@@ -27,6 +28,30 @@ import { formatPrice } from '@/utils/format';
 import type { ListingCard as ListingCardType } from '@/types';
 
 type ViewMode = 'grid' | 'swipe';
+
+const keyExtractor = (item: ListingCardType) => item.id;
+
+/**
+ * One grid cell. Memoized so a parent state change (typing in search, opening
+ * a sheet, a fetch flag flipping) does not re-render every visible card: all
+ * props here are primitives or stable references, and `onOpen` is a single
+ * callback shared by every cell (ListingCard calls it with its own id).
+ */
+const GridCell = memo(function GridCell({
+  item,
+  maxWidth,
+  onOpen,
+}: {
+  item: ListingCardType;
+  maxWidth: `${number}%`;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <View style={[styles.gridCell, { maxWidth }]}>
+      <ListingCard listing={item} onPressListing={onOpen} />
+    </View>
+  );
+});
 
 export default function BrowseScreen() {
   const router = useRouter();
@@ -175,9 +200,48 @@ export default function BrowseScreen() {
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = feedQuery;
   // Stable so the deck's near-end effect doesn't re-fire (and re-request a
   // page that just failed) on every render.
+  // The ref closes the gap the flags leave: onEndReached can fire twice before
+  // a re-render flips isFetchingNextPage, and fetchNextPage cancels and
+  // restarts an in-flight request by default.
+  const loadingMoreRef = useRef(false);
   const loadMore = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+    if (loadingMoreRef.current || !hasNextPage || isFetchingNextPage) return;
+    loadingMoreRef.current = true;
+    fetchNextPage().finally(() => {
+      loadingMoreRef.current = false;
+    });
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Scroll position. Tab screens stay mounted under a pushed listing, but on
+  // web the hidden screen's scroller can come back at 0, so remember the
+  // offset (a ref: no re-renders while scrolling) and restore it on focus.
+  const listRef = useRef<FlatList<ListingCardType>>(null);
+  const scrollOffset = useRef(0);
+  const onScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
+    scrollOffset.current = e.nativeEvent.contentOffset.y;
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const y = scrollOffset.current;
+      if (y <= 0) return;
+      const handle = requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: y, animated: false }));
+      return () => cancelAnimationFrame(handle);
+    }, []),
+  );
+  // A different feed (new filters/search) or column count starts at the top.
+  useEffect(() => {
+    scrollOffset.current = 0;
+  }, [deckResetKey, numColumns]);
+
+  const onRefresh = useCallback(() => {
+    feedQuery.refetch();
+  }, [feedQuery.refetch]);
+  const renderItem = useCallback(
+    ({ item }: { item: ListingCardType }) => (
+      <GridCell item={item} maxWidth={`${(100 / numColumns).toFixed(4)}%` as `${number}%`} onOpen={goToListing} />
+    ),
+    [numColumns, goToListing],
+  );
 
   const controlsBlock = (
     <View style={styles.controls}>
@@ -233,9 +297,7 @@ export default function BrowseScreen() {
     body = (
       <View style={styles.bodyPad}>
         {headerBlock}
-        <View style={styles.padHorizontal}>
-          <BrowseGridSkeleton />
-        </View>
+        <BrowseGridSkeleton numColumns={numColumns} />
       </View>
     );
   } else if (campusQuery.isError) {
@@ -249,12 +311,10 @@ export default function BrowseScreen() {
     body = (
       <View style={styles.bodyPad}>
         {headerBlock}
-        <View style={styles.padHorizontal}>
-          <BrowseGridSkeleton />
-        </View>
+        <BrowseGridSkeleton numColumns={numColumns} />
       </View>
     );
-  } else if (feedQuery.isError) {
+  } else if (feedQuery.isError && items.length === 0) {
     body = (
       <View style={styles.bodyPad}>
         {headerBlock}
@@ -275,10 +335,6 @@ export default function BrowseScreen() {
       />
     );
   } else {
-    // gridCell maxWidth is 1/numColumns so a lone item in the last row never
-    // stretches to full width. It must be recalculated alongside numColumns.
-    const cellMaxWidth = `${(100 / numColumns).toFixed(4)}%` as `${number}%`;
-
     body = (
       <FlatList
         // key includes numColumns: FlatList cannot change numColumns without
@@ -286,37 +342,54 @@ export default function BrowseScreen() {
         // if numColumns changes on an existing instance. The key forces a
         // clean remount when the window is resized across a breakpoint.
         key={`grid-${numColumns}`}
+        ref={listRef}
         data={items}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
         numColumns={numColumns}
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={styles.gridContent}
         ListHeaderComponent={headerBlock}
-        renderItem={({ item }) => (
-          <View style={[styles.gridCell, { maxWidth: cellMaxWidth }]}>
-            <ListingCard listing={item} onPress={() => goToListing(item.id)} />
-          </View>
-        )}
+        renderItem={renderItem}
         refreshControl={
           <RefreshControl
             refreshing={feedQuery.isRefetching && !feedQuery.isFetchingNextPage}
-            onRefresh={() => feedQuery.refetch()}
+            onRefresh={onRefresh}
             tintColor={colors.accent}
           />
         }
-        onEndReachedThreshold={0.4}
-        onEndReached={() => {
-          if (feedQuery.hasNextPage && !feedQuery.isFetchingNextPage) feedQuery.fetchNextPage();
-        }}
+        // Threshold is in viewport lengths: start the next page ~2 screens
+        // before the end so it has landed by the time you get there.
+        onEndReachedThreshold={2}
+        onEndReached={loadMore}
+        onScroll={onScroll}
+        scrollEventThrottle={32}
         keyboardDismissMode="on-drag"
-        initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={7}
+        // Counts are rows (numColumns cells each). No getItemLayout: row
+        // height is photo (width-dependent 4:5) + 2-5 text lines, so a fixed
+        // guess would be wrong and cause jumps; memoized cells keep a wide
+        // window cheap instead.
+        initialNumToRender={5}
+        maxToRenderPerBatch={6}
+        updateCellsBatchingPeriod={40}
+        windowSize={11}
         removeClippedSubviews={Platform.OS === 'android'}
         ListFooterComponent={
           feedQuery.isFetchingNextPage ? (
             <View style={styles.footerLoading}>
-              <BrowseGridSkeleton />
+              <BrowseGridSkeleton numColumns={numColumns} rows={1} />
+            </View>
+          ) : feedQuery.isFetchNextPageError ? (
+            <View style={styles.footerNote}>
+              <Text variant="body" color="inkMuted" style={styles.footerText}>
+                Couldn&apos;t load more.
+              </Text>
+              <Button title="Try again" variant="secondary" onPress={loadMore} />
+            </View>
+          ) : !feedQuery.hasNextPage && items.length > 0 ? (
+            <View style={styles.footerNote}>
+              <Text variant="label" color="inkMuted" style={styles.footerText}>
+                That&apos;s everything on {campus?.name ?? 'campus'} right now.
+              </Text>
             </View>
           ) : null
         }
@@ -403,5 +476,7 @@ const styles = StyleSheet.create({
   // `1/numColumns %` so a lone last-row cell never stretches to full width.
   // The static 50% is gone — see the renderItem inline style above.
   gridCell: { flex: 1 },
-  footerLoading: { paddingHorizontal: space.lg, paddingTop: space.md },
+  footerLoading: { paddingTop: space.md },
+  footerNote: { alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingTop: space.lg },
+  footerText: { textAlign: 'center' },
 });

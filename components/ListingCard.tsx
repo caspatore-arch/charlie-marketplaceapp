@@ -2,7 +2,7 @@
  * 2-col grid card for Browse/Saved/Profile grids.
  * Usage: <ListingCard listing={item} onPress={() => router.push(`/listing/${item.id}`)} />
  */
-import React from 'react';
+import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Clock3 } from 'lucide-react-native';
@@ -13,11 +13,18 @@ import { PriceText } from './ui/PriceText';
 import { Avatar } from './ui/Avatar';
 import { resolveMediaUrl } from '@/lib/trpc';
 import { conditionLabel, formatPickupWindow } from '@/utils/format';
+import { useReduceMotion } from '@/components/browse/useReduceMotion';
 import type { ListingCard as ListingCardType } from '@/types';
 
 export interface ListingCardProps {
   listing: ListingCardType;
-  onPress: () => void;
+  /** Fine for one-off callers, but an inline arrow defeats the memo below. */
+  onPress?: () => void;
+  /**
+   * Preferred in lists: pass ONE stable callback for the whole grid and the
+   * card calls it with its own id, so the memo holds across parent renders.
+   */
+  onPressListing?: (id: string) => void;
   /**
    * Hide the seller line where it is already implied by context — your own
    * "My listings" grid, or "More from this seller" under that seller's item.
@@ -26,8 +33,14 @@ export interface ListingCardProps {
   showSeller?: boolean;
 }
 
-export function ListingCard({ listing, onPress, showSeller = true }: ListingCardProps) {
+function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true }: ListingCardProps) {
   const price = listing.priceCents;
+  const reduceMotion = useReduceMotion();
+  const id = listing.id;
+  const handlePress = useCallback(() => {
+    if (onPressListing) onPressListing(id);
+    else onPress?.();
+  }, [onPressListing, onPress, id]);
 
   // The pickup line is the card's reason to exist: it answers "when and where
   // could I actually get this" from the grid, without opening the listing or
@@ -45,15 +58,24 @@ export function ListingCard({ listing, onPress, showSeller = true }: ListingCard
       accessibilityLabel={`${listing.title}, ${conditionLabel(listing.condition)}, price $${(price / 100).toFixed(0)}${
         pickupLabel ? `, pickup ${pickupLabel}` : ', no pickup times listed'
       }`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
+      onPress={handlePress}
+      // Feedback is a plain style swap on press-in (no animation to wait on),
+      // so it lands on the first frame. Scale is dropped under Reduce Motion.
+      style={({ pressed }) => [
+        styles.wrap,
+        pressed && (reduceMotion ? styles.pressedStill : styles.pressed),
+      ]}
     >
       <View style={styles.photoWrap}>
         <Image
           source={{ uri: resolveMediaUrl(listing.coverPhotoUrl) }}
           style={styles.photo}
           contentFit="cover"
-          transition={150}
+          // The photoWrap is a fixed 4:5 box with a muted fill, so a late
+          // image fades over a stable block instead of shifting layout.
+          transition={reduceMotion ? 0 : 220}
+          cachePolicy="memory-disk"
+          recyclingKey={listing.id}
         />
         {listing.seller.isDemo ? (
           <View style={styles.demoBadge}>
@@ -102,7 +124,8 @@ export function ListingCard({ listing, onPress, showSeller = true }: ListingCard
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, borderRadius: radius.md, overflow: 'hidden' },
-  pressed: { opacity: 0.9 },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.97 }] },
+  pressedStill: { opacity: 0.85 },
   photoWrap: {
     aspectRatio: 4 / 5,
     borderRadius: radius.md,
@@ -118,5 +141,12 @@ const styles = StyleSheet.create({
   sellerRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: 2 },
   sellerName: { flexShrink: 1 },
 });
+
+/**
+ * Memoized: `listing` objects keep their identity across pages (react-query
+ * structural sharing), so a card only re-renders when its own data or its
+ * callback props change, not on every parent state change.
+ */
+export const ListingCard = memo(ListingCardImpl);
 
 export default ListingCard;
