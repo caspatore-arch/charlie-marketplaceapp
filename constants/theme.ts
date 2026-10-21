@@ -4,25 +4,67 @@
  */
 import { Platform, type ViewStyle } from 'react-native';
 
+/**
+ * Palette derived from the Dibbs logo (white brush script on vermilion).
+ *
+ * The logo red was sampled from the artwork itself, not guessed:
+ * assets/branding/*.png decode to #ee362c / #ef3b2f / #ed4234 — the same
+ * intended colour three times, with generation noise, since the marks were
+ * produced by an image model rather than drawn as vectors. `brand` below is
+ * the single canonical value; do not re-sample a PNG for a new one.
+ *
+ * THE RULE THAT SHAPES THIS WHOLE PALETTE: the logo red is NOT accessible as
+ * a small-text background. White on #EE3B30 is 3.96:1 — fine for a logo and
+ * for large text or graphics (3:1), but under the 4.5:1 WCAG AA floor for
+ * normal-size text. So the red is split in two:
+ *
+ *   brand   #EE3B30  the real logo red. Splash, app icon, the logo lockup,
+ *                    large brand surfaces. White on it only at display sizes.
+ *   accent  #DE2F26  the interactive red: buttons, active tab, links. Deeper
+ *                    by just enough to clear AA for white button labels
+ *                    (4.63:1). Beside the brand red nobody reads them as two
+ *                    colours, which is the point.
+ *
+ * Every value here was verified with a real contrast calculation, not by eye.
+ */
 export const colors = {
-  bg: '#FAF8F5',
+  // Warm near-white, biased very slightly red so the ground belongs to the
+  // brand rather than sitting under it as generic off-white.
+  bg: '#FCF8F7',
   surface: '#FFFFFF',
-  surfaceMuted: '#F1EDE7',
+  surfaceMuted: '#F5F0EE',
   ink: '#161513',
   inkMuted: '#6F6A62',
-  // 4.62:1 on `bg`, 4.90:1 on `surface` — WCAG AA for small text. It sits close
-  // to `inkMuted` on purpose: on a near-white ground a genuinely faint grey
-  // cannot reach 4.5:1. Do not lighten this back to a prettier value (it was
-  // #A8A29A at 2.4:1, unreadable for low-vision users).
-  inkFaint: '#767068',
-  line: '#E6E1DA',
-  accent: '#C8442B',
-  accentSoft: '#FBE9E4',
+  // Passes AA (>=4.5:1) on EVERY surface it can land on: bg 5.22, surface
+  // 5.51, surfaceMuted 4.87, accentSoft 4.75. The previous #767068 was tuned
+  // against `bg` alone and silently failed on the muted surfaces (4.33 and
+  // 4.22) — this darkening is barely perceptible and fixes that. Never
+  // lighten it for looks; it was #A8A29A at 2.4:1 once, unreadable.
+  inkFaint: '#6E6860',
+  line: '#E8E1DE',
+
+  /** The literal logo red. Large text / graphics / brand surfaces only. */
+  brand: '#EE3B30',
+  /** Interactive red. White text on this is AA at any size (4.63:1). */
+  accent: '#DE2F26',
+  /** Pressed state for accent surfaces (5.72:1 with white). */
+  accentPressed: '#C4281F',
+  /** Tinted background for accent chips and banners. */
+  accentSoft: '#FDEAE8',
+  /** Text/icons ON accentSoft. Plain `accent` on that tint is 3.99:1 — it
+   *  FAILS. Use this instead (6.28:1) anywhere red text sits on a red tint. */
+  accentInk: '#A82018',
+
   success: '#2E7D4F',
   successSoft: '#E4F3EA',
   warning: '#9A6B00',
   warningSoft: '#FBF1D6',
-  danger: '#B3261E',
+  // Deliberately a darker, bluer crimson than `accent`. With a red brand, a
+  // destructive action can no longer be signalled by redness alone — it reads
+  // as just another branded control. Destructive affordances must therefore
+  // also carry an explicit verb ("Delete", "Cancel meetup") or an icon; this
+  // colour is a reinforcement, never the only signal.
+  danger: '#9B1C1C',
   demo: '#5B4FCF',
   demoSoft: '#ECEAFB',
   white: '#FFFFFF',
