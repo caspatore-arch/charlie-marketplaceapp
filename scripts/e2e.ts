@@ -836,6 +836,74 @@ async function main(): Promise<number> {
 
   /* ------------------------------------------------------------------ 9 */
 
+  await criterion('11. An offer carries a meetup time and spot the seller actually offered', async () => {
+    const listing = await maya.listing.create.mutate({
+      title: 'Bookshelf (offer proposal test)',
+      category: 'dorm',
+      condition: 'good',
+      priceCents: 8000,
+      isSellToday: false,
+      photoUrls: PHOTOS,
+      spotIds: [spotAId],
+      windows: [stdWindow()],
+    });
+    const goodTime = alignedIn(2);
+
+    // A spot the seller did not choose is refused.
+    const badSpot = await expectTrpcError('BAD_REQUEST', () =>
+      jordan.offer.create.mutate({
+        listingId: listing.id,
+        amountCents: 6000,
+        proposedStartsAt: goodTime,
+        proposedSpotId: spotBId,
+      }),
+    );
+    assert(/spot/i.test(badSpot), `the spot refusal should say so: ${badSpot}`);
+    // A time outside every window is refused (window ends ~10h out).
+    await expectTrpcError('BAD_REQUEST', () =>
+      jordan.offer.create.mutate({
+        listingId: listing.id,
+        amountCents: 6000,
+        proposedStartsAt: alignedIn(16),
+        proposedSpotId: spotAId,
+      }),
+    );
+    // A time in the past is refused.
+    await expectTrpcError('BAD_REQUEST', () =>
+      jordan.offer.create.mutate({
+        listingId: listing.id,
+        amountCents: 6000,
+        proposedStartsAt: new Date(Math.floor((Date.now() - 2 * HOUR_MS) / SLOT_MS) * SLOT_MS),
+        proposedSpotId: spotAId,
+      }),
+    );
+    // A time off the 30-minute grid is refused.
+    await expectTrpcError('BAD_REQUEST', () =>
+      jordan.offer.create.mutate({
+        listingId: listing.id,
+        amountCents: 6000,
+        proposedStartsAt: new Date(goodTime.getTime() + 7 * 60_000),
+        proposedSpotId: spotAId,
+      }),
+    );
+    // Time without a spot (or the reverse) is refused.
+    await expectTrpcError('BAD_REQUEST', () =>
+      jordan.offer.create.mutate({ listingId: listing.id, amountCents: 6000, proposedStartsAt: goodTime }),
+    );
+
+    // None of the refusals left an open offer behind; a valid proposal works.
+    const ok = await jordan.offer.create.mutate({
+      listingId: listing.id,
+      amountCents: 6000,
+      message: 'Can carry it myself',
+      proposedStartsAt: goodTime,
+      proposedSpotId: spotAId,
+    });
+    assertEqual(ok.status, 'pending', 'a valid proposal creates a pending offer');
+    assert(/Proposed meetup:/.test(ok.message ?? ''), 'the proposal is recorded on the offer');
+    assert((ok.message ?? '').includes('Can carry it myself'), "the buyer's note is kept");
+  });
+
   await criterion('9. Reporting, blocking and access controls hold', async () => {
     // Access control first, while everyone can still talk to everyone.
     await expectTrpcError('FORBIDDEN', () =>

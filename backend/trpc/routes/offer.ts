@@ -20,15 +20,17 @@ import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
-import { listings, offers, users, type Offer } from '../../db/schema';
+import { availabilityWindows, campuses, listingSpots, listings, meetupSpots, offers, users, type Offer } from '../../db/schema';
 import { notifyOfferEvent } from '../../notifications/events';
 import {
+  AVAILABILITY_HORIZON_MS,
   LEGACY_AUCTION_MESSAGE,
   OFFER_HOLD_MS,
   applyExpiry,
   applyExpiryForRead,
   isBlockedBetween,
   isUniqueViolation,
+  slotStartsFor,
   toListingCards,
   toPublicUser,
 } from '../lib';
@@ -82,6 +84,13 @@ export const offerRouter = router({
         listingId: z.uuid(),
         amountCents: z.number().int().max(5_000_00, 'Offers are capped at $5,000.'),
         message: z.string().trim().max(280).optional(),
+        /**
+         * The meetup the buyer proposes with the price: a start time and one
+         * of the seller's spots. Both or neither. When present, both are
+         * checked against the seller's real windows and chosen spots.
+         */
+        proposedStartsAt: z.coerce.date().optional(),
+        proposedSpotId: z.uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -111,6 +120,51 @@ export const offerRouter = router({
         });
       }
 
+      // Price and meetup are one proposal: validate the time and place on the
+      // server so a time or spot the seller did not offer is never accepted.
+      let proposalLine: string | null = null;
+      if ((input.proposedStartsAt == null) !== (input.proposedSpotId == null)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Pick both a meetup time and a meetup spot, or neither.',
+        });
+      }
+      if (input.proposedStartsAt && input.proposedSpotId) {
+        const startsAt = input.proposedStartsAt;
+        const [windows, [spotRow], [campus]] = await Promise.all([
+          ctx.db.select().from(availabilityWindows).where(eq(availabilityWindows.listingId, listing.id)),
+          ctx.db
+            .select({ name: meetupSpots.name })
+            .from(listingSpots)
+            .innerJoin(meetupSpots, eq(meetupSpots.id, listingSpots.spotId))
+            .where(and(eq(listingSpots.listingId, listing.id), eq(listingSpots.spotId, input.proposedSpotId))),
+          ctx.db.select({ timezone: campuses.timezone }).from(campuses).where(eq(campuses.id, listing.campusId)),
+        ]);
+        if (!spotRow) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'The seller does not meet at that spot.' });
+        }
+        const slotOk = slotStartsFor(windows, {
+          now,
+          until: new Date(now.getTime() + AVAILABILITY_HORIZON_MS),
+        }).some((d) => d.getTime() === startsAt.getTime());
+        if (!slotOk) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Pick a time the seller is available. Their times may have changed.',
+          });
+        }
+        const when = new Intl.DateTimeFormat('en-US', {
+          timeZone: campus?.timezone,
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        }).format(startsAt);
+        proposalLine = `Proposed meetup: ${when} at ${spotRow.name}.`;
+      }
+      const storedMessage = [input.message, proposalLine].filter(Boolean).join('\n\n') || null;
+
       try {
         const [created] = await ctx.db
           .insert(offers)
@@ -120,7 +174,7 @@ export const offerRouter = router({
             sellerId: listing.sellerId,
             amountCents: input.amountCents,
             askingPriceCents: listing.priceCents,
-            message: input.message || null,
+            message: storedMessage,
             status: 'pending',
             // A pending offer can never outlive the listing.
             expiresAt: listing.expiresAt ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),

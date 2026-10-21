@@ -638,10 +638,19 @@ export default function ListingDetailScreen() {
         askingPriceCents={listing.priceCents}
         submitting={createOfferMutation.isPending}
         serverError={offerError}
-        onSubmit={(amountCents, message) => {
+        windows={listing.availabilityWindows}
+        spots={listing.spots}
+        timeZone={timeZone}
+        onSubmit={(amountCents, message, proposal) => {
           if (!id) return;
           setOfferError(null);
-          createOfferMutation.mutate({ listingId: id, amountCents, message });
+          createOfferMutation.mutate({
+            listingId: id,
+            amountCents,
+            message,
+            proposedStartsAt: proposal.startsAt,
+            proposedSpotId: proposal.spotId,
+          });
         }}
       />
 
