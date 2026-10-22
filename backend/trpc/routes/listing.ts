@@ -13,6 +13,8 @@ import {
   savedListings,
 } from '../../db/schema';
 import { enqueueListingPosted } from '../../sms/outbox';
+import { ListingDraftError, draftListingFromPhotos } from '../../ai/listing-draft';
+import { priceGuide } from '../../price-guide';
 import {
   AVAILABILITY_HORIZON_MS,
   LISTING_LIFETIME_MS,
@@ -509,4 +511,57 @@ export const listingRouter = router({
       rows.map((r) => r.listing),
     );
   }),
+
+  /**
+   * Sell form "Fill in from photos". Reads the photos back from upload
+   * storage and drafts the fields. Simulated unless LISTING_AI_MODE=live.
+   * Capped per user because each live call costs money.
+   */
+  draftFromPhotos: campusVerifiedProcedure
+    .input(z.object({ photoUrls: z.array(z.string().min(1).max(500)).min(1).max(4) }))
+    .mutation(async ({ ctx, input }) => {
+      if (!takeDraftAllowance(ctx.user.id)) {
+        throw new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message: 'You have used autofill a lot this hour. Fill in the details yourself, or try again later.',
+        });
+      }
+      try {
+        return await draftListingFromPhotos(input.photoUrls);
+      } catch (err) {
+        if (err instanceof ListingDraftError) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  /** Average price of similar items, for the Sell form's price bar. */
+  priceGuide: protectedProcedure
+    .input(
+      z.object({
+        category: categorySchema,
+        title: z.string().max(120).optional(),
+        excludeListingId: z.uuid().optional(),
+      }),
+    )
+    .query(({ ctx, input }) => priceGuide(ctx.db, input)),
 });
+
+/* -------------------------------------------- autofill per-user allowance */
+
+const DRAFTS_PER_HOUR = 15;
+const draftUse = new Map<string, number[]>();
+
+/** In-memory, single-instance like backend/ratelimit.ts. */
+function takeDraftAllowance(userId: string): boolean {
+  const now = Date.now();
+  const recent = (draftUse.get(userId) ?? []).filter((t) => now - t < 60 * 60 * 1000);
+  if (recent.length >= DRAFTS_PER_HOUR) {
+    draftUse.set(userId, recent);
+    return false;
+  }
+  recent.push(now);
+  draftUse.set(userId, recent);
+  return true;
+}

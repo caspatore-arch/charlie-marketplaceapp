@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
     "@aws-sdk/client-s3": "^3.1133.0",
     "@electric-sql/pglite": "^0.5.8",
     "@expo-google-fonts/montserrat": "^0.4.2",
@@ -71,6 +72,7 @@
     "test:geo": "tsx scripts/geo-check.ts",
     "test:payments": "tsx scripts/payments-check.ts",
     "test:save": "tsx scripts/save-check.ts",
+    "test:price-guide": "tsx scripts/price-guide-check.ts",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "env:lan": "node -e \"const fs=require('fs');const ip=require('child_process').execSync('ipconfig getifaddr en0').toString().trim();let e=fs.readFileSync('.env','utf8');e=e.replace(/EXPO_PUBLIC_RORK_API_BASE_URL=.*/,'EXPO_PUBLIC_RORK_API_BASE_URL=http://'+ip+':3000');fs.writeFileSync('.env',e);console.log('API base URL set to http://'+ip+':3000')\"",

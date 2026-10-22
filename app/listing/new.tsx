@@ -101,6 +101,7 @@ export default function NewListingScreen() {
       {user ? <FirstPostTutorial key={user.id} userId={user.id} /> : null}
       <ListingForm
         submitLabel="Publish"
+        enableAutofill
         submitting={createMutation.isPending}
         submitError={submitError}
         onSubmit={handleSubmit}

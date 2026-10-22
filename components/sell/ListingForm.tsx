@@ -16,6 +16,7 @@ import { Divider } from '@/components/ui/Divider';
 import { PhotoPickerRow, type PhotoItem } from './PhotoPickerRow';
 import { SpotMultiSelect } from './SpotMultiSelect';
 import { WindowEditor, type WindowItem } from './WindowEditor';
+import { PriceGuideBar } from './PriceGuideBar';
 import { DAY_MS } from '@/components/booking/time';
 import { space } from '@/constants/theme';
 import { CATEGORIES, CATEGORY_LABELS, CONDITIONS, CONDITION_LABELS, CLOTHING_SIZE_OPTIONS, SHOE_SIZE_OPTIONS } from '@/constants/campus';
@@ -64,6 +65,10 @@ export interface ListingFormProps {
   onDirtyChange?: (dirty: boolean) => void;
   /** Extra content rendered below the form fields, above Publish (edit screen's "More" section). */
   footer?: React.ReactNode;
+  /** Offer "Fill in from photos" (create screen only). */
+  enableAutofill?: boolean;
+  /** The listing being edited, so the price guide doesn't compare it with itself. */
+  listingId?: string;
 }
 
 const DEFAULTS: ListingFormInitialValues = {
@@ -116,7 +121,7 @@ const FIELD_ORDER: (keyof FieldErrors)[] = [
 const MIN_PRICE_CENTS = 100;
 
 export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(function ListingForm(
-  { initialValues, submitLabel, submitting = false, submitError, until, onSubmit, onDirtyChange, footer },
+  { initialValues, submitLabel, submitting = false, submitError, until, onSubmit, onDirtyChange, footer, enableAutofill = false, listingId },
   ref,
 ) {
   const merged = { ...DEFAULTS, ...initialValues };
@@ -137,6 +142,30 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
   const [description, setDescription] = useState(merged.description);
   const [spotIds, setSpotIds] = useState<string[]>(merged.spotIds);
   const [windows, setWindows] = useState<WindowItem[]>(merged.windows);
+
+  const [aiEstimate, setAiEstimate] = useState<{ lowCents: number; highCents: number } | null>(null);
+  const [autofillNote, setAutofillNote] = useState<{ text: string; error?: boolean } | null>(null);
+  const draftMutation = trpc.listing.draftFromPhotos.useMutation({
+    onSuccess: (draft) => {
+      // Fill only what the seller hasn't typed yet.
+      if (!title.trim()) setTitle(draft.title);
+      if (!category) setCategory(draft.category);
+      if (!condition) setCondition(draft.condition);
+      if (!brand.trim() && draft.brand) setBrand(draft.brand);
+      if (!description.trim()) setDescription(draft.description);
+      if (parsePriceInput(priceInput) === null) {
+        const mid = Math.round((draft.priceLowCents + draft.priceHighCents) / 2 / 100) * 100;
+        setPriceInput(priceCentsToInput(mid));
+      }
+      setAiEstimate({ lowCents: draft.priceLowCents, highCents: draft.priceHighCents });
+      setAutofillNote({
+        text: draft.simulated
+          ? 'Demo draft: AI autofill is off on this server, so these are placeholder details.'
+          : 'Filled in from your photos. Check every detail before you publish.',
+      });
+    },
+    onError: (err) => setAutofillNote({ text: err.message, error: true }),
+  });
 
   const [touched, setTouched] = useState<Partial<Record<keyof FieldErrors, boolean>>>({});
   const [triedSubmit, setTriedSubmit] = useState(false);
@@ -204,6 +233,8 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
     (touched[key] || triedSubmit) && errors[key] ? errors[key] : undefined;
 
   const uploading = photos.some((p) => p.status === 'uploading');
+  const donePhotoUrls = photos.filter((p) => p.status === 'done' && p.url).map((p) => p.url!);
+  const showAutofill = enableAutofill && donePhotoUrls.length > 0 && !uploading;
   const hasError = Object.keys(errors).length > 0;
 
   function handleSubmit() {
@@ -256,6 +287,24 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
             Photos
           </Text>
           <PhotoPickerRow photos={photos} onChange={setPhotos} error={visible('photos')} />
+          {showAutofill ? (
+            <Button
+              title={autofillNote && !autofillNote.error ? 'Fill in again from photos' : 'Fill in details from photos'}
+              variant="secondary"
+              onPress={() => {
+                setAutofillNote(null);
+                draftMutation.mutate({ photoUrls: donePhotoUrls.slice(0, 4) });
+              }}
+              loading={draftMutation.isPending}
+              disabled={draftMutation.isPending}
+              style={styles.autofill}
+            />
+          ) : null}
+          {autofillNote ? (
+            <Text variant="caption" color={autofillNote.error ? 'danger' : 'inkMuted'} style={styles.error}>
+              {autofillNote.text}
+            </Text>
+          ) : null}
         </View>
 
         <Divider style={styles.divider} />
@@ -332,6 +381,17 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
             error={visible('price')}
             keyboardType="decimal-pad"
             helper="At least $1. Buyers can book at this price or send you an offer below it."
+          />
+          <PriceGuideBar
+            category={category}
+            title={title}
+            priceCents={priceCents}
+            aiEstimate={aiEstimate}
+            excludeListingId={listingId}
+            onUsePrice={(cents) => {
+              setPriceInput(priceCentsToInput(cents));
+              setTouched((t) => ({ ...t, price: true }));
+            }}
           />
         </View>
 
@@ -429,6 +489,7 @@ const styles = StyleSheet.create({
   error: { marginTop: space.sm },
   divider: { marginVertical: space.xl },
   footer: { marginTop: space.xl },
+  autofill: { marginTop: space.md },
   submitError: { marginTop: space.lg, textAlign: 'center' },
   submit: { marginTop: space.xl },
 });

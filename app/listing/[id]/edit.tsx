@@ -144,6 +144,7 @@ export default function EditListingScreen() {
         key={listing.id}
         initialValues={initialValues}
         submitLabel="Save changes"
+        listingId={listing.id}
         submitting={updateMutation.isPending}
         submitError={submitError}
         until={listing.expiresAt ? new Date(listing.expiresAt) : undefined}

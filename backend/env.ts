@@ -71,6 +71,20 @@ export const env = {
       .map((id) => id.trim())
       .filter(Boolean);
   },
+  /* ------------------------------------------------- listing autofill AI */
+
+  /** Raw LISTING_AI_MODE. Decisions go through resolveListingAiMode() (backend/ai/listing-draft.ts). */
+  get listingAiModeRaw(): string {
+    return (process.env.LISTING_AI_MODE ?? 'simulated').trim().toLowerCase();
+  },
+  get anthropicApiKey(): string | undefined {
+    const v = process.env.ANTHROPIC_API_KEY?.trim();
+    return v ? v : undefined;
+  },
+  get listingAiModel(): string {
+    return process.env.LISTING_AI_MODEL?.trim() || 'claude-opus-5-5';
+  },
+
   /* --------------------------------------------------------------- email */
 
   /** Raw EMAIL_MODE. Decisions go through resolveEmailMode() (backend/email/provider.ts). */
