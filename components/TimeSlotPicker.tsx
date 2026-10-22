@@ -1,5 +1,5 @@
 /**
- * The time-slot chart: 30-minute chips grouped by campus-local day
+ * The time-slot chart: 15-minute chips grouped by campus-local day, then by hour
  * ("Today", "Tomorrow"). Unavailable slots stay visible but disabled, with a
  * reason, so a buyer sees *why* a time is missing instead of wondering.
  *
@@ -68,8 +68,9 @@ export function TimeSlotPicker({ slots, selectedIso, onSelect, timeZone, current
               {zone ? ` · ${zone}` : ''}
             </Text>
           </View>
-          <View style={styles.chipRow}>
-            {g.items.map(({ iso, slot }) => {
+          {hourRows(g.items, timeZone).map((row) => (
+          <View key={row.key} style={styles.chipRow}>
+            {row.items.map(({ iso, slot }) => {
               const isCurrent = currentIso === iso;
               const disabled = !slot.available || isCurrent;
               const reason = isCurrent ? 'Current time' : slot.reason ? REASON_LABEL[slot.reason] : 'Unavailable';
@@ -96,10 +97,25 @@ export function TimeSlotPicker({ slots, selectedIso, onSelect, timeZone, current
               );
             })}
           </View>
+          ))}
         </View>
       ))}
     </View>
   );
+}
+
+/** Splits a day's slots into one row per clock hour (up to four 15-minute chips each). */
+function hourRows<T extends { iso: string }>(items: T[], timeZone?: string): { key: string; items: T[] }[] {
+  const rows: { key: string; items: T[] }[] = [];
+  for (const item of items) {
+    const label = clockTime(item.iso, timeZone);
+    // "5:15 PM" -> "5 PM": the hour a slot belongs to, in campus time.
+    const key = label.replace(/:\d{2}/, '');
+    const last = rows[rows.length - 1];
+    if (last && last.key === key) last.items.push(item);
+    else rows.push({ key, items: [item] });
+  }
+  return rows;
 }
 
 const styles = StyleSheet.create({

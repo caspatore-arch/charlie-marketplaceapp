@@ -112,7 +112,7 @@ export default function EditListingScreen() {
   }
 
   // Windows already in the past can't be re-saved (the server requires future
-  // windows), so trim them to start no earlier than the next half hour.
+  // windows), so trim them to start no earlier than the next quarter hour.
   const earliest = nextSlotBoundary().getTime();
   const editableWindows = listing.availabilityWindows
     .map((w) => ({

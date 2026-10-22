@@ -69,7 +69,7 @@ function assertWindows(
       });
     }
     if (w.endsAt.getTime() - Math.max(w.startsAt.getTime(), opts.now.getTime()) < MEETUP_SLOT_MS) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Each window needs room for at least one 30-minute meetup.' });
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Each window needs room for at least one 15-minute meetup.' });
     }
   }
 }

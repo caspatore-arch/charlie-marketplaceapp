@@ -59,7 +59,7 @@ const MAYA = '00000000-0000-4000-8000-000000000001';
 const JORDAN = '00000000-0000-4000-8000-000000000002';
 const SAM = '00000000-0000-4000-8000-000000000003';
 const CAMPUS = '00000000-0000-4000-8000-0000000000aa';
-const SLOT = 30 * 60 * 1000;
+const SLOT = 15 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 
 async function main() {
@@ -228,11 +228,11 @@ async function main() {
 
   /* =========================================================== booking */
 
-  await check('booking: slots are 30-min aligned, inside the window, within 24h', async () => {
+  await check('booking: slots are 15-min aligned, inside the window, within 24h', async () => {
     const listing = await makeListing(MAYA, { startH: 1, endH: 3 });
     const res = await anon.reservation.slots({ listingId: listing.id });
     assert(res.open, 'listing open');
-    eq(res.slotMinutes, 30, 'explicit slot length');
+    eq(res.slotMinutes, 15, 'explicit slot length');
     assert(res.slots.length >= 3, `expected several slots, got ${res.slots.length}`);
     for (const s of res.slots) {
       eq(s.startsAt.getTime() % SLOT, 0, 'aligned');
@@ -240,6 +240,30 @@ async function main() {
       assert(s.startsAt.getTime() < Date.now() + 24 * HOUR, 'within 24h');
     }
     eq(res.spots.length, 2, 'campus spots offered');
+  });
+
+  await check('booking: a :15 start books, a :10 start is rejected, adjacent 15-min slots coexist', async () => {
+    const listing = await makeListing(MAYA, { startH: 1, endH: 3 });
+    const jordan = await as(JORDAN);
+    const slots = (await jordan.reservation.slots({ listingId: listing.id })).slots.filter((x) => x.available);
+    const quarter = slots.find((s) => s.startsAt.getUTCMinutes() % 30 === 15);
+    assert(!!quarter, 'a :15 or :45 slot is offered');
+    const next = slots.find((s) => s.startsAt.getTime() === quarter!.startsAt.getTime() + SLOT);
+    assert(!!next, 'the adjacent slot is offered');
+    await expectCode('BAD_REQUEST', () =>
+      jordan.reservation.book({ listingId: listing.id, spotId: SPOT_A, startsAt: new Date(quarter!.startsAt.getTime() - (quarter!.startsAt.getUTCMinutes() - 10) * 60_000) }),
+    );
+    const booked = await jordan.reservation.book({ listingId: listing.id, spotId: SPOT_A, startsAt: quarter!.startsAt });
+    eq(booked.status, 'accepted', 'a :15 start books');
+    // Adjacent (back-to-back) slots are not an overlap for the seller.
+    const listing2 = await makeListing(MAYA, { startH: 1, endH: 3 });
+    const res2 = await jordan.reservation.slots({ listingId: listing2.id });
+    const adj = res2.slots.find((s) => s.startsAt.getTime() === next!.startsAt.getTime());
+    assert(!!adj && adj.available, 'adjacent slot on another listing stays bookable');
+    const prev = res2.slots.find((s) => s.startsAt.getTime() === quarter!.startsAt.getTime());
+    assert(!!prev && !prev.available, 'the booked slot is unavailable on the seller\'s other listing');
+    // Free the slot (and its queued reminders) so later SMS checks start clean.
+    await jordan.reservation.cancel({ id: booked.id });
   });
 
   await check('booking: invalid times, spots, and stale availability are rejected', async () => {
@@ -630,10 +654,15 @@ async function main() {
     const buyerMsg = sms.sent.find((m) => m.to === '+15205550103' && m.body.includes('Booked!'));
     assert(buyerMsg && buyerMsg.body.includes(listing.title) && buyerMsg.body.includes('$40'), 'buyer text has item and price');
     assert(!buyerMsg.body.includes(MAYA_PHONE), 'no phone numbers in the text');
-    const res2 = await dispatchDueSms(db, { now: new Date(r.startsAt.getTime() - 29 * 60_000) });
-    eq(res2.sent, 2, 'both reminders sent at T-30');
-    const res3 = await dispatchDueSms(db, { now: new Date(r.startsAt.getTime() - 20 * 60_000) });
-    eq(res3.sent, 0, 'nothing sent twice');
+    // Earlier tests leave other meetups queued (15-minute slots can sit just
+    // before this one), so count only the texts about THIS listing.
+    const mine = (from: number) => sms.sent.slice(from).filter((m) => m.body.includes(listing.title) && m.body.includes('reminder')).length;
+    const before2 = sms.sent.length;
+    await dispatchDueSms(db, { now: new Date(r.startsAt.getTime() - 29 * 60_000) });
+    eq(mine(before2), 2, 'both reminders sent at T-30');
+    const before3 = sms.sent.length;
+    await dispatchDueSms(db, { now: new Date(r.startsAt.getTime() - 20 * 60_000) });
+    eq(mine(before3), 0, 'nothing sent twice');
   });
 
   await check('sms: purchase triggers on final booking state, not on a pending request', async () => {

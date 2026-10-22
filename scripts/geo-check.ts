@@ -139,9 +139,9 @@ async function main(): Promise<number> {
   assert(spots.length > 0, 'campus should have seeded meetup spots');
   const spotId = spots[0]!.id;
 
-  // Meetups are 30-minute slots on :00/:30, within the next 24h and inside a
+  // Meetups are 15-minute slots on :00/:15/:30/:45, within the next 24h and inside a
   // seller window, so derive every time from the slot grid.
-  const SLOT_MS = 30 * 60 * 1000;
+  const SLOT_MS = 15 * 60 * 1000;
   const alignedIn = (hours: number) =>
     new Date(Math.ceil((Date.now() + hours * 60 * 60 * 1000) / SLOT_MS) * SLOT_MS);
   const windowStart = alignedIn(0.5);
@@ -279,7 +279,7 @@ async function main(): Promise<number> {
       }),
     );
     // Off the 30-minute grid is refused before the address is even resolved.
-    await expectTrpcError('BAD_REQUEST', 'Meetups start on the hour or half hour (30-minute slots).', () =>
+    await expectTrpcError('BAD_REQUEST', 'Meetups start on a quarter hour (:00, :15, :30, :45) (15-minute slots).', () =>
       maya.reservation.counter.mutate({
         id: inRadiusReservationId,
         customAddress: IN_RADIUS_ADDRESS,

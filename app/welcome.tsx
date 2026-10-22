@@ -39,7 +39,7 @@ const STEPS = [
   },
   {
     title: 'Buyers book an exact time and spot',
-    body: 'No “is this still available?” Pick a 30-minute slot at a campus meetup spot from the times the seller already offered.',
+    body: 'No “is this still available?” Pick a 15-minute slot at a campus meetup spot from the times the seller already offered.',
   },
   {
     title: 'Meet, check it, make it yours',
@@ -177,7 +177,7 @@ export default function WelcomeScreen() {
             <Text variant="body">Less back-and-forth. More actual meetups.</Text>
             {[
               ['Stay close to campus', 'Browse your campus community and choose a campus meetup spot. Less travel makes a handoff easier to fit between classes.', colors.successSoft],
-              ['Know when you can meet', 'Sellers share availability up front. Buyers book an exact 30-minute slot, so both people have a clear plan.', colors.warningSoft],
+              ['Know when you can meet', 'Sellers share availability up front. Buyers book an exact 15-minute slot, so both people have a clear plan.', colors.warningSoft],
               ['Find something fresh', 'Listings expire after 24 hours. Share your link with friends while it’s live, or make an offer on a find you love.', colors.demoSoft],
             ].map(([title, body, backgroundColor]) => (
               <View key={title} style={[styles.benefit, { backgroundColor }]}>

@@ -635,7 +635,7 @@ function ProposeSheet({
   const slotsQuery = trpc.reservation.slots.useQuery({ listingId }, { enabled: visible });
   // While the listing is still open, offer its real availability chart. After
   // it expires (confirmed meetups outlive the listing) fall back to every
-  // 30-minute step in the next 24 hours.
+  // 15-minute step in the next 24 hours.
   const chart = slotsQuery.data;
   const chartSlots: ChartSlot[] = chart?.open && chart.slots.length > 0
     ? chart.slots

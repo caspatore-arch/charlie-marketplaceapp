@@ -10,7 +10,7 @@ const STEPS = [
   ['Help buyers find it', 'Give it a specific title, choose a category and condition, and add size or brand when relevant. Use the description for measurements, what’s included, and any flaws.'],
   ['Choose an asking price', 'Enter the amount in dollars. Compare similar used items and account for condition. Buyers can book at your asking price or send a lower offer for you to accept or decline.'],
   ['Choose campus meetup spots', 'Select the public campus locations where you can actually meet. Buyers choose from your locations when booking.'],
-  ['Set hours you can meet', 'Tap individual hours or add a custom window in the next 24 hours. Buyers book an exact 30-minute slot inside your availability. Times use your campus timezone.'],
+  ['Set hours you can meet', 'Tap individual hours or add a custom window in the next 24 hours. Buyers book an exact 15-minute slot inside your availability. Times use your campus timezone.'],
   ['Publish, share, and hand it over', 'Review your details, then publish. Your listing lasts 24 hours. Copy its link or share it from the confirmation screen. Check Meetups & messages for bookings; meet in public, inspect the item, arrange payment directly, and confirm the handoff.'],
 ];
 

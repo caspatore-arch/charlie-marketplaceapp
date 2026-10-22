@@ -1,7 +1,7 @@
 /**
  * Booking flow (route `/reservation/request?listingId=&offerId=&offerCents=`).
  *
- *   1. Pick an open 30-minute time (slot chart, campus timezone)
+ *   1. Pick an open 15-minute time (slot chart, campus timezone)
  *   2. Pick a campus meetup place
  *   3. Confirm: exact price, exact local time + date, place -> `reservation.book`
  *
@@ -249,7 +249,7 @@ export default function BookingScreen() {
       <View style={styles.section}>
         <Text variant="title">Pick a time</Text>
         <Text variant="caption" color="inkMuted">
-          30-minute meetups in campus time{zone ? ` (${zone})` : ''}.
+          15-minute meetups in campus time{zone ? ` (${zone})` : ''}.
           {chart.expiresAt
             ? ` Listing is live until ${relativeDayLabel(chart.expiresAt, timeZone)} ${clockTime(chart.expiresAt, timeZone)}.`
             : ''}

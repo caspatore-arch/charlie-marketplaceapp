@@ -2,7 +2,7 @@
 
 Everything below is the source of truth for backend and frontend agents. If you must deviate, update this file in the same change.
 
-> **Updated 2026-10-20.** Auctions are retired (offers replace them), meetups are booked into exact 30-minute slots, sign-in is phone-first, and a Community feed + transactional SMS exist. Inline statements below were corrected; the new sections at the end ("Auctions retired" onward) hold the detail. Where an older section and a newer section disagree, the newer section wins, and the code wins over both.
+> **Updated 2026-10-20.** Auctions are retired (offers replace them), meetups are booked into exact 15-minute slots, sign-in is phone-first, and a Community feed + transactional SMS exist. Inline statements below were corrected; the new sections at the end ("Auctions retired" onward) hold the detail. Where an older section and a newer section disagree, the newer section wins, and the code wins over both.
 
 All ids are `uuid` strings. All timestamps are ISO strings over the wire (`timestamptz` in DB). Money is integer **cents** (`priceCents`).
 
@@ -62,7 +62,7 @@ accepted ──(either propose reschedule)──▶ countered   (item stays 'res
 accepted, startsAt + 2h passed, not completed ──(lazy expiry on read)──▶ expired
 ```
 
-`reservation.request` → `counter` → `accept` is still implemented (and gated by `campusVerifiedProcedure`) for in-flight and legacy meetups, but the product path is `reservation.book` (see "Booking"). `counter` now requires a future time on the 30-minute grid inside the next 24h.
+`reservation.request` → `counter` → `accept` is still implemented (and gated by `campusVerifiedProcedure`) for in-flight and legacy meetups, but the product path is `reservation.book` (see "Booking"). `counter` now requires a future time on the 15-minute grid inside the next 24h.
 
 Effects:
 - On **book**: see "Booking" — one transaction creates the reservation already `accepted`, sets the listing `reserved`, auto-declines other `requested|countered` reservations (cancelReason `'item_reserved'`) and closes every other open offer.
@@ -103,7 +103,7 @@ listing.feed          pub  { campusId, q?, category?, minCents?, maxCents?, size
 listing.byId          pub  { id }                   → ListingDetail = listing + photos[] + seller + spots[] + availabilityWindows[] + activeReservationId? + viewerRole ('seller'|'buyer'|'guest') + isSaved
 listing.bySeller      pub  { sellerId, includeSold? } → ListingCard[]
 listing.mine          P    –                        → ListingCard[] (all statuses)
-listing.create        C    { title, description?, category, condition, priceCents, saleType?, startPriceCents?, buyoutPriceCents?, size?, brand?, isSellToday, photoUrls: string[] (1–8), spotIds: string[] (1+), windows: {startsAt,endsAt}[] (**1–8**, each inside now → now+24h and ≥ 30 min) } → ListingDetail
+listing.create        C    { title, description?, category, condition, priceCents, saleType?, startPriceCents?, buyoutPriceCents?, size?, brand?, isSellToday, photoUrls: string[] (1–8), spotIds: string[] (1+), windows: {startsAt,endsAt}[] (**1–8**, each inside now → now+24h and ≥ 15 min) } → ListingDetail
       priceCents >= 100. saleType 'auction' is REFUSED (BAD_REQUEST "Auctions have been replaced by an asking price plus offers…"); omit saleType. startPriceCents/buyoutPriceCents are ignored.
       expiresAt = now + 24h for every listing. Enqueues the seller's "listing posted" SMS (see "Transactional SMS").
 listing.update        P    { id, ...same fields optional }             → ListingDetail
@@ -138,7 +138,7 @@ reservation.slots     pub  { listingId }                      → bookable slots
 reservation.book      C    { listingId, spotId, startsAt, offerId?, expectedPriceCents? } → ReservationDetail (status 'accepted')
 reservation.history   P    { id }                            → ReservationEvent[] oldest first (participants only)
 reservation.request   C    { listingId, spotId|customAddress, startsAt }    → Reservation   (legacy request flow; see AUCTIONS.md §2 for customAddress)
-reservation.counter   P    { id, spotId|customAddress, startsAt, note? }    → Reservation   (either party; sets proposedById; startsAt must be future, on the 30-min grid, within 24h. On an accepted meetup this is a reschedule.)
+reservation.counter   P    { id, spotId|customAddress, startsAt, note? }    → Reservation   (either party; sets proposedById; startsAt must be future, on the 15-min grid, within 24h. On an accepted meetup this is a reschedule.)
 reservation.accept    P    { id }                            → Reservation   (the party who did NOT propose)
 reservation.decline   P    { id }                            → Reservation   (seller)
 reservation.cancel    P    { id, reason? }                   → Reservation   (either party)
@@ -371,18 +371,18 @@ DecoratedOffer = Offer + listing: ListingCard | null + buyer: PublicUser + selle
 `reservation.book` replaces request -> accept as the primary flow: the buyer picks a spot and an exact time from the seller's published availability and the meetup is **final at once** (`status: 'accepted'`, listing `reserved`, handoff code issued). The old `request`/`counter`/`accept` procedures stay for in-flight and rescheduling use.
 
 **Rules**
-- **Slot grid**: meetups are `MEETUP_SLOT_MINUTES` = 30 minutes long and start only on :00 / :30 (`isSlotAligned`, checked on the UTC epoch). Times are stored as UTC; the UI must display them in the campus timezone (`slots.timezone`, e.g. `America/Phoenix`).
+- **Slot grid**: meetups are `MEETUP_SLOT_MINUTES` = 15 minutes long and start only on a quarter hour (:00 / :15 / :30 / :45) (`isSlotAligned`, checked on the UTC epoch). Times are stored as UTC; the UI must display them in the campus timezone (`slots.timezone`, e.g. `America/Phoenix`).
 - **Rolling availability**: sellers publish availability for "now -> next 24 hours" (`AVAILABILITY_HORIZON_MS`), which is also the listing's whole life.
-- **Window validation** (`listing.create`, `listing.update`, `listing.relist`): 1–8 windows on create (relist/update may have none, but a listing with none has no bookable slots); each must end in the future, start no earlier than now minus a 15-minute grace, end within the listing's own expiry (+1 min), and leave room for at least one 30-minute slot after `max(start, now)`.
+- **Window validation** (`listing.create`, `listing.update`, `listing.relist`): 1–8 windows on create (relist/update may have none, but a listing with none has no bookable slots); each must end in the future, start no earlier than now minus a 15-minute grace, end within the listing's own expiry (+1 min), and leave room for at least one 15-minute slot after `max(start, now)`.
 - **Bookable time** (`book`, `counter`): on the grid, in the future, within 24h; and — for `book` — re-checked inside the row lock to be exactly one of the slots the seller's current windows produce (otherwise CONFLICT "The seller's availability changed. Pick one of the times shown now.").
 - **Spot** must be one of the listing's active `listing_spots` (BAD_REQUEST otherwise).
 
-**Double-booking guard (seller AND buyer).** `slotConflicts()` rejects a slot if either person already has an `accepted` meetup starting within +/-30 minutes (strictly overlapping), on any listing (CONFLICT "That time was just booked. Pick another slot." for the seller; "You already have a meetup at that time." for the buyer). Both users' rows are locked in id order first so concurrent bookings serialize. The DB backstop is two partial unique indexes: `reservations_seller_slot_uq (sellerId, startsAt) WHERE status='accepted'` and `reservations_buyer_slot_uq (buyerId, startsAt) WHERE status='accepted'`; a violation is mapped to the same "just booked" CONFLICT.
+**Double-booking guard (seller AND buyer).** `slotConflicts()` rejects a slot if either person already has an `accepted` meetup starting within +/-15 minutes (strictly overlapping; back-to-back slots are allowed), on any listing (CONFLICT "That time was just booked. Pick another slot." for the seller; "You already have a meetup at that time." for the buyer). Both users' rows are locked in id order first so concurrent bookings serialize. The DB backstop is two partial unique indexes: `reservations_seller_slot_uq (sellerId, startsAt) WHERE status='accepted'` and `reservations_buyer_slot_uq (buyerId, startsAt) WHERE status='accepted'`; a violation is mapped to the same "just booked" CONFLICT.
 
 **Procedures**
 ```
 reservation.slots   pub  { listingId } → {
-      listingId, open, closedReason, timezone, slotMinutes: 30, expiresAt, spots: MeetupSpot[],
+      listingId, open, closedReason, timezone, slotMinutes: 15, expiresAt, spots: MeetupSpot[],
       slots: { startsAt, available, reason: 'seller_busy'|'you_busy'|null }[] }
       open=false (and slots=[]) with a closedReason for an expired/reserved/removed listing or a legacy auction.
       `you_busy` only appears for a signed-in non-seller viewer.

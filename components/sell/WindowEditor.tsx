@@ -1,10 +1,10 @@
 /**
  * Availability editor for a listing. A listing is live for 24 hours, so every
  * window must sit between now and the listing's end (`until`). The seller adds
- * one or more windows (max 8, each at least 30 minutes); buyers then book one
- * 30-minute slot inside them.
+ * one or more windows (max 8, each at least 15 minutes); buyers then book one
+ * 15-minute slot inside them.
  *
- * Times are real instants on :00/:30 boundaries and are displayed in the
+ * Times are real instants on quarter-hour boundaries and are displayed in the
  * campus timezone, so "Today / Tomorrow" and the clock match what buyers see.
  * No native date picker: day chips plus start/end chips keep it Expo Go and
  * web friendly.
@@ -43,7 +43,7 @@ function nextKey() {
   return `window-${Date.now()}-${keySeq}`;
 }
 
-/** Boundaries (:00/:30) from the next one until `until`, inclusive. */
+/** Boundaries (:00/:15/:30/:45) from the next one until `until`, inclusive. */
 function boundaries(until: Date): Date[] {
   const out: Date[] = [];
   for (let t = nextSlotBoundary().getTime(); t <= until.getTime(); t += SLOT_MS) out.push(new Date(t));
@@ -68,7 +68,7 @@ export function WindowEditor({ windows, onChange, until, timeZone, error }: Wind
     return [...map.entries()];
   }, [all, timeZone]);
 
-  // Starts must leave room for a 30-minute meetup before the end of the listing.
+  // Starts must leave room for a 15-minute meetup before the end of the listing.
   const startOptions = all.filter((b) => dayKey(b, timeZone) === day && b.getTime() + SLOT_MS <= untilMs);
   const endOptions = start
     ? all.filter((b) => b.getTime() >= new Date(start).getTime() + SLOT_MS && b.getTime() <= untilMs)
@@ -139,7 +139,7 @@ export function WindowEditor({ windows, onChange, until, timeZone, error }: Wind
       )}
 
       <Text variant="heading">Pick your available hours</Text>
-      <Text variant="caption" color="inkMuted" style={styles.hint}>Times shown in {timeZone ?? 'your local timezone'}. Each hour gives buyers two 30-minute meetup slots. Tap an hour again to remove it.</Text>
+      <Text variant="caption" color="inkMuted" style={styles.hint}>Times shown in {timeZone ?? 'your local timezone'}. Each hour gives buyers four 15-minute meetup slots. Tap an hour again to remove it.</Text>
       <View style={styles.quickWrap}>
         {hourly.map((t) => {
           const startsAt = t.toISOString();
@@ -229,7 +229,7 @@ export function WindowEditor({ windows, onChange, until, timeZone, error }: Wind
           </View>
 
           <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
-            End time (at least 30 minutes later)
+            End time (at least 15 minutes later)
           </Text>
           <View style={styles.chipWrap}>
             {endOptions.map((t) => {

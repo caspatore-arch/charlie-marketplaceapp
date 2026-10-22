@@ -437,7 +437,7 @@ export const reservations = pgTable(
     uniqueIndex('reservations_one_accepted_per_listing')
       .on(t.listingId)
       .where(sql`${t.status} = 'accepted'`),
-    // Seller/buyer double-booking backstop. New bookings start on a 30-minute
+    // Seller/buyer double-booking backstop. New bookings start on a 15-minute
     // boundary and last one slot (MEETUP_SLOT_MINUTES), so "overlap" is
     // exactly "same start" and a plain unique index is a full guarantee.
     uniqueIndex('reservations_seller_slot_uq')

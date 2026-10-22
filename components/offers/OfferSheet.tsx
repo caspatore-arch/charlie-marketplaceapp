@@ -2,7 +2,7 @@
  * Buyer's "Make an offer" sheet. One sheet, one decision: price AND when/where.
  *
  * The seller's real availability windows (future only) are tappable choices;
- * picking a window narrows to 30-minute times inside it; the seller's chosen
+ * picking a window narrows to 15-minute times inside it; the seller's chosen
  * spots are choices too. Sensible defaults (first window, first time, first
  * spot) mean the obvious proposal is two taps: type a price, send. A summary
  * line shows price + time + place together before sending. The server
@@ -71,7 +71,7 @@ interface WindowChoice {
   slots: number[];
 }
 
-/** Future 30-minute starts that fit inside [start, end), within the next 24h. */
+/** Future 15-minute starts that fit inside [start, end), within the next 24h. */
 function slotsIn(start: number, end: number, now: number): number[] {
   const out: number[] = [];
   const first = Math.ceil(Math.max(start, now) / SLOT_MS) * SLOT_MS;

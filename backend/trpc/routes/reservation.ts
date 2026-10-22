@@ -69,12 +69,12 @@ function conflictFromUnique(err: unknown): TRPCError | null {
   return new TRPCError({ code: 'CONFLICT', message: 'This item was just reserved by someone else.' });
 }
 
-/** Rejects times that are off the 30-minute grid, in the past, or beyond the rolling 24h. */
+/** Rejects times that are off the 15-minute grid, in the past, or beyond the rolling 24h. */
 function assertBookableTime(startsAt: Date, now = new Date()) {
   if (!isSlotAligned(startsAt)) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message: `Meetups start on the hour or half hour (${MEETUP_SLOT_MINUTES}-minute slots).`,
+      message: `Meetups start on a quarter hour (:00, :15, :30, :45) (${MEETUP_SLOT_MINUTES}-minute slots).`,
     });
   }
   if (startsAt.getTime() <= now.getTime()) {
@@ -760,7 +760,7 @@ export const reservationRouter = router({
     }),
 
   /**
-   * Bookable slots for a listing: every 30-minute start inside the seller's
+   * Bookable slots for a listing: every 15-minute start inside the seller's
    * published windows, in the future, within the rolling 24h — each marked
    * unavailable when the seller (any listing) or the viewer already has a
    * meetup then. Public so guests can see times before signing in.

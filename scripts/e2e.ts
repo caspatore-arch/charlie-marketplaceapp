@@ -139,9 +139,9 @@ async function main(): Promise<number> {
   let blockTargetListingId = '';
   const PHOTOS = ['/api/uploads/demo-tech.svg'];
 
-  // Meetups are 30-minute slots on :00/:30, in the future, within the next
+  // Meetups are 15-minute slots on :00/:15/:30/:45, in the future, within the next
   // 24h, and inside a seller window. These helpers build such times.
-  const SLOT_MS = 30 * 60 * 1000;
+  const SLOT_MS = 15 * 60 * 1000;
   const HOUR_MS = 60 * 60 * 1000;
   const alignedIn = (hours: number) =>
     new Date(Math.ceil((Date.now() + hours * HOUR_MS) / SLOT_MS) * SLOT_MS);
@@ -169,7 +169,7 @@ async function main(): Promise<number> {
       'every feed card says whether it has availability today',
     );
     const slotProbe = await guest.reservation.slots.query({ listingId: feed.items[0]!.id });
-    assertEqual(slotProbe.slotMinutes, 30, 'meetups are 30-minute slots');
+    assertEqual(slotProbe.slotMinutes, 15, 'meetups are 15-minute slots');
     assert(
       slotProbe.slots.some((sl) => sl.available),
       'a seeded listing offers at least one open meetup slot in the next 24h',
@@ -877,7 +877,7 @@ async function main(): Promise<number> {
         proposedSpotId: spotAId,
       }),
     );
-    // A time off the 30-minute grid is refused.
+    // A time off the 15-minute grid is refused.
     await expectTrpcError('BAD_REQUEST', () =>
       jordan.offer.create.mutate({
         listingId: listing.id,

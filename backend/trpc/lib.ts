@@ -63,10 +63,10 @@ export function localDayBounds(timeZone: string, at: Date = new Date()): { start
 
 /**
  * Meetup length, and the grid every booked start time sits on. This was the
- * existing 30-minute slot of components/TimeSlotPicker.tsx — made explicit and
+ * 15-minute slot of components/TimeSlotPicker.tsx — made explicit and
  * enforced server-side instead of only implied by the picker.
  */
-export const MEETUP_SLOT_MINUTES = 30;
+export const MEETUP_SLOT_MINUTES = 15;
 export const MEETUP_SLOT_MS = MEETUP_SLOT_MINUTES * 60 * 1000;
 
 /** Sellers publish availability for "today and the next rolling 24 hours". */
@@ -75,7 +75,7 @@ export const AVAILABILITY_HORIZON_MS = 24 * 60 * 60 * 1000;
 /** How long an accepted offer holds the item for the buyer to pick a time. */
 export const OFFER_HOLD_MS = 60 * 60 * 1000;
 
-/** True when `at` is exactly on a 30-minute boundary (UTC epoch, so any whole/half-hour zone). */
+/** True when `at` is exactly on a 15-minute boundary (UTC epoch, so any whole/half/quarter-hour zone). */
 export function isSlotAligned(at: Date): boolean {
   return at.getTime() % MEETUP_SLOT_MS === 0;
 }

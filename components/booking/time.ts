@@ -4,7 +4,7 @@
  * the device's. Everything here takes an explicit IANA `timeZone`.
  */
 
-export const SLOT_MS = 30 * 60_000;
+export const SLOT_MS = 15 * 60_000;
 export const DAY_MS = 24 * 60 * 60_000;
 
 type DateLike = Date | string | number;
@@ -74,12 +74,12 @@ export function zoneAbbreviation(timeZone?: string, at: Date = new Date()): stri
   }
 }
 
-/** Next :00 or :30 boundary at or after `from`. */
+/** Next quarter-hour boundary at or after `from`. */
 export function nextSlotBoundary(from: Date = new Date()): Date {
   return new Date(Math.ceil(from.getTime() / SLOT_MS) * SLOT_MS);
 }
 
-/** Every 30-minute start from the next boundary until now + 24h. */
+/** Every 15-minute start from the next boundary until now + 24h. */
 export function rollingDaySlotStarts(now: Date = new Date()): Date[] {
   const out: Date[] = [];
   const end = now.getTime() + DAY_MS;
