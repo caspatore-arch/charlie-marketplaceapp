@@ -2,9 +2,10 @@
  * Horizontal paging photo gallery with dot indicators. Usage:
  * <PhotoGallery photos={listingDetail.photos} />
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   FlatList,
+  Pressable,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -12,6 +13,7 @@ import {
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { Image } from 'expo-image';
 import { colors, radius, space } from '@/constants/theme';
 import { resolveMediaUrl } from '@/lib/trpc';
@@ -39,6 +41,7 @@ const MAX_PHOTO_HEIGHT = 560;
 const MAX_VIEWPORT_SHARE = 0.6;
 
 export function PhotoGallery({ photos, aspectRatio = 4 / 5 }: PhotoGalleryProps) {
+  const list = useRef<FlatList<GalleryPhoto>>(null);
   const [index, setIndex] = useState(0);
 
   // Measure the CONTAINER, not the window. The old code paged on
@@ -69,7 +72,7 @@ export function PhotoGallery({ photos, aspectRatio = 4 / 5 }: PhotoGalleryProps)
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     if (pageWidth <= 0) return;
-    const newIndex = Math.round(e.nativeEvent.contentOffset.x / pageWidth);
+    const newIndex = Math.max(0, Math.min(photos.length - 1, Math.round(e.nativeEvent.contentOffset.x / pageWidth)));
     if (newIndex !== index) setIndex(newIndex);
   }
 
@@ -88,6 +91,9 @@ export function PhotoGallery({ photos, aspectRatio = 4 / 5 }: PhotoGalleryProps)
   return (
     <View onLayout={onLayout}>
       <FlatList
+        ref={list}
+        key={pageWidth}
+        initialScrollIndex={Math.min(index, photos.length - 1)}
         data={photos}
         horizontal
         pagingEnabled
@@ -121,9 +127,9 @@ export function PhotoGallery({ photos, aspectRatio = 4 / 5 }: PhotoGalleryProps)
         )}
       />
       {photos.length > 1 ? (
-        <View style={styles.dots} pointerEvents="none">
+        <View style={styles.dots}>
           {photos.map((p, i) => (
-            <View key={p.id} style={[styles.dot, i === index && styles.dotActive]} />
+            <Pressable key={p.id} accessibilityRole="button" accessibilityLabel={`Show photo ${i + 1} of ${photos.length}`} accessibilityState={{ selected: i === index }} onPress={() => { list.current?.scrollToOffset({ offset: i * pageWidth, animated: false }); setIndex(i); }} style={[styles.photoButton, i === index && { backgroundColor: colors.accentSoft, borderWidth: 2, borderColor: colors.accentInk }]}><Text variant="label" weight="700">{i + 1}</Text></Pressable>
           ))}
         </View>
       ) : null}
@@ -142,14 +148,13 @@ const styles = StyleSheet.create({
   // 4:5. It reads as a deliberate mat around the photo rather than a gap.
   photo: { width: '100%', height: '100%', backgroundColor: colors.surfaceMuted },
   dots: {
-    position: 'absolute',
-    bottom: space.md,
-    left: 0,
-    right: 0,
+    marginTop: space.sm,
+    flexWrap: 'wrap',
     flexDirection: 'row',
     justifyContent: 'center',
     gap: space.xs,
   },
+  photoButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.warningSoft, borderRadius: radius.pill },
   dot: {
     width: 6,
     height: 6,

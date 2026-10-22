@@ -14,12 +14,13 @@ import { ListingForm, type ListingFormSubmitValues } from '@/components/sell/Lis
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { confirmAction } from '@/utils/confirm';
+import { FirstPostTutorial } from '@/components/sell/FirstPostTutorial';
 import { PostPublishModal, type PublishedListing } from '@/components/share/PostPublishModal';
 
 export default function NewListingScreen() {
   const router = useRouter();
   const requireAuth = useRequireAuth();
-  const { status } = useAuth();
+  const { status, user } = useAuth();
   const utils = trpc.useUtils();
 
   const [dirty, setDirty] = useState(false);
@@ -97,6 +98,7 @@ export default function NewListingScreen() {
           ),
         }}
       />
+      {user ? <FirstPostTutorial key={user.id} userId={user.id} /> : null}
       <ListingForm
         submitLabel="Publish"
         submitting={createMutation.isPending}

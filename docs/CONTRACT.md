@@ -508,3 +508,28 @@ Only three event texts exist. They go through a durable outbox, not inline sends
 - **Retries**: a retryable failure goes back to `scheduled` with backoff 1, 2, 4, 8 minutes; the **5th** failed attempt, or any non-retryable error (Twilio 4xx other than 429, e.g. invalid number or unsubscribed), sets `failed`.
 
 **Provider mode** (`backend/sms/provider.ts`): `simulated` (default; logs a masked line and keeps an in-memory list) or `live` (Twilio REST over fetch). Live requires `SMS_MODE=live` **and** `TWILIO_ACCOUNT_SID` **and** `TWILIO_AUTH_TOKEN` **and** `TWILIO_FROM` **and** `SMS_LIVE_ACK=1`, and never runs under `NODE_ENV=test`; a half-configured environment falls back to simulated. The Twilio code has never executed against a real account. See `docs/DEPLOY.md` for setup and the STOP-sync gap.
+
+
+## Booking confirmation email and Twilio STOP callback (October 21, 2026)
+
+`reservation.book` and `reservation.accept` atomically insert `booking_emails`
+rows inside their booking transaction. One row per participant and meetup start;
+repeated submissions do not duplicate rows. The table contains id, reservationId,
+userId, meetupStartsAt, unique dedupeKey, status, attempts, sendAfter, updatedAt.
+The worker claims up to 20 rows with SKIP LOCKED every 30 seconds and recovers
+claims older than five minutes. It checks current accepted state/time, future
+start, non-deleted recipient and verified campus email before delivery. Cancelled,
+rescheduled or otherwise stale confirmations become skipped. Retries back off
+1/2/4/8 minutes; the fifth failure is terminal. Resend receives a stable
+Idempotency-Key per row. Provider acceptance is not proof of inbox delivery.
+These are booking confirmations only, not email reminders or cancellation notices.
+No handoff code, other participant email or payment receipt is included.
+
+`POST /api/sms/inbound` accepts form callbacks authenticated using Twilio's
+HMAC-SHA1 signature, the configured exact `TWILIO_INBOUND_WEBHOOK_URL`, and the
+configured Account SID. Missing config returns 503; invalid signatures return
+403. STOP/standard opt-out keywords or Advanced Opt-Out `OptOutType=STOP` revoke
+app SMS consent and cancel scheduled texts atomically. Duplicate callbacks are
+safe. START does not re-enable app consent: re-opt-in is via app settings after
+carrier unblocking. Twilio handles its own opt-out reply; the app returns empty
+TwiML. Already-sending messages may be in flight. Live delivery is unverified.

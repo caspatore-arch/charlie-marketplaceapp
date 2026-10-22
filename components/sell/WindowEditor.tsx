@@ -89,6 +89,7 @@ export function WindowEditor({ windows, onChange, until, timeZone, error }: Wind
       .filter((c) => c.ok && !windows.some((w) => w.startsAt === c.startsAt && w.endsAt === c.endsAt));
   }, [windows, untilMs]);
 
+  const hourly = all.filter((t) => t.getTime() % 3_600_000 === 0 && t.getTime() + 3_600_000 <= untilMs);
   const full = windows.length >= MAX_WINDOWS;
 
   function openSheet() {
@@ -137,6 +138,19 @@ export function WindowEditor({ windows, onChange, until, timeZone, error }: Wind
         </View>
       )}
 
+      <Text variant="heading">Pick your available hours</Text>
+      <Text variant="caption" color="inkMuted" style={styles.hint}>Times shown in {timeZone ?? 'your local timezone'}. Each hour gives buyers two 30-minute meetup slots. Tap an hour again to remove it.</Text>
+      <View style={styles.quickWrap}>
+        {hourly.map((t) => {
+          const startsAt = t.toISOString();
+          const endsAt = new Date(t.getTime() + 3_600_000).toISOString();
+          const selected = windows.find((w) => w.startsAt === startsAt && w.endsAt === endsAt);
+          const overlaps = windows.some((w) => new Date(w.startsAt).getTime() < t.getTime() + 3_600_000 && new Date(w.endsAt).getTime() > t.getTime());
+          return <Chip key={startsAt} label={`${relativeDayLabel(t, timeZone)} ${clockTime(t, timeZone)}`} selected={!!selected}
+            disabled={!selected && (full || overlaps)}
+            onPress={() => onChange(selected ? windows.filter((w) => w.key !== selected.key) : [...windows, { key: nextKey(), startsAt, endsAt }])} />;
+        })}
+      </View>
       {quick.length > 0 && !full ? (
         <View style={styles.quickWrap}>
           {quick.map((o) => (

@@ -8,8 +8,9 @@
  * welcome screen uses, so the card reads the same wherever it appears.
  */
 import React from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { AuthScreenShell } from '@/components/auth/AuthScreenShell';
+import { Text } from '@/components/ui/Text';
 import { AuthMethods } from '@/components/auth/AuthMethods';
 import type { AuthFinish } from '@/components/auth/EmailAuthFlow';
 
@@ -24,6 +25,9 @@ export default function SignInScreen() {
 
   return (
     <AuthScreenShell title="Sign in or sign up">
+      <Text variant="body">Sell unused items, find affordable secondhand goods, and book a campus meetup. Verify your campus email to buy, sell, and post.</Text>
+      <Link href="/about" style={{ paddingVertical: 12 }}>What is Dibbs?</Link>
+      <Link href="/why-dibbs" style={{ paddingVertical: 12 }}>Why use Dibbs?</Link>
       <AuthMethods
         hideFirstHeading
         cardIntro
