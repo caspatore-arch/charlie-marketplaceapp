@@ -31,7 +31,8 @@ import { Button } from './ui/Button';
 import { PriceText } from './ui/PriceText';
 import { ReservationStatusPill } from './ReservationStatusPill';
 import { resolveMediaUrl } from '@/lib/trpc';
-import { exactMeetupTime } from '@/components/booking/time';
+import { exactMeetupTime, zoneAbbreviation } from '@/components/booking/time';
+import { DemoBadge } from './DemoBadge';
 import type { ReservationStatus } from '@/types';
 
 export interface MeetupCardProps {
@@ -49,6 +50,9 @@ export interface MeetupCardProps {
   /** True when the price came from an accepted offer. */
   agreedOffer?: boolean;
   status: ReservationStatus;
+  /** Optional spot extras, so the card is the one place the spot is described. */
+  spotHoursNote?: string | null;
+  spotIsDemo?: boolean;
   onPressDirections?: () => void;
   onReschedule?: () => void;
   onCancel?: () => void;
@@ -65,11 +69,15 @@ export function MeetupCard({
   timeZone,
   agreedOffer,
   status,
+  spotHoursNote,
+  spotIsDemo,
   onPressDirections,
   onReschedule,
   onCancel,
 }: MeetupCardProps) {
   const canAct = status === 'requested' || status === 'countered' || status === 'accepted';
+  // Once a meetup is closed, the map placeholder and Directions are noise.
+  const zone = zoneAbbreviation(timeZone, new Date(startsAt));
 
   return (
     <Card style={styles.card}>
@@ -94,12 +102,14 @@ export function MeetupCard({
         <ReservationStatusPill status={status} />
       </View>
 
-      <View style={styles.mapTile}>
-        <MapPin size={22} color={colors.accent} />
-        <Text variant="caption" color="inkFaint">
-          Map preview unavailable in this prototype
-        </Text>
-      </View>
+      {canAct ? (
+        <View style={styles.mapTile}>
+          <MapPin size={22} color={colors.accent} />
+          <Text variant="caption" color="inkFaint">
+            Map preview unavailable in this prototype
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.spotInfo}>
         {customAddress ? (
@@ -110,24 +120,38 @@ export function MeetupCard({
             <Text variant="label" weight="600">
               {customAddress}
             </Text>
+            <Text variant="caption" color="inkMuted">
+              Public places are safer for meeting someone new. Only share an address you&apos;re comfortable with.
+            </Text>
           </>
         ) : (
           <>
-            <Text variant="label" weight="600">
-              {spotName}
-            </Text>
-            <Text variant="caption" color="inkMuted">
-              {spotDescription}
-            </Text>
+            <View style={styles.spotNameRow}>
+              <Text variant="label" weight="600">
+                {spotName}
+              </Text>
+              <DemoBadge visible={!!spotIsDemo} />
+            </View>
+            {spotDescription ? (
+              <Text variant="caption" color="inkMuted">
+                {spotDescription}
+              </Text>
+            ) : null}
+            {spotHoursNote ? (
+              <Text variant="caption" color="inkMuted">
+                {spotHoursNote}
+              </Text>
+            ) : null}
           </>
         )}
         <Text variant="body" style={styles.time}>
           {exactMeetupTime(startsAt, timeZone)}
+          {zone ? ` ${zone}` : ''}
         </Text>
       </View>
 
       <View style={styles.actions}>
-        {onPressDirections ? (
+        {canAct && onPressDirections ? (
           <Button title="Directions" variant="secondary" onPress={onPressDirections} style={styles.actionBtn} />
         ) : null}
         {canAct && onReschedule ? (
@@ -155,6 +179,7 @@ const styles = StyleSheet.create({
     gap: space.xs,
   },
   spotInfo: { gap: 2 },
+  spotNameRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   time: { marginTop: space.xs },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   actionBtn: { flexGrow: 1 },

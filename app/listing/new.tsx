@@ -6,10 +6,10 @@
  * doesn't return to this form.
  */
 import React, { useEffect, useState } from 'react';
-import { Pressable } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
-import { Text } from '@/components/ui/Text';
+import { TextLink } from '@/components/ui/TextLink';
+import { GuardedCloseButton } from '@/components/sell/GuardedCloseButton';
 import { ListingForm, type ListingFormSubmitValues } from '@/components/sell/ListingForm';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
@@ -26,6 +26,7 @@ export default function NewListingScreen() {
   const [dirty, setDirty] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [published, setPublished] = useState<PublishedListing | null>(null);
+  const [tipsReplay, setTipsReplay] = useState(0);
 
   useEffect(() => {
     if (status === 'signedOut') {
@@ -89,18 +90,18 @@ export default function NewListingScreen() {
       <Stack.Screen
         options={{
           title: 'New listing',
-          headerLeft: () => (
-            <Pressable accessibilityRole="button" accessibilityLabel="Cancel" onPress={handleCancel} hitSlop={8}>
-              <Text variant="body" color="accent">
-                Cancel
-              </Text>
-            </Pressable>
+          headerLeft: () => <GuardedCloseButton onPress={handleCancel} label="Close" />,
+          headerRight: () => (
+            <TextLink variant="small" onPress={() => setTipsReplay((n) => n + 1)} accessibilityLabel="Tips for a great post">
+              Tips
+            </TextLink>
           ),
         }}
       />
-      {user ? <FirstPostTutorial key={user.id} userId={user.id} /> : null}
+      {user ? <FirstPostTutorial key={user.id} userId={user.id} replay={tipsReplay} /> : null}
       <ListingForm
         submitLabel="Publish"
+        publishCaption="Live for 24 hours. Didn't sell? Repost it at a lower price."
         enableAutofill
         submitting={createMutation.isPending}
         submitError={submitError}

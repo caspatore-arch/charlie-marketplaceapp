@@ -30,6 +30,7 @@ import { ServerErrorNote, type ServerErrorLike } from '@/components/offers/Serve
 import { clockTime, exactMeetupTime, relativeDayLabel, SLOT_MS, zoneAbbreviation } from '@/components/booking/time';
 import { trpc, resolveMediaUrl } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
+import { OFFERS_ENABLED } from '@/constants/features';
 import { colors, radius, space } from '@/constants/theme';
 import { formatPrice } from '@/utils/format';
 
@@ -59,11 +60,18 @@ function calendarUrl(b: BookedSummary): string {
 }
 
 export default function BookingScreen() {
-  const { listingId, offerId: offerIdParam, offerCents: offerCentsParam } = useLocalSearchParams<{
+  const {
+    listingId,
+    offerId: rawOfferId,
+    offerCents: rawOfferCents,
+  } = useLocalSearchParams<{
     listingId: string;
     offerId?: string;
     offerCents?: string;
   }>();
+  // Offers are hidden: ignore any offer params so booking is always at the asking price.
+  const offerIdParam = OFFERS_ENABLED ? rawOfferId : undefined;
+  const offerCentsParam = OFFERS_ENABLED ? rawOfferCents : undefined;
   const router = useRouter();
   const { status: authStatus } = useAuth();
   const requireAuth = useRequireAuth();
@@ -74,9 +82,16 @@ export default function BookingScreen() {
   const [startsAt, setStartsAt] = useState<string | undefined>();
   const [spotId, setSpotId] = useState<string | undefined>();
   const [error, setError] = useState<ServerErrorLike | null>(null);
+  const [justTaken, setJustTaken] = useState(false);
 
   useEffect(() => {
-    if (authStatus === 'signedOut' && listingId) requireAuth(`/reservation/request?listingId=${listingId}`);
+    if (authStatus === 'signedOut' && listingId) {
+      // Keep every param so an accepted offer survives the sign-in round trip.
+      const qs = new URLSearchParams({ listingId });
+      if (rawOfferId) qs.set('offerId', rawOfferId);
+      if (rawOfferCents) qs.set('offerCents', rawOfferCents);
+      requireAuth(`/reservation/request?${qs.toString()}`);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authStatus]);
 
@@ -84,7 +99,7 @@ export default function BookingScreen() {
   const slotsQuery = trpc.reservation.slots.useQuery({ listingId: listingId! }, { enabled: !!listingId });
   const offersQuery = trpc.offer.forListing.useQuery(
     { listingId: listingId! },
-    { enabled: !!listingId && authStatus === 'signedIn' },
+    { enabled: OFFERS_ENABLED && !!listingId && authStatus === 'signedIn' },
   );
 
   const listing = listingQuery.data;
@@ -112,6 +127,8 @@ export default function BookingScreen() {
   const selectedSlot = chart?.slots.find((s) => new Date(s.startsAt).toISOString() === startsAt);
   // If a refetch shows the chosen time is gone, treat it as unselected.
   const pickedStart = selectedSlot?.available ? startsAt : undefined;
+  // The seller's chart changed under the buyer: the time they chose is gone.
+  const slotGone = !!startsAt && !pickedStart && !!chart;
 
   const bookMutation = trpc.reservation.book.useMutation({
     onSuccess: async (res) => {
@@ -139,6 +156,8 @@ export default function BookingScreen() {
       if (err.data?.code === 'CONFLICT') {
         // Stale availability: show the message, refresh, send them back to pick again.
         setStep('pick');
+        setStartsAt(undefined);
+        setJustTaken(true);
         utils.reservation.slots.invalidate({ listingId: listingId! });
         utils.offer.forListing.invalidate({ listingId: listingId! });
         utils.listing.byId.invalidate({ id: listingId! });
@@ -154,6 +173,7 @@ export default function BookingScreen() {
   const review = useCallback(() => {
     if (!pickedStart || !spotId) return;
     setError(null);
+    setJustTaken(false);
     setStep('confirm');
   }, [pickedStart, spotId]);
 
@@ -305,7 +325,8 @@ export default function BookingScreen() {
         </Card>
 
         <Text variant="body">
-          Pay the seller in person when you meet. Dibbs never handles money. Seller keeps 100%.
+          Booking is instant: the seller is notified. Pay the seller in person when you meet. Dibbs never handles
+          money. Seller keeps 100%.
         </Text>
 
         <ServerErrorNote error={error} />
@@ -328,27 +349,39 @@ export default function BookingScreen() {
         </View>
       ) : null}
 
-      <ServerErrorNote error={error} />
+      {slotGone || justTaken ? (
+        <View style={styles.notice} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          <Text variant="body">That time was just taken. Pick another.</Text>
+        </View>
+      ) : null}
+      <ServerErrorNote error={slotGone || justTaken ? null : error} />
 
       <View style={styles.section}>
         <Text variant="title">Pick a time</Text>
         <Text variant="caption" color="inkMuted">
           15-minute meetups in campus time{zone ? ` (${zone})` : ''}.
           {chart.expiresAt
-            ? ` Listing is live until ${relativeDayLabel(chart.expiresAt, timeZone)} ${clockTime(chart.expiresAt, timeZone)}.`
+            ? ` Listing is live until ${relativeDayLabel(chart.expiresAt, timeZone)} ${clockTime(chart.expiresAt, timeZone)}. A confirmed meetup still happens after the listing expires.`
             : ''}
         </Text>
         {chart.slots.length === 0 || !anyAvailable ? (
           <EmptyState
             title="No open times"
-            body="No open times — message the seller."
-            actionLabel="Back to listing"
-            onAction={() => router.back()}
+            body="There are no open times left. Message the seller to ask for another."
+            actionLabel="Message seller"
+            onAction={() => messageSeller.mutate({ listingId: listingId! })}
           />
-        ) : null}
-        {chart.slots.length > 0 ? (
-          <TimeSlotPicker slots={chart.slots} timeZone={timeZone} selectedIso={pickedStart} onSelect={setStartsAt} />
-        ) : null}
+        ) : (
+          <TimeSlotPicker
+            slots={chart.slots}
+            timeZone={timeZone}
+            selectedIso={pickedStart}
+            onSelect={(iso) => {
+              setJustTaken(false);
+              setStartsAt(iso);
+            }}
+          />
+        )}
       </View>
 
       <View style={styles.section}>
@@ -369,6 +402,15 @@ export default function BookingScreen() {
         disabled={!pickedStart || !spotId}
         accessibilityLabel={!pickedStart || !spotId ? 'Review booking. Pick a time and a place first.' : 'Review booking'}
       />
+      {!pickedStart || !spotId ? (
+        <Text variant="caption" color="inkMuted" style={styles.hint}>
+          {!pickedStart && !spotId
+            ? 'Pick a time and a place to continue.'
+            : !pickedStart
+              ? 'Pick a time to continue.'
+              : 'Pick a place to continue.'}
+        </Text>
+      ) : null}
       <Button title="Back" variant="ghost" onPress={() => router.back()} />
     </Screen>
   );
@@ -398,5 +440,6 @@ const styles = StyleSheet.create({
   thumb: { width: 72, height: 72, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
   itemInfo: { flex: 1, gap: 2 },
   summaryRow: { gap: 2 },
+  hint: { textAlign: 'center', marginTop: -space.md },
   notice: { backgroundColor: colors.warningSoft, borderRadius: radius.md, padding: space.md },
 });

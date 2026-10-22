@@ -37,11 +37,13 @@ import { trpc } from '@/lib/trpc';
 import { colors, space } from '@/constants/theme';
 import { formatPrice } from '@/utils/format';
 
-function formatDeadline(at: Date): string {
-  return at.toLocaleString(undefined, {
+function formatDeadline(at: Date, timeZone?: string): string {
+  return at.toLocaleString('en-US', {
+    timeZone,
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   });
 }
 
@@ -62,7 +64,7 @@ export default function PaymentRoute() {
 function PaymentScreen() {
   const { reservationId } = useLocalSearchParams<{ reservationId: string }>();
   const router = useRouter();
-  const { status: authStatus } = useAuth();
+  const { status: authStatus, user } = useAuth();
   const utils = trpc.useUtils();
   const [error, setError] = React.useState<string | null>(null);
 
@@ -131,6 +133,12 @@ function PaymentScreen() {
       <Stack.Screen options={{ title: 'Payment' }} />
 
       <View style={styles.wrap}>
+        {!isBuyer ? (
+          <Text variant="body" color="inkMuted">
+            You are the seller here. The buyer pays from their own screen; you will see it marked
+            paid once their payment goes through.
+          </Text>
+        ) : null}
         <PaymentsModeBanner
           detail={
             data.simulated
@@ -181,19 +189,27 @@ function PaymentScreen() {
           </Text>
         </Card>
 
-        <Text variant="body" color="inkMuted" style={styles.explainer}>
-          You pay now; the seller is paid right away. Arrange the handoff in the app. The payment
-          goes straight to the seller&apos;s own payment account — this app does not hold your money at
-          any point.
-        </Text>
-        <Text variant="body" color="inkMuted" style={styles.explainer}>
-          Because the seller is paid immediately, the app cannot take the money back on its own. A
-          refund happens only if the seller agrees or a moderator steps in.
-        </Text>
+        {data.simulated ? (
+          <Text variant="body" color="inkMuted" style={styles.explainer}>
+            Simulated — nothing is charged or paid out.
+          </Text>
+        ) : (
+          <>
+            <Text variant="body" color="inkMuted" style={styles.explainer}>
+              You pay now; the seller is paid right away. Arrange the handoff in the app. The payment
+              goes straight to the seller&apos;s own payment account — this app does not hold your money at
+              any point.
+            </Text>
+            <Text variant="body" color="inkMuted" style={styles.explainer}>
+              Because the seller is paid immediately, the app cannot take the money back on its own. A
+              refund happens only if the seller agrees or a moderator steps in.
+            </Text>
+          </>
+        )}
 
-        {!paid && !refunded && !data.timedOut ? (
+        {isBuyer && canPay ? (
           <Text variant="caption" color="inkFaint">
-            Pay by {formatDeadline(data.payDeadline)} or this meetup is cancelled and the seller can
+            Pay by {formatDeadline(data.payDeadline, user?.campus?.timezone)} or this meetup is cancelled and the seller can
             relist the item.
           </Text>
         ) : null}
@@ -203,13 +219,6 @@ function PaymentScreen() {
             {data.cancelReason === 'payment_timeout'
               ? 'The 24-hour window to pay has passed, so this meetup was cancelled and the item went back to the seller.'
               : 'This meetup is closed, so it can no longer be paid for.'}
-          </Text>
-        ) : null}
-
-        {!isBuyer ? (
-          <Text variant="body" color="inkMuted">
-            You are the seller here. The buyer pays from their own screen; you will see it marked
-            paid once their payment goes through.
           </Text>
         ) : null}
 
@@ -224,15 +233,15 @@ function PaymentScreen() {
         ) : null}
 
         {error ? (
-          <Text variant="caption" style={styles.error}>
+          <Text variant="caption" style={styles.error} accessibilityRole="alert">
             {error}
           </Text>
         ) : null}
 
         {payment && !paid && !refunded ? (
           <Text variant="caption" color="inkFaint">
-            Payment status: {payment.status.replace('_', ' ')}
-            {data.simulated
+            Payment status: {payment.status.replaceAll('_', ' ')}
+            {__DEV__ && data.simulated
               ? ' — in simulated mode a payment only becomes paid when the local test hook sends the webhook.'
               : ''}
           </Text>
