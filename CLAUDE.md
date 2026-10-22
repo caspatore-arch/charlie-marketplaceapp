@@ -15,6 +15,19 @@ Subagents: always set `model` to the cheapest one that does the job well.
 - **opus**: only API contracts, auth/payments/data-integrity code, tricky debugging,
   security review, and the coordinator's final verification.
 If a cheaper agent's output fails verification, retry once one tier up.
+Sessions themselves run on Sonnet unless the owner picks otherwise; keep the main
+conversation lean and hand big reads, test runs and mechanical edits to subagents.
+
+# Working alongside other sessions (owner directive, 2026-10-22)
+
+Several sessions share this checkout and its git index. The coordinator is the
+session titled "Dibbs page-by-page overhaul" (it may show as "New session"):
+- Before editing files another session may be using, run `git status --short`.
+  If anything you'd touch already has someone else's uncommitted changes,
+  message the coordinator first.
+- Don't commit, stage, stash, reset or check out in the shared checkout unless
+  the coordinator agrees. Work that can't wait goes in its own worktree and branch.
+- Keep `docs/OVERHAUL.md` decisions intact; the coordinator records owner decisions there.
 
 Reading:
 - `docs/CONTRACT.md` is large; grep for the section you need instead of reading it whole.
