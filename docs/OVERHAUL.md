@@ -40,17 +40,17 @@ And the 24-hour rule is a feature, not a worry. If an item doesn't sell in a day
 the market has spoken: repost it at a lower price.
 
 **Owner feature decisions (2026-10-22):**
-- **Saved list.** Buyers keep a list of saved items they might want. Saving already
+- **Saved list.** ✅ Built (`934ae57`). Buyers keep a list of saved items they might want. Saving already
   works (the heart on cards and listings, swipe right, a Saved section on Profile);
   make the list easy to reach and useful. Because items expire after 24 hours,
   show "expires in Xh" on saved items and nudge the buyer before one disappears.
-- **15-minute meetups.** Sellers pick the time blocks they're available. The buyer
+- **15-minute meetups.** ✅ Built (`a175089`). Sellers pick the time blocks they're available. The buyer
   agrees to one 15-minute slot inside a block (today the slot is 30 minutes).
   Change `MEETUP_SLOT_MINUTES` in `backend/trpc/lib.ts`, the slot grid checks in
   `backend/trpc/routes/reservation.ts` and `listing.ts`, the time picker and the
   booking copy, then run `test:workstreams` and `test:e2e` (they assume 30).
 
-- **No payments for now.** No platform fee and no card processing fee. Booking ends
+- **No payments for now.** ✅ Built (`ae75a83`). No platform fee and no card processing fee. Booking ends
   on a confirmation page, not a payment step: the buyer pays the seller in person
   however they agree. Set the platform fee to 0, remove the fee breakdown from
   booking, and turn `app/payments/[reservationId].tsx` into (or replace it with) a
