@@ -6,6 +6,7 @@ import { runMigrations } from './db/migrate';
 import { db, dbKind } from './db/client';
 import { resolveSmsMode } from './sms/provider';
 import { resolveEmailMode } from './email/provider';
+import { startBookingEmailDispatcher } from './email/bookings';
 import { startSmsDispatcher } from './sms/outbox';
 import { env } from './env';
 import app from './hono';
@@ -22,6 +23,7 @@ function lanAddress(): string | null {
 async function main() {
   await runMigrations();
   startSmsDispatcher(db);
+  startBookingEmailDispatcher(db);
 
   const port = env.port;
   serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {

@@ -76,7 +76,8 @@ export function PostPublishModal({ listing, onViewListing, onBackToFeed }: Props
               It stays up for 24 hours, then it expires. Share it now while buyers are around.
             </Text>
 
-            <Text variant="heading">Share it</Text>
+            <Text variant="heading">Send your listing to a friend</Text>
+            <Text selectable variant="caption" color="accentInk">{content.url}</Text>
             <ShareRow content={content} />
 
             <Button title="View my listing" size="lg" onPress={onViewListing} />

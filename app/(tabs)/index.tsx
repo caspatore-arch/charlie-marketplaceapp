@@ -285,9 +285,10 @@ export default function BrowseScreen() {
   const headerBlock = (
     <View style={styles.header}>
       <View style={styles.brandRow}>
-        <Logo variant="wordmark" width={72} />
+        <Logo variant="wordmark" width={104} />
         {campus?.name ? <Text variant="title">{campus.name}</Text> : null}
       </View>
+      <Text variant="body" color="inkMuted">Find your next campus favorite. Book a time. Meet nearby.</Text>
       {campus?.isDemo ? (
         <Text variant="caption" color="inkFaint" style={styles.demoNote}>
           Demo campus — listings and locations are for demonstration only.

@@ -17,6 +17,9 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dibbs-ws-'));
 process.env.PGLITE_DIR = path.join(tempRoot, 'pg');
 process.env.UPLOADS_DIR = path.join(tempRoot, 'uploads');
 process.env.DEV_LOGIN = '1';
+process.env.DATABASE_URL = '';
+process.env.NODE_ENV = 'test';
+process.env.EMAIL_MODE = 'simulated';
 process.env.SMS_MODE = 'simulated';
 process.env.SMS_DISPATCH_INTERVAL_MS = '0';
 
@@ -736,6 +739,71 @@ async function main() {
     await expectCode('BAD_REQUEST', () =>
       appRouter.createCaller({ db, user: outsider! }).user.updateSmsPreferences({ smsOptIn: true }),
     );
+  });
+
+  await check('upvotes: repeat votes, removal, campus and authentication boundaries', async () => {
+    const post = await (await as(MAYA)).community.create({ kind: 'selling', body: 'Vote regression item' });
+    const voter = await as(JORDAN);
+    await Promise.all([voter.community.setVote({ id: post.id, voted: true }), voter.community.setVote({ id: post.id, voted: true })]);
+    const seen = await voter.community.byId({ id: post.id });
+    eq(seen.voteCount, 1, 'concurrent repeats count once');
+    eq(seen.viewerVoted, true, 'own vote is shown');
+    eq((await voter.community.setVote({ id: post.id, voted: false })).voteCount, 0, 'remove vote');
+    eq((await voter.community.setVote({ id: post.id, voted: false })).voteCount, 0, 'repeat removal');
+    await expectCode('UNAUTHORIZED', () => anon.community.setVote({ id: post.id, voted: true }));
+    await expectCode('NOT_FOUND', () => appRouter.createCaller({ db, user: outsider! }).community.setVote({ id: post.id, voted: true }));
+    await (await as(MAYA)).community.remove({ id: post.id });
+    await expectCode('NOT_FOUND', () => voter.community.setVote({ id: post.id, voted: true }));
+  });
+
+  await check('meetup email: both participants, retry, dedupe, and stale cancellation', async () => {
+    const { dispatchBookingEmails, enqueueBookingEmails } = await import('../backend/email/bookings');
+    // Only this test's messages are dispatched; the database is a temporary fixture.
+    await db.delete(schema.bookingEmails);
+    const listing = await makeListing(MAYA, { startH: 22, endH: 23 });
+    const buyer = await as(JORDAN);
+    const slot = (await buyer.reservation.slots({ listingId: listing.id })).slots.find((x) => x.available)!;
+    const booking = await buyer.reservation.book({ listingId: listing.id, spotId: SPOT_A, startsAt: slot.startsAt });
+    const [row] = await db.select().from(schema.reservations).where(d.eq(schema.reservations.id, booking.id));
+    await enqueueBookingEmails(db, row!);
+    eq((await db.select().from(schema.bookingEmails)).length, 2, 'one queue row per participant');
+    const before = mail.sent.length;
+    mail.failNext = 1;
+    await dispatchBookingEmails(db);
+    eq(mail.sent.length - before, 1, 'other participant still receives email after one failure');
+    await dispatchBookingEmails(db, new Date(Date.now() + 2 * 60_000));
+    eq(mail.sent.length - before, 2, 'failed send retried');
+    const messages = mail.sent.slice(before);
+    assert(messages.every((m) => m.text.includes('America/Phoenix') && m.text.includes(`/reservation/${booking.id}`) && m.text.includes('Where:')), 'email includes time, place and link');
+    eq(new Set(messages.map((m) => m.to)).size, 2, 'separate recipients');
+    await dispatchBookingEmails(db);
+    eq(mail.sent.length - before, 2, 'sent rows are not resent');
+    await db.update(schema.bookingEmails).set({ status: 'scheduled' });
+    await buyer.reservation.cancel({ id: booking.id });
+    await dispatchBookingEmails(db, new Date(Date.now() + 3 * 60_000));
+    eq(mail.sent.length - before, 2, 'cancelled booking emails skipped');
+    assert((await db.select().from(schema.bookingEmails)).every((r) => r.status === 'skipped'), 'stale queue rows marked skipped');
+  });
+
+  await check('Twilio: signed STOP cancels queue; forged callback cannot change consent', async () => {
+    const { createHmac } = await import('node:crypto');
+    const { handleSmsOptOut, validTwilioSignature } = await import('../backend/sms/webhook');
+    assert(validTwilioSignature('https://example.com/myapp.php?foo=1&bar=2', new URLSearchParams({ Digits: '1234', To: '+18005551212', From: '+14158675310', Caller: '+14158675310', CallSid: 'CA1234567890ABCDE' }), 'L/OH5YylLD5NRKLltdqwSvS0BnU=', '12345'), 'Twilio published signature fixture validates');
+    process.env.TWILIO_AUTH_TOKEN = 'test-only-token';
+    process.env.TWILIO_ACCOUNT_SID = 'ACtest';
+    process.env.TWILIO_INBOUND_WEBHOOK_URL = 'https://example.test/api/sms/inbound';
+    const person = await userRow(MAYA);
+    await db.update(schema.users).set({ smsOptIn: true }).where(d.eq(schema.users.id, MAYA));
+    await makeListing(MAYA);
+    const params = new URLSearchParams({ From: person.phone!, AccountSid: 'ACtest', Body: 'STOP', OptOutType: 'STOP' });
+    eq(await handleSmsOptOut(db, params.toString(), 'forged'), 403, 'bad signature refused');
+    eq((await userRow(MAYA)).smsOptIn, true, 'forgery does not change consent');
+    const signature = createHmac('sha1', 'test-only-token').update(process.env.TWILIO_INBOUND_WEBHOOK_URL + [...params.keys()].sort().map((k) => k + params.get(k)).join('')).digest('base64');
+    eq(await handleSmsOptOut(db, params.toString(), signature), 200, 'valid STOP accepted');
+    eq((await userRow(MAYA)).smsOptIn, false, 'app consent removed');
+    eq((await smsRows(d.and(d.eq(schema.smsMessages.userId, MAYA), d.eq(schema.smsMessages.status, 'scheduled')))).length, 0, 'queued texts cancelled');
+    eq(await handleSmsOptOut(db, params.toString(), signature), 200, 'duplicate STOP harmless');
+    eq(await handleSmsOptOut(db, params.toString().replace('STOP', 'START'), signature), 403, 'tampering refused');
   });
 
   /* ------------------------------------------------------------ report */

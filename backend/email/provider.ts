@@ -20,6 +20,7 @@ export interface EmailMessage {
   subject: string;
   text: string;
   html?: string;
+  idempotencyKey?: string;
 }
 
 export interface EmailProvider {
@@ -65,7 +66,7 @@ export class ResendEmailProvider implements EmailProvider {
   async send(msg: EmailMessage) {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${env.resendApiKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${env.resendApiKey}`, 'Content-Type': 'application/json', ...(msg.idempotencyKey ? { 'Idempotency-Key': msg.idempotencyKey } : {}) },
       body: JSON.stringify({ from: env.emailFrom, to: [msg.to], subject: msg.subject, text: msg.text, html: msg.html }),
       signal: AbortSignal.timeout(10_000),
     });

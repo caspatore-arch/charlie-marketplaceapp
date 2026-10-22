@@ -15,7 +15,7 @@
  * Copy stays plain: a campus email proves you are a student there, not that
  * you are trustworthy, and Dibbs holds no money.
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Redirect, Stack, useRouter } from 'expo-router';
@@ -35,15 +35,15 @@ const WIDE = 880;
 const STEPS = [
   {
     title: 'List it for 24 hours',
-    body: 'A photo, a price, and when you can meet. Listings don’t linger — what you see is what’s actually still around.',
+    body: 'A photo, a price, and when you can meet. Posts expire after a day, keeping yesterday’s listings out of today’s feed.',
   },
   {
     title: 'Buyers book an exact time and spot',
     body: 'No “is this still available?” Pick a 30-minute slot at a campus meetup spot from the times the seller already offered.',
   },
   {
-    title: 'Make an offer',
-    body: 'Price too high? Offer less, with the time and place attached. The seller accepts or declines.',
+    title: 'Meet, check it, make it yours',
+    body: 'Meet in public on campus. Check the item together, arrange payment directly, and confirm the handoff in Dibbs.',
   },
 ];
 
@@ -51,6 +51,8 @@ export default function WelcomeScreen() {
   const { width } = useWindowDimensions();
   const wide = width >= WIDE;
   const router = useRouter();
+  const scroll = useRef<ScrollView>(null);
+  const sections = useRef<Record<string, number>>({});
   const { status } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signup');
   // Once the card finishes we navigate ourselves; this stops the signed-in
@@ -90,6 +92,8 @@ export default function WelcomeScreen() {
         {mode === 'signup' ? 'Make your Dibbs account' : 'Welcome back'}
       </Text>
 
+      <Text variant="body" color="inkMuted">Sell what you no longer use, discover affordable secondhand finds, and book a campus meetup. Verify your campus email to start buying, selling, or posting.</Text>
+
       {status === 'loading' || finishing ? (
         <View style={styles.loading}>
           <Skeleton height={48} />
@@ -119,7 +123,7 @@ export default function WelcomeScreen() {
   return (
     <View style={styles.page}>
       <Stack.Screen options={{ headerShown: false, title: 'Dibbs — the UArizona student marketplace' }} />
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scroll} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Hero: the logo's own red, so the transparent wordmark has no seam. */}
         <View style={styles.hero}>
           <View style={styles.inner}>
@@ -129,6 +133,13 @@ export default function WelcomeScreen() {
               contentFit="contain"
               style={{ width: wide ? 268 : 190, aspectRatio: WORDMARK_RATIO }}
             />
+            <View style={styles.nav}>
+              {['About us', 'How it works', 'Why use Dibbs', 'Get started'].map((label) => (
+                <Pressable key={label} accessibilityRole="button" onPress={() => label === 'About us' ? router.push('/about') : label === 'Why use Dibbs' ? router.push('/why-dibbs') : scroll.current?.scrollTo({ y: (sections.current.content ?? 0) + (sections.current[label] ?? 0) + (label === 'Get started' ? (sections.current.cardOffset ?? 0) : 0), animated: false })} style={styles.navLink}>
+                  <Text variant="label" weight="700">{label}</Text>
+                </Pressable>
+              ))}
+            </View>
             <Text variant="label" weight="600" color="white" style={styles.tagline}>
               CAMPUS MARKETPLACE
             </Text>
@@ -155,9 +166,27 @@ export default function WelcomeScreen() {
           </View>
         </View>
 
-        <View style={styles.inner}>
-          <View style={[styles.panel, wide ? styles.panelWide : null]}>
-            {wide ? null : card}
+        <View style={styles.inner} onLayout={(e) => { sections.current['content'] = e.nativeEvent.layout.y; }}>
+          <View style={styles.about} onLayout={(e) => { sections.current['About us'] = e.nativeEvent.layout.y; }}>
+            <Text variant="title" accessibilityRole="header">About us</Text>
+            <Text variant="body">Good stuff deserves another semester.</Text>
+            <Text variant="body" color="inkMuted">Dibbs is an independent campus marketplace starting at the University of Arizona. We’re making it easier to pass along the clothes, books, tech, and dorm finds you no longer need to someone nearby who does.</Text>
+          </View>
+          <View style={styles.benefits} onLayout={(e) => { sections.current['Why use Dibbs'] = e.nativeEvent.layout.y; }}>
+            <Text variant="title" accessibilityRole="header">Why use Dibbs?</Text>
+            <Text variant="body">Less back-and-forth. More actual meetups.</Text>
+            {[
+              ['Stay close to campus', 'Browse your campus community and choose a campus meetup spot. Less travel makes a handoff easier to fit between classes.', colors.successSoft],
+              ['Know when you can meet', 'Sellers share availability up front. Buyers book an exact 30-minute slot, so both people have a clear plan.', colors.warningSoft],
+              ['Find something fresh', 'Listings expire after 24 hours. Share your link with friends while it’s live, or make an offer on a find you love.', colors.demoSoft],
+            ].map(([title, body, backgroundColor]) => (
+              <View key={title} style={[styles.benefit, { backgroundColor }]}>
+                <Text variant="heading" accessibilityRole="header">{title}</Text>
+                <Text variant="body">{body}</Text>
+              </View>
+            ))}
+          </View>
+          <View onLayout={(e) => { sections.current['How it works'] = e.nativeEvent.layout.y; sections.current['Get started'] = sections.current['How it works']; }} style={[styles.panel, wide ? styles.panelWide : null]}>
 
             <View style={[styles.steps, wide ? styles.stepsWide : null]}>
               <Text variant="caption" weight="700" color="accentInk" style={styles.sectionLabel}>
@@ -182,7 +211,7 @@ export default function WelcomeScreen() {
               ))}
             </View>
 
-            {wide ? <View style={styles.cardCol}>{card}</View> : null}
+            <View onLayout={(e) => { sections.current.cardOffset = e.nativeEvent.layout.y; }} style={wide ? styles.cardCol : undefined}>{card}</View>
           </View>
 
           <View style={styles.plain}>
@@ -191,7 +220,7 @@ export default function WelcomeScreen() {
             </Text>
             <Text variant="label" color="inkMuted">
               Dibbs doesn’t hold your money, handle payment, or check who anyone is. A campus email proves someone is
-              a student here — not that they’re trustworthy. Meet in public, on campus, and use your own judgment.
+              in control of that campus email address. It does not verify identity or trustworthiness. Meet in public, on campus, and use your own judgment.
             </Text>
           </View>
 
@@ -216,6 +245,11 @@ export default function WelcomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  nav: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.lg },
+  navLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.md, backgroundColor: colors.white, borderRadius: radius.pill },
+  about: { paddingVertical: space.xxxl, gap: space.md },
+  benefits: { gap: space.md },
+  benefit: { padding: space.xl, borderRadius: radius.lg, gap: space.sm },
   page: { flex: 1, backgroundColor: colors.bg },
   scroll: { flexGrow: 1, paddingBottom: 72 },
   inner: { width: '100%', maxWidth: 1060, alignSelf: 'center', paddingHorizontal: space.lg },
@@ -238,7 +272,7 @@ const styles = StyleSheet.create({
   pillText: { fontSize: 13, letterSpacing: 0.3 },
 
   // The card laps onto the red band, as on the old page.
-  panel: { gap: space.xxxl, marginTop: -28 },
+  panel: { gap: space.xxxl, marginTop: 28 },
   panelWide: { flexDirection: 'row', alignItems: 'flex-start', gap: 48 },
 
   steps: { paddingTop: space.lg, gap: 26 },

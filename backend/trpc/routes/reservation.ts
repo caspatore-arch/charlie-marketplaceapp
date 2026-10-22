@@ -38,6 +38,7 @@ import {
   users,
   type Reservation,
 } from '../../db/schema';
+import { enqueueBookingEmails } from '../../email/bookings';
 import { cancelBookingSms, enqueueBookingSms } from '../../sms/outbox';
 import { directionsUrlForCoords, geocodeAddress, haversineMeters, GeocodeError } from '../../geocode';
 import { notifyMeetupEvent, type MeetupEventKind } from '../../notifications/events';
@@ -664,6 +665,7 @@ export const reservationRouter = router({
             now,
           );
 
+          await enqueueBookingEmails(tx as unknown as Db, accepted!);
           return accepted!;
         });
       } catch (err) {
@@ -998,6 +1000,7 @@ export const reservationRouter = router({
               ),
             );
           await closeOffersOnReserve(tx, listing.id, reservation!.id, held?.id ?? null, now);
+          await enqueueBookingEmails(tx as unknown as Db, reservation!);
           return { reservation: reservation!, reused: false };
         });
         created = out.reservation;

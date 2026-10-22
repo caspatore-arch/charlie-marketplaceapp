@@ -6,6 +6,7 @@ import { db, dbKind } from './db/client';
 import { env } from './env';
 import { callerKey, rateLimit } from './ratelimit';
 import { paymentsMode } from './stripe/client';
+import { handleSmsOptOut } from './sms/webhook';
 import { resolveSmsMode } from './sms/provider';
 import { resolveEmailMode } from './email/provider';
 import {
@@ -48,6 +49,15 @@ app.use(
       : { origin: '*', allowHeaders: ['Authorization', 'Content-Type'] },
   ),
 );
+
+app.post('/api/sms/inbound', async (c) => {
+  if (!c.req.header('content-type')?.includes('application/x-www-form-urlencoded')) return c.text('Unsupported media type', 415);
+  const raw = await c.req.text();
+  if (raw.length > 16384) return c.text('Request too large', 413);
+  const status = await handleSmsOptOut(db, raw, c.req.header('x-twilio-signature') ?? '');
+  if (status !== 200) return c.text('Callback refused', status as 400 | 403 | 503);
+  return c.body('<Response/>', 200, { 'Content-Type': 'text/xml' });
+});
 
 app.get('/api/health', (c) => {
   const { mode, reason, requested } = paymentsMode();

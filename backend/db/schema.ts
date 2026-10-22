@@ -933,3 +933,16 @@ export type CommunityComment = typeof communityComments.$inferSelect;
 export type Follow = typeof follows.$inferSelect;
 export type SmsMessage = typeof smsMessages.$inferSelect;
 export type ReservationEvent = typeof reservationEvents.$inferSelect;
+
+/** Durable booking confirmation email queue; recipient address is resolved at send time. */
+export const bookingEmails = pgTable('booking_emails', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reservationId: uuid('reservation_id').notNull().references(() => reservations.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  meetupStartsAt: ts('meetup_starts_at').notNull(),
+  dedupeKey: text('dedupe_key').notNull().unique(),
+  status: text('status').notNull().default('scheduled'),
+  attempts: integer('attempts').notNull().default(0),
+  sendAfter: ts('send_after').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => [index('booking_emails_due_idx').on(t.status, t.sendAfter)]);
