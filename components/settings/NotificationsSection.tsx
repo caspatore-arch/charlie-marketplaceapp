@@ -11,11 +11,12 @@ import { Text } from '@/components/ui/Text';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { trpc } from '@/lib/trpc';
+import { OFFERS_ENABLED } from '@/constants/features';
 import { colors, space } from '@/constants/theme';
 
 type Category = 'messages' | 'meetups' | 'offers';
 
-const ROWS: { key: Category; label: string; helper: string }[] = [
+const ALL_ROWS: { key: Category; label: string; helper: string }[] = [
   { key: 'messages', label: 'Messages', helper: 'A new message from a buyer or seller.' },
   {
     key: 'meetups',
@@ -28,6 +29,8 @@ const ROWS: { key: Category; label: string; helper: string }[] = [
     helper: 'A new offer on your item, or an offer you made being accepted or declined.',
   },
 ];
+
+const ROWS = ALL_ROWS.filter((r) => OFFERS_ENABLED || r.key !== 'offers');
 
 export function NotificationsSection() {
   const utils = trpc.useUtils();
@@ -70,8 +73,8 @@ export function NotificationsSection() {
   return (
     <View style={styles.wrap}>
       <Text variant="body" color="inkMuted" style={styles.intro}>
-        Choose what can notify you. This app never sends push notifications until you make an offer,
-        send a message, or book a meetup for the first time — and only for what you leave on here.
+        Choose what can notify you. This app never sends push notifications until you send a message
+        or book a meetup for the first time, and only for what you leave on here.
       </Text>
 
       {ROWS.map((row) => (
@@ -86,7 +89,8 @@ export function NotificationsSection() {
             value={prefs[row.key]}
             onValueChange={(next) => updateMutation.mutate({ [row.key]: next })}
             trackColor={{ false: colors.line, true: colors.accent }}
-            thumbColor={colors.surface}
+            thumbColor={colors.white}
+            ios_backgroundColor={colors.line}
             accessibilityLabel={`${row.label} notifications`}
             accessibilityRole="switch"
           />

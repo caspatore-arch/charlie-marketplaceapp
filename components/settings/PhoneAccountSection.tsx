@@ -135,7 +135,18 @@ function PhoneEditor({ hasPhone, onClose }: { hasPhone: boolean; onClose: () => 
   );
 }
 
-export function PhoneAccountSection() {
+export interface PhoneAccountSectionProps {
+  /**
+   * 'verification' = phone + campus email only (Settings > Verification);
+   * 'texts' = the text-message switch only (Settings > Notifications);
+   * omitted = everything, as before.
+   */
+  part?: 'verification' | 'texts';
+}
+
+export function PhoneAccountSection({ part }: PhoneAccountSectionProps = {}) {
+  const showVerification = part !== 'texts';
+  const showTexts = part !== 'verification';
   const utils = trpc.useUtils();
   const settings = trpc.user.contactSettings.useQuery();
   const [editingPhone, setEditingPhone] = useState(false);
@@ -163,6 +174,11 @@ export function PhoneAccountSection() {
 
   return (
     <View style={styles.wrap}>
+      {showVerification ? (
+        <>
+      <Text variant="caption" color="inkMuted">
+        Phone verified and campus email verified are two separate checks. Neither is an ID check.
+      </Text>
       <View style={styles.row}>
         <View style={styles.rowText}>
           <Text variant="label" color="inkMuted">
@@ -202,7 +218,7 @@ export function PhoneAccountSection() {
       </View>
       {s.campusEmailVerified ? (
         <Text variant="caption" color="inkFaint">
-          Verified @arizona.edu email — not an identity check
+          Campus email verified. This is not an ID check.
         </Text>
       ) : verifyingEmail ? (
         <View style={styles.editor}>
@@ -216,8 +232,7 @@ export function PhoneAccountSection() {
       ) : (
         <>
           <Text variant="caption" color="inkFaint">
-            Your phone proves it’s you. Your campus email proves you’re a student — it’s required to buy, sell, or
-            post.
+            Campus email verification is required to buy, sell, or post. It is not an ID check.
           </Text>
           <Button
             title="Verify campus email"
@@ -227,7 +242,11 @@ export function PhoneAccountSection() {
           />
         </>
       )}
+        </>
+      ) : null}
 
+      {showTexts ? (
+        <>
       <View style={styles.row}>
         <View style={styles.rowText}>
           <Text variant="heading">Text message notifications</Text>
@@ -246,6 +265,8 @@ export function PhoneAccountSection() {
           }}
           accessibilityLabel="Text message notifications"
           trackColor={{ true: colors.accent, false: colors.line }}
+          thumbColor={colors.white}
+          ios_backgroundColor={colors.line}
           style={styles.switch}
         />
       </View>
@@ -253,6 +274,8 @@ export function PhoneAccountSection() {
       <Text variant="caption" color="inkFaint">
         {SMS_CODES_NOTE} Msg & data rates may apply. Reply STOP to opt out.
       </Text>
+        </>
+      ) : null}
     </View>
   );
 }

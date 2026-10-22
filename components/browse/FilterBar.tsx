@@ -45,6 +45,8 @@ export function FilterBar({
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.row}
     >
+      <Chip label="Pickup today" selected={pickupToday} onPress={onTogglePickupToday} />
+      <View style={styles.divider} />
       <Chip label="All" selected={category === 'all'} onPress={() => onCategoryChange('all')} />
       {CATEGORIES.map((c) => (
         <Chip
@@ -55,7 +57,6 @@ export function FilterBar({
         />
       ))}
       <View style={styles.divider} />
-      <Chip label="Pickup today" selected={pickupToday} onPress={onTogglePickupToday} />
       <Chip label={priceLabel} selected={priceActive} onPress={onPressPrice} />
       {sizeVisible ? <Chip label={sizeLabel} selected={sizeActive} onPress={onPressSize} /> : null}
     </ScrollView>

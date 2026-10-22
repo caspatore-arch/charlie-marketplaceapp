@@ -49,6 +49,13 @@ export interface LegalSection {
 
 export const TERMS_TITLE = 'Terms of Service';
 
+/** Short plain-English summary shown above the full text. Not a substitute for it. */
+export const TERMS_SUMMARY: string[] = [
+  'Dibbs is a prototype campus marketplace. You meet other students in person; Dibbs is not part of the trade.',
+  'No payments happen in the app. Phone verified and campus email verified are not ID checks.',
+  'Community posts disappear after 24 hours. Report or block anyone who makes you uncomfortable.',
+];
+
 export const TERMS_SECTIONS: LegalSection[] = [
   {
     heading: '1. What this is',
@@ -61,16 +68,16 @@ export const TERMS_SECTIONS: LegalSection[] = [
     heading: '2. Eligibility',
     body: [
       `You must be at least ${MINIMUM_AGE} years old to create an account. Age is self-declared at sign-up — the App does not verify your age or identity.`,
-      'You must sign up with a campus email address. Campus email verification confirms you can receive mail at that address; it is not an identity check and does not confirm you are a student, faculty, or staff member.',
+      'You verify a phone number when you sign up, and you must verify a campus email address to buy, sell, or post. Phone verified means you can receive a text at that number. Campus email verified means you can receive mail at that address. Neither is an identity check, and neither confirms you are a student, faculty, or staff member.',
     ],
   },
   {
     heading: '3. What is real, and what is simulated',
     body: [
       'This section must always match docs/HANDOFF.md §3 exactly, in plain language:',
-      'No real payments happen anywhere in the App. Any price, fee, or "total" shown is a simulated calculation for demonstration purposes only. No money moves, no payment processor is connected, and the App does not hold, transmit, or protect funds.',
+      'No payments happen in the App. Payments are switched off: no payment processor is active, the App charges no fees, and it does not hold, transmit, or protect funds. A listing price is what the buyer and seller agree to settle between themselves in person.',
       'Sign-in codes are not emailed to you in this prototype. They are simulated delivery — printed to the operator\'s server log — and this will change before any real launch.',
-      'The App does not verify your identity, run background checks, or vet other users beyond confirming a campus email address.',
+      'The App does not verify your identity, run background checks, or vet other users beyond confirming a phone number and a campus email address. Phone verification is not identity verification.',
       'The App does not resolve disputes between users. If a trade goes wrong, the operator can review reports but cannot guarantee a refund, replacement, or any particular outcome, because no money or goods pass through the operator at all.',
       'Meetup spots and listings marked "Demo" are sample data for testing and have not been verified for accuracy, hours, or permission to use as a meetup location.',
     ],
@@ -86,7 +93,8 @@ export const TERMS_SECTIONS: LegalSection[] = [
   {
     heading: '5. Your content',
     body: [
-      'You are responsible for what you post — listing text, photos, and messages. Do not post anything illegal, fraudulent, or that you do not have the right to post.',
+      'You are responsible for what you post — listing text, photos, messages, Community posts, and comments. Do not post anything illegal, fraudulent, or that you do not have the right to post.',
+      'Listings and Community posts are temporary. Community posts disappear from the feed after 24 hours, and listings expire on their own schedule, so an item that does not sell can be listed again.',
       'The operator can remove listings or content, and suspend or close accounts, at its discretion — including through the moderation tools described in docs/HANDOFF.md.',
     ],
   },
@@ -121,6 +129,14 @@ export const TERMS_SECTIONS: LegalSection[] = [
 
 export const PRIVACY_TITLE = 'Privacy Policy';
 
+/** Short plain-English summary shown above the full text. Not a substitute for it. */
+export const PRIVACY_SUMMARY: string[] = [
+  'We keep your phone number and verification status, your campus email, your profile, and what you post (listings, messages, Community posts, comments and votes).',
+  'Instagram and a contact phone number are shown to others only if you turn sharing on.',
+  'We do not collect payment details or government ID. We do not sell your information.',
+];
+
+
 export const PRIVACY_SECTIONS: LegalSection[] = [
   {
     heading: '1. What this is',
@@ -131,8 +147,11 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
   {
     heading: '2. What we collect',
     body: [
-      'Account information: your campus email address, display name, and optional bio.',
+      'Account information: your phone number and whether it is verified, your campus email address and whether it is verified, your display name, and an optional bio and profile photo.',
+      'Optional contact sharing: if you add an Instagram handle or a contact phone number to your profile, we store it. It is shown to other students only if you turn sharing on, and you can turn it off at any time.',
       'Content you create: listings (title, description, price, photos, availability), messages you send other users, meetup requests, and reports you file.',
+      'Community activity: Community posts (which expire after 24 hours), comments and votes on them, and comments on listings.',
+      'Notifications: if you allow notifications, a device notification token so we can send you alerts, and your notification and text-message preferences.',
       'Automatically: basic technical data needed to run the App (e.g. request logs on the backend server).',
       `Analytics and third-party services: ${ANALYTICS_THIRD_PARTIES}`,
     ],
@@ -140,8 +159,8 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
   {
     heading: '3. What we do not collect',
     body: [
-      'No payment or financial information — the App has no real payment flow (see the Terms of Service, section 3).',
-      'No government ID or identity document — campus email verification only confirms mail delivery to that address, not who you are.',
+      'No payment or financial information — payments are switched off and the App has no active payment flow (see the Terms of Service, section 3).',
+      'No government ID or identity document — phone and campus email verification only confirm that you can receive a text or mail there, not who you are.',
       'No precise real-time location tracking. Meetup spots are chosen from a fixed list, not derived from device location.',
     ],
   },
@@ -156,7 +175,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
   {
     heading: '5. Who can see your information',
     body: [
-      'Other users see your display name, bio, active listings, and campus-email-verified badge (not your actual email address) when you interact with them.',
+      'Other users see your display name, bio, profile photo, active listings, Community posts, comments and votes, and campus-email-verified badge (not your actual email address or sign-in phone number) when you interact with them. Your Instagram handle and contact phone number are shown only if you turn sharing on.',
       'Messages are visible to you and the person you are messaging.',
       'The operator can see reports, account details, and content for moderation purposes.',
       `We do not sell your information. [FOUNDER TO CONFIRM: confirm this is accurate once any third-party analytics or services are added — see item 2 above.]`,

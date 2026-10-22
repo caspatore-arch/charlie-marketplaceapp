@@ -7,7 +7,7 @@
  * away on your own profile (InboxLinkRow), scoped to you on the server.
  */
 import React, { useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Text } from '@/components/ui/Text';
 import { Badge } from '@/components/ui/Badge';
@@ -16,13 +16,18 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ListingCard } from '@/components/ListingCard';
-import { SegmentedTabs } from '@/components/inbox/SegmentedTabs';
 import { trpc } from '@/lib/trpc';
 import { timeLeftLabel, useNow } from '@/components/community/useNow';
 import { formatRelative } from '@/utils/format';
-import { space } from '@/constants/theme';
+import { colors, minTouchHeight, radius, space } from '@/constants/theme';
 
 type Tab = 'listings' | 'posts' | 'comments';
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'listings', label: 'Listings' },
+  { key: 'posts', label: 'Posts' },
+  { key: 'comments', label: 'Comments' },
+];
 
 export function ProfileContent({
   userId,
@@ -51,15 +56,25 @@ export function ProfileContent({
 
   return (
     <View>
-      <SegmentedTabs
-        segments={[
-          { key: 'listings', label: 'Listings' },
-          { key: 'posts', label: 'Posts' },
-          { key: 'comments', label: 'Comments' },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
+      {/* Equal-width tabs at the label size, so "Comments" never clips on a phone. */}
+      <View style={styles.tabs} accessibilityRole="tablist">
+        {TABS.map((t) => {
+          const selected = tab === t.key;
+          return (
+            <Pressable
+              key={t.key}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              onPress={() => setTab(t.key)}
+              style={[styles.tab, selected && styles.tabSelected]}
+            >
+              <Text variant="label" weight="600" color={selected ? 'ink' : 'inkMuted'} numberOfLines={1}>
+                {t.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <View style={styles.body}>
         {tab === 'listings' ? (
           listingsQuery.isPending ? (
@@ -169,6 +184,16 @@ export function ProfileContent({
 }
 
 const styles = StyleSheet.create({
+  tabs: { flexDirection: 'row', backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: 4, gap: 4 },
+  tab: {
+    flex: 1,
+    minHeight: minTouchHeight - 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.sm,
+    paddingHorizontal: space.xs,
+  },
+  tabSelected: { backgroundColor: colors.surface },
   body: { marginTop: space.lg },
   gridRow: { gap: space.md },
   gridContent: { gap: space.md },

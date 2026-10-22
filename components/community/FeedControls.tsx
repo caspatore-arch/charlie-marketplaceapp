@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
   // Wraps rather than overflowing if the font is scaled up or the screen is narrow.
   sorts: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   pill: {
-    minHeight: 48,
+    minHeight: 40,
     paddingHorizontal: space.lg,
     borderRadius: radius.pill,
     flexDirection: 'row',
@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.surface,
   },
-  pillSelected: { borderColor: colors.accentInk, borderWidth: 2.5, backgroundColor: colors.accentSoft },
+  pillSelected: { borderColor: colors.accentInk, borderWidth: 2, backgroundColor: colors.accentSoft },
   pressed: { opacity: 0.7 },
 });
 

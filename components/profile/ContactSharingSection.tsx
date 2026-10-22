@@ -9,14 +9,14 @@
  * sign-in number and is never verified.
  */
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, Switch, View } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { trpc } from '@/lib/trpc';
-import { colors, radius, space } from '@/constants/theme';
+import { colors, space } from '@/constants/theme';
 
 function ShareSwitch({
   label,
@@ -30,23 +30,22 @@ function ShareSwitch({
   onChange: (next: boolean) => void;
 }) {
   return (
-    <Pressable
-      accessibilityRole="switch"
-      accessibilityLabel={label}
-      accessibilityState={{ checked }}
-      onPress={() => onChange(!checked)}
-      style={styles.switchRow}
-    >
+    <View style={styles.switchRow}>
       <View style={styles.switchText}>
         <Text variant="body">{label}</Text>
         <Text variant="caption" color="inkMuted">
           {hint}
         </Text>
       </View>
-      <View style={[styles.track, checked ? styles.trackOn : null]}>
-        <View style={[styles.thumb, checked ? styles.thumbOn : null]} />
-      </View>
-    </Pressable>
+      <Switch
+        value={checked}
+        onValueChange={onChange}
+        accessibilityLabel={label}
+        trackColor={{ true: colors.accent, false: colors.line }}
+        thumbColor={colors.white}
+        ios_backgroundColor={colors.line}
+      />
+    </View>
   );
 }
 
@@ -119,7 +118,7 @@ export function ContactSharingSection() {
           style={styles.input}
         />
         <ShareSwitch
-          label="Show my Instagram on my profile"
+          label="Show my Instagram"
           hint="Other students who open your profile will see this handle."
           checked={shareInstagram}
           onChange={(v) => {
@@ -145,7 +144,7 @@ export function ContactSharingSection() {
           style={styles.input}
         />
         <ShareSwitch
-          label="Show my phone number on my profile"
+          label="Show my phone number"
           hint="Other students who open your profile will see this number."
           checked={sharePhone}
           onChange={(v) => {
@@ -187,23 +186,7 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingVertical: space.sm,
   },
-  switchText: { flex: 1, gap: 2 },
-  track: {
-    width: 52,
-    height: 32,
-    borderRadius: radius.pill,
-    backgroundColor: colors.inkMuted,
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  trackOn: { backgroundColor: colors.accent },
-  thumb: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.white,
-  },
-  thumbOn: { alignSelf: 'flex-end' },
+  switchText: { flex: 1, minWidth: 0, gap: 2 },
   save: { alignSelf: 'flex-start' },
 });
 

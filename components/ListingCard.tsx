@@ -14,6 +14,7 @@ import { Avatar } from './ui/Avatar';
 import { resolveMediaUrl } from '@/lib/trpc';
 import { conditionLabel, formatPickupWindow } from '@/utils/format';
 import { useReduceMotion } from '@/components/browse/useReduceMotion';
+import { expiresInLabel, expiresSoon, useMinuteNow } from '@/components/browse/expiry';
 import type { ListingCard as ListingCardType } from '@/types';
 
 export interface ListingCardProps {
@@ -51,13 +52,16 @@ function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true }
   const pickup = listing.nextPickup;
   const pickupLabel = pickup ? formatPickupWindow(pickup.startsAt, pickup.endsAt) : null;
   const pickupIsToday = listing.hasAvailabilityToday;
+  const nowMs = useMinuteNow();
+  const expiryLabel = listing.status === 'active' ? expiresInLabel(listing.expiresAt, nowMs) : null;
+  const expiringSoon = expiresSoon(listing.expiresAt, nowMs);
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${listing.title}, ${conditionLabel(listing.condition)}, price $${(price / 100).toFixed(0)}${
         pickupLabel ? `, pickup ${pickupLabel}` : ', no pickup times listed'
-      }`}
+      }${expiryLabel ? `, ${expiryLabel.toLowerCase()}` : ''}`}
       onPress={handlePress}
       // Feedback is a plain style swap on press-in (no animation to wait on),
       // so it lands on the first frame. Scale is dropped under Reduce Motion.
@@ -109,6 +113,16 @@ function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true }
             {pickupLabel ?? 'Times on the listing'}
           </Text>
         </View>
+        {expiryLabel ? (
+          <Text
+            variant="caption"
+            weight={expiringSoon ? '600' : '500'}
+            color={expiringSoon ? 'accentInk' : 'inkMuted'}
+            numberOfLines={1}
+          >
+            {expiryLabel}
+          </Text>
+        ) : null}
         {showSeller ? (
           <View style={styles.sellerRow}>
             <Avatar uri={listing.seller.avatarUrl} name={listing.seller.displayName} size={18} />

@@ -16,6 +16,9 @@ export function LegalSection() {
 
   return (
     <View style={styles.wrap}>
+      <Text variant="label" color="inkMuted" style={styles.subheading}>
+        Legal
+      </Text>
       <Text variant="body" color="inkMuted" style={styles.note}>
         Draft placeholders — not reviewed by a lawyer yet.
       </Text>
@@ -39,6 +42,7 @@ export function LegalSection() {
 
 const styles = StyleSheet.create({
   wrap: { gap: space.sm },
+  subheading: { marginTop: space.lg },
   note: { marginBottom: space.xs },
   button: { alignSelf: 'flex-start' },
 });

@@ -27,12 +27,13 @@ export interface ReportCardProps {
   onPressTarget: () => void;
   /** Omit to render without the open-report action row (reviewed reports). */
   actions?: {
-    dismissing: boolean;
-    removing: boolean;
+    /** Some report's mutation is running: every card's buttons are disabled. */
+    busy: boolean;
+    /** This card's own mutation is running: its buttons show a spinner. */
+    pending: boolean;
     onDismiss: () => void;
     onRemoveListing: () => void;
     /** Shown only for community-post reports. */
-    removingPost?: boolean;
     onRemovePost?: () => void;
     onAddNote: () => void;
   };
@@ -64,7 +65,9 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`View ${hasListing ? 'listing' : 'profile'}: ${targetLabel}`}
+        accessibilityLabel={
+          hasListing ? `View listing: ${targetLabel}` : isPost ? `Open the post author's profile: ${targetLabel}` : `View profile: ${targetLabel}`
+        }
         onPress={onPressTarget}
         style={({ pressed }) => [styles.targetRow, pressed && styles.pressed]}
       >
@@ -78,6 +81,9 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
         ) : null}
         <Text variant="body" weight="600" style={styles.targetLabel} numberOfLines={1}>
           {targetLabel}
+        </Text>
+        <Text variant="caption" weight="600" color="accentInk">
+          {hasListing ? 'Open listing' : 'Open profile'}
         </Text>
       </Pressable>
 
@@ -120,7 +126,8 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
             variant="secondary"
             size="md"
             onPress={actions.onDismiss}
-            loading={actions.dismissing}
+            disabled={actions.busy}
+            loading={actions.pending}
             style={styles.actionBtn}
           />
           {hasListing ? (
@@ -129,7 +136,7 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
               variant="danger"
               size="md"
               onPress={actions.onRemoveListing}
-              loading={actions.removing}
+              disabled={actions.busy}
               style={styles.actionBtn}
             />
           ) : null}
@@ -139,7 +146,8 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
               variant="danger"
               size="md"
               onPress={actions.onRemovePost}
-              loading={actions.removingPost}
+              disabled={actions.busy}
+              loading={actions.pending}
               style={styles.actionBtn}
             />
           ) : null}
@@ -148,6 +156,7 @@ export function ReportCard({ report, onPressTarget, actions }: ReportCardProps) 
             variant="ghost"
             size="md"
             onPress={actions.onAddNote}
+            disabled={actions.busy}
             style={styles.actionBtn}
           />
         </View>

@@ -1,9 +1,11 @@
 /**
- * Profile tab. Signed-out: sign-in CTA. Signed-in: your picture (upload),
- * bio, follower counts, trust block, Listings / Posts tabs, your private chats
- * link, a "Saved (N)" row that opens the Saved screen, a link to Settings (account details, blocked users,
- * sign out, close account), and (dev builds only) a "Switch test user"
- * panel for the three seeded identities in CONTRACT.md.
+ * Profile tab. Signed-out: sign-in CTA. Signed-in: a compact header (picture
+ * with name and badges beside it, bio, follower counts, one "Edit profile &
+ * settings" entry point), the trust block, a "Saved (N)" row, your Listings /
+ * Posts (ProfileContent), the private Meetups & messages link, a moderator
+ * link when applicable, and (dev builds only) a "Switch test user" panel for
+ * the three seeded identities in CONTRACT.md. Sign out and Close account live
+ * in Settings.
  */
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -13,7 +15,8 @@ import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { Divider } from '@/components/ui/Divider';
+import { RefetchBanner } from '@/components/ui/RefetchBanner';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { SavedLinkRow } from '@/components/profile/SavedLinkRow';
 import { InboxLinkRow } from '@/components/inbox/InboxLinkRow';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
@@ -23,7 +26,8 @@ import { useAvatarUpload } from '@/components/profile/useAvatarUpload';
 import { TrustBlock } from '@/components/TrustSignals';
 import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
-import { space } from '@/constants/theme';
+import { colors, space } from '@/constants/theme';
+import { Settings } from 'lucide-react-native';
 
 const DEV_TEST_USERS = [
   { id: '00000000-0000-4000-8000-000000000001', label: 'Maya Test' },
@@ -105,19 +109,37 @@ function SignedInProfile({
         onChangePhoto={avatar.pick}
         uploading={avatar.uploading}
         uploadError={avatar.error}
+        compact
+        demoAccountLabel
         action={
           <Button
-            title="Edit name & bio"
+            title="Edit profile & settings"
             variant="secondary"
+            icon={<Settings size={18} color={colors.ink} />}
             onPress={() => router.push('/settings')}
-            accessibilityLabel="Edit your name and bio in settings"
+            accessibilityLabel="Edit your profile and open settings"
           />
         }
       />
 
       {openList ? <FollowListPanel userId={userId} direction={openList} isSelf /> : null}
 
-      {trustQuery.data ? <TrustBlock summary={trustQuery.data} style={styles.trustBlock} /> : null}
+      {trustQuery.isPending ? (
+        <Skeleton height={140} radius={20} style={styles.trustBlock} />
+      ) : trustQuery.data ? (
+        <>
+          {trustQuery.isError ? <RefetchBanner onRetry={() => trustQuery.refetch()} /> : null}
+          <TrustBlock summary={trustQuery.data} style={styles.trustBlock} />
+        </>
+      ) : (
+        <View style={styles.trustBlock}>
+          <ErrorState
+            title="Couldn't load your activity"
+            message="Your meetup history will show here once it loads."
+            onRetry={() => trustQuery.refetch()}
+          />
+        </View>
+      )}
 
       <SavedLinkRow count={savedQuery.data?.length} />
 
@@ -131,40 +153,19 @@ function SignedInProfile({
       </View>
 
       {isModeratorQuery.data ? (
-        <Section title="Moderation">
-          <Button
-            title="Moderation"
-            variant="secondary"
-            onPress={() => router.push('/moderation')}
-            accessibilityLabel="Open moderation"
-          />
-        </Section>
+        <Button
+          title="Open moderation queue"
+          variant="secondary"
+          onPress={() => router.push('/moderation')}
+          style={styles.moderationButton}
+          accessibilityLabel="Open moderation"
+        />
       ) : null}
-
-      <Button
-        title="Settings"
-        variant="secondary"
-        onPress={() => router.push('/settings')}
-        style={styles.settingsButton}
-        accessibilityLabel="Open settings"
-      />
 
       {process.env.EXPO_PUBLIC_DEV_LOGIN === '1' ? (
         <DevSwitchUser onSelect={onDevSignIn} currentUserId={userId} />
       ) : null}
     </Screen>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text variant="heading" style={styles.sectionTitle}>
-        {title}
-      </Text>
-      {children}
-      <Divider style={styles.sectionDivider} />
-    </View>
   );
 }
 
@@ -198,21 +199,16 @@ function DevSwitchUser({
 
 const styles = StyleSheet.create({
   loadingWrap: { alignItems: 'center', gap: space.sm, paddingTop: space.huge },
-  header: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
-  name: { marginTop: space.sm },
   inboxLink: { marginTop: space.xl, marginBottom: space.sm },
   privateNote: { marginTop: space.sm, paddingHorizontal: space.xs },
   trustBlock: { marginBottom: space.xl },
-  section: { marginTop: space.md },
-  sectionTitle: { marginBottom: space.md },
-  sectionDivider: { marginTop: space.xl },
   gridRow: { gap: space.md },
   gridContent: { gap: space.md },
   // maxWidth pins a lone cell to half the row. With numColumns={2} a flex:1
   // cell stretches to the full width whenever a row is short — one search
   // result rendered as a single giant card.
   gridCell: { flex: 1, maxWidth: '50%' },
-  settingsButton: { marginTop: space.lg },
+  moderationButton: { marginTop: space.lg },
   devWrap: { marginTop: space.xxl, marginBottom: space.xxl },
   devTitle: { marginBottom: space.sm },
   devButtons: { gap: space.sm },

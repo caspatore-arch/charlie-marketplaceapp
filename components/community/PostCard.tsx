@@ -3,7 +3,7 @@
  * "Xh left" countdown, and an overflow button that opens the actions sheet
  * (Delete for your own post; Report / Block for someone else's).
  */
-import React from 'react';
+import React, { type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { MoreHorizontal } from 'lucide-react-native';
 import { Text } from '@/components/ui/Text';
@@ -20,9 +20,11 @@ export interface PostCardProps {
   now: number;
   onPressAuthor: () => void;
   onOpenActions: () => void;
+  /** Rendered at the right of the footer row (the upvote pill), never overlaid. */
+  footerRight?: ReactNode;
 }
 
-export function PostCard({ post, now, onPressAuthor, onOpenActions }: PostCardProps) {
+export function PostCard({ post, now, onPressAuthor, onOpenActions, footerRight }: PostCardProps) {
   const buying = post.kind === 'buying';
   const left = timeLeftLabel(post.expiresAt, now);
   return (
@@ -48,17 +50,20 @@ export function PostCard({ post, now, onPressAuthor, onOpenActions }: PostCardPr
         {post.body}
       </Text>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`View ${post.author.displayName}'s profile`}
-        onPress={onPressAuthor}
-        style={({ pressed }) => [styles.author, pressed && styles.pressed]}
-      >
-        <Avatar uri={post.author.avatarUrl} name={post.author.displayName} size={28} />
-        <Text variant="label" color="inkMuted" numberOfLines={1} style={styles.authorName}>
-          {post.isMine ? `${post.author.displayName} (you)` : post.author.displayName}
-        </Text>
-      </Pressable>
+      <View style={styles.footerRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`View ${post.author.displayName}'s profile`}
+          onPress={onPressAuthor}
+          style={({ pressed }) => [styles.author, pressed && styles.pressed]}
+        >
+          <Avatar uri={post.author.avatarUrl} name={post.author.displayName} size={28} />
+          <Text variant="label" color="inkMuted" numberOfLines={1} style={styles.authorName}>
+            {post.isMine ? `${post.author.displayName} (you)` : post.author.displayName}
+          </Text>
+        </Pressable>
+        {footerRight}
+      </View>
     </Card>
   );
 }
@@ -67,10 +72,11 @@ const styles = StyleSheet.create({
   card: { gap: space.sm },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   spacer: { flex: 1 },
-  more: { width: 48, height: 48, marginVertical: -space.md, marginRight: -space.md, alignItems: 'center', justifyContent: 'center' },
+  more: { width: 48, height: 48, marginVertical: -space.sm, marginRight: -space.md, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.7 },
   body: { lineHeight: 22 },
-  author: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 48, alignSelf: 'flex-start' },
+  footerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
+  author: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 48 },
   authorName: { flexShrink: 1 },
 });
 

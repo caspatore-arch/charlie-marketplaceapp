@@ -17,6 +17,8 @@ import { Camera } from 'lucide-react-native';
 import { Text } from '@/components/ui/Text';
 import { Input, TextArea } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { TextLink } from '@/components/ui/TextLink';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Notice } from '@/components/auth/Notice';
 import { useAuth } from '@/hooks/useAuth';
@@ -62,11 +64,6 @@ export default function CreateProfileScreen() {
 
   async function pickPhoto() {
     setError(undefined);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError('Allow photo access to add a profile picture, or skip it for now.');
-      return;
-    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -100,7 +97,7 @@ export default function CreateProfileScreen() {
     });
   };
 
-  const loading = status === 'loading' || meQuery.isPending;
+  const loading = status === 'loading' || (meQuery.isPending && !meQuery.isError);
   const photoUri = localPhoto ?? resolveMediaUrl(avatarUrl);
 
   return (
@@ -112,10 +109,7 @@ export default function CreateProfileScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text variant="caption" weight="700" color="accentInk" style={styles.kicker}>
-            STEP 2 OF 2
-          </Text>
-          <Text variant="title" accessibilityRole="header" style={styles.title}>
+          <Text variant="displaySm" accessibilityRole="header" style={styles.title}>
             Make your profile
           </Text>
           <Text variant="body" color="inkMuted">
@@ -123,7 +117,9 @@ export default function CreateProfileScreen() {
             Settings.
           </Text>
 
-          {loading ? (
+          {meQuery.isError ? (
+            <ErrorState message={meQuery.error.message} onRetry={() => meQuery.refetch()} />
+          ) : loading ? (
             <View style={styles.form}>
               <Skeleton height={AVATAR} width={AVATAR} />
               <Skeleton height={48} />
@@ -144,7 +140,7 @@ export default function CreateProfileScreen() {
                   ) : (
                     <View style={[styles.photo, styles.initialWrap]}>
                       <Text variant="display" weight="700" color="accentInk">
-                        {displayName.trim()[0]?.toUpperCase() ?? '?'}
+                        {displayName.trim()[0]?.toUpperCase() ?? '+'}
                       </Text>
                     </View>
                   )}
@@ -162,7 +158,7 @@ export default function CreateProfileScreen() {
                     {photoUri ? 'Change photo' : 'Add a photo'}
                   </Text>
                   <Text variant="label" color="inkMuted">
-                    Optional. A clear face helps people find you at the meetup spot.
+                    Optional. So the person you’re meeting can recognise you.
                   </Text>
                 </View>
               </Pressable>
@@ -194,7 +190,7 @@ export default function CreateProfileScreen() {
                 loading={save.isPending}
                 disabled={uploading || save.isPending}
               />
-              <Button title="Skip for now" variant="ghost" onPress={() => router.replace('/')} />
+              <TextLink align="center" onPress={() => router.replace('/')}>Skip for now</TextLink>
             </View>
           )}
         </View>
@@ -221,12 +217,18 @@ const styles = StyleSheet.create({
     gap: space.sm,
     ...shadow,
   },
-  kicker: { letterSpacing: 1.6 },
-  title: { fontSize: 26 },
+  title: { marginBottom: space.xs },
   form: { gap: space.lg, marginTop: space.lg },
   photoRow: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
   photo: { width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, backgroundColor: colors.surfaceMuted },
-  initialWrap: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accentSoft },
+  initialWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accentSoft,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: colors.accent,
+  },
   overlay: {
     position: 'absolute',
     top: 0,

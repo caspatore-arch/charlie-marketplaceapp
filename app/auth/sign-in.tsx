@@ -4,15 +4,18 @@
  *
  * The chrome lives in <AuthScreenShell> so this route and /auth/email stay
  * identical. `hideFirstHeading` + `cardIntro` hand the heading to the shell and
- * let the flow supply only its one-line explainer — the same pairing the
- * welcome screen uses, so the card reads the same wherever it appears.
+ * let the flow supply its one-line explainer, the same pairing the welcome
+ * screen uses.
  */
 import React from 'react';
-import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AuthScreenShell } from '@/components/auth/AuthScreenShell';
-import { Text } from '@/components/ui/Text';
 import { AuthMethods } from '@/components/auth/AuthMethods';
+import { TextLink } from '@/components/ui/TextLink';
+import { safeReturnTo } from '@/components/auth/helpers';
 import type { AuthFinish } from '@/components/auth/EmailAuthFlow';
+import { space } from '@/constants/theme';
 
 export default function SignInScreen() {
   const { returnTo, method } = useLocalSearchParams<{ returnTo?: string; method?: string }>();
@@ -21,19 +24,20 @@ export default function SignInScreen() {
   // A brand-new account makes its profile first; everyone else goes back to
   // where they were.
   const finish = ({ isNewAccount }: AuthFinish) =>
-    router.replace((isNewAccount ? '/create-profile' : returnTo || '/') as never);
+    router.replace((isNewAccount ? '/create-profile' : safeReturnTo(returnTo)) as never);
 
   return (
     <AuthScreenShell title="Sign in or sign up">
-      <Text variant="body">Sell unused items, find affordable secondhand goods, and book a campus meetup. Verify your campus email to buy, sell, and post.</Text>
-      <Link href="/about" style={{ paddingVertical: 12 }}>What is Dibbs?</Link>
-      <Link href="/why-dibbs" style={{ paddingVertical: 12 }}>Why use Dibbs?</Link>
       <AuthMethods
         hideFirstHeading
         cardIntro
         onFinished={finish}
         initialMethod={method === 'phone' || method === 'email' ? method : undefined}
       />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: space.lg }}>
+        <TextLink href="/about" variant="small">What is Dibbs?</TextLink>
+        <TextLink href="/why-dibbs" variant="small">Why use Dibbs?</TextLink>
+      </View>
     </AuthScreenShell>
   );
 }

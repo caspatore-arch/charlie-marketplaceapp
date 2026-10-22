@@ -6,13 +6,16 @@
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
+import { TextLink } from '@/components/ui/TextLink';
+import { Button } from '@/components/ui/Button';
 import { colors, radius, space } from '@/constants/theme';
-import { DRAFT_BANNER, PRIVACY_SECTIONS, PRIVACY_TITLE } from '@/constants/legal';
+import { DRAFT_BANNER, LAST_UPDATED, OPERATOR_CONTACT_EMAIL, PRIVACY_SUMMARY, PRIVACY_SECTIONS, PRIVACY_TITLE } from '@/constants/legal';
 
 export default function PrivacyScreen() {
+  const router = useRouter();
   return (
     <Screen scroll contentContainerStyle={styles.content}>
       <Stack.Screen options={{ title: PRIVACY_TITLE }} />
@@ -29,6 +32,23 @@ export default function PrivacyScreen() {
       <Text variant="title" style={styles.title}>
         {PRIVACY_TITLE}
       </Text>
+      <Text variant="small" color="inkMuted" selectable>
+        Last updated: {LAST_UPDATED}
+      </Text>
+      <Text variant="small" color="inkMuted" selectable>
+        Contact: {OPERATOR_CONTACT_EMAIL}
+      </Text>
+
+      <View style={styles.summary}>
+        <Text variant="heading" style={styles.heading}>
+          In plain English
+        </Text>
+        {PRIVACY_SUMMARY.map((line) => (
+          <Text key={line} variant="body" style={styles.paragraph}>
+            {line}
+          </Text>
+        ))}
+      </View>
 
       {PRIVACY_SECTIONS.map((section) => (
         <View key={section.heading} style={styles.section}>
@@ -48,6 +68,14 @@ export default function PrivacyScreen() {
           ))}
         </View>
       ))}
+
+      <View style={styles.footer}>
+        <Text variant="label" color="inkMuted">
+          See also
+        </Text>
+        <TextLink href="/legal/terms">Terms of Service</TextLink>
+        <Button title="Back to settings" variant="secondary" onPress={() => router.navigate('/settings')} />
+      </View>
     </Screen>
   );
 }
@@ -63,6 +91,8 @@ const styles = StyleSheet.create({
   },
   bannerTitle: {},
   bannerBody: { lineHeight: 20 },
+  summary: { backgroundColor: colors.tint, borderRadius: radius.xl, padding: space.lg, marginTop: space.lg },
+  footer: { marginTop: space.xxxl, gap: space.sm },
   title: { marginTop: space.xl, marginBottom: space.sm },
   section: { marginTop: space.xl },
   heading: { marginBottom: space.sm },

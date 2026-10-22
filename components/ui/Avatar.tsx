@@ -36,7 +36,13 @@ export function Avatar({ uri, name, size = 40 }: AvatarProps) {
       accessibilityLabel={name ? `${name}'s avatar` : 'User avatar'}
       style={[styles.base, styles.fallback, dimensions]}
     >
-      <Text variant="label" weight="600" color="inkMuted">
+      <Text
+        variant="label"
+        weight="600"
+        color="inkMuted"
+        // Scale the initial to the circle so a large avatar is not a tiny letter in a big disc.
+        style={size > 40 ? { fontSize: Math.round(size * 0.42), lineHeight: Math.round(size * 0.5) } : undefined}
+      >
         {initial}
       </Text>
     </View>

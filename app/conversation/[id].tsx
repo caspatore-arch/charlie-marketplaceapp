@@ -1,10 +1,12 @@
 /**
- * Conversation screen: header (other user + listing title, tap → listing),
- * an optional reservation summary strip when one exists between these two
- * people for this listing, an inverted message list with day separators, and
- * a growing composer. Polls every 5s while focused; loads older pages via
- * cursor. `conversation.list` doubles as this screen's "byId" lookup since
- * the router has no dedicated single-conversation query.
+ * Conversation screen: header (other user's name, "…" menu with Report and
+ * Block), a listing bar (thumbnail, price, tap → listing), an optional
+ * reservation summary strip when one exists between these two people for this
+ * listing, an inverted message list with day separators, and a growing
+ * composer. A failed send stays in the thread as "Not sent · Retry". Polls
+ * every 5s while focused; loads older pages via cursor. `conversation.list`
+ * doubles as this screen's "byId" lookup since the router has no dedicated
+ * single-conversation query.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -20,19 +22,24 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter, useIsFocused, Stack } from 'expo-router';
-import { Send } from 'lucide-react-native';
+import { ChevronRight, MoreHorizontal, Send } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Sheet } from '@/components/ui/Sheet';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { ReportSheet } from '@/components/browse/ReportSheet';
+import { confirmAction } from '@/utils/confirm';
 import { MessageBubble } from '@/components/MessageBubble';
 import { ReservationStatusPill } from '@/components/ReservationStatusPill';
 import { trpc, resolveMediaUrl } from '@/lib/trpc';
 import { useAuth } from '@/hooks/useAuth';
 import { colors, radius, space, minTouchHeight } from '@/constants/theme';
-import { formatMeetupTime } from '@/utils/format';
-import type { Message } from '@/types';
+import { formatMeetupTime, formatPrice } from '@/utils/format';
+import type { Message, ReportReason } from '@/types';
 
 const POLL_MS = 5_000;
 const MAX_COMPOSER_HEIGHT = 100;
@@ -40,11 +47,19 @@ const MIN_COMPOSER_HEIGHT = 44;
 
 interface OptimisticMessage extends Message {
   pending?: boolean;
+  failed?: boolean;
 }
 
 export default function ConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  // Real distance from the top of the window to this screen's content (the
+  // header's height), measured on layout, used as the keyboard offset.
+  const contentRef = React.useRef<View>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const measureHeader = useCallback(() => {
+    contentRef.current?.measureInWindow((_x, y) => setHeaderHeight(Math.max(0, y)));
+  }, []);
   const isFocused = useIsFocused();
   const { user } = useAuth();
   const utils = trpc.useUtils();
@@ -82,6 +97,39 @@ export default function ConversationScreen() {
     );
   }, [convo, reservationsQuery.data, buyerId, sellerId]);
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [safetyNotice, setSafetyNotice] = useState<string | null>(null);
+  const reportMutation = trpc.user.report.useMutation({
+    onSuccess: () => {
+      setReportOpen(false);
+      setSafetyNotice("Thanks. We'll review this.");
+    },
+    onError: (e) => setSafetyNotice(`Couldn't send the report: ${e.message}`),
+  });
+  const blockMutation = trpc.user.block.useMutation({
+    onSuccess: () => {
+      void utils.conversation.list.invalidate();
+      void utils.user.blocked.invalidate();
+      router.back();
+    },
+    onError: (e) => setSafetyNotice(`Couldn't block: ${e.message}`),
+  });
+  const submitReport = (reason: ReportReason, details?: string) => {
+    if (!otherUserId) return;
+    reportMutation.mutate({ targetUserId: otherUserId, reason, details });
+  };
+  const confirmBlock = () => {
+    if (!convo) return;
+    setMenuOpen(false);
+    confirmAction(
+      `Block ${convo.otherUser.displayName}?`,
+      'They will no longer be able to message or request meetups with you.',
+      'Block',
+      () => blockMutation.mutate({ userId: convo.otherUser.id }),
+    );
+  };
+
   const [draft, setDraft] = useState('');
   const [composerHeight, setComposerHeight] = useState(MIN_COMPOSER_HEIGHT);
   const [optimistic, setOptimistic] = useState<OptimisticMessage[]>([]);
@@ -103,17 +151,58 @@ export default function ConversationScreen() {
   const allMessages = useMemo<OptimisticMessage[]>(() => {
     const fetched = (messagesQuery.data?.pages ?? []).flatMap((p) => p.items);
     const merged = [...fetched, ...optimistic.filter((o) => !fetched.some((f) => f.id === o.id))];
-    return merged.slice().sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return merged
+      .slice()
+      .sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+      );
   }, [messagesQuery.data, optimistic]);
 
-  // Mark read when the thread opens and whenever new messages arrive while focused.
-  const latestMessageId = allMessages[0]?.id;
+  // Mark read when the thread opens and when a message from the other person
+  // arrives while focused. Our own sends don't need a mark-read round trip.
+  const latestMessage = allMessages[0];
+  const latestMessageId = latestMessage?.id;
+  const latestIsOwn = !!latestMessage && latestMessage.senderId === user?.id;
+  const markedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!id || !isFocused) return;
     if (!latestMessageId) return; // nothing to mark read yet (or still loading)
+    if (latestIsOwn && markedRef.current) return;
+    markedRef.current = latestMessageId;
     markReadMutation.mutate({ conversationId: id });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isFocused, latestMessageId]);
+
+  const sendBody = useCallback(
+    (tempId: string, body: string) => {
+      sendMutation.mutate(
+        { conversationId: id, body },
+        {
+          onSuccess: () => {
+            setOptimistic((prev) => prev.filter((m) => m.id !== tempId));
+          },
+          onError: () => {
+            setOptimistic((prev) =>
+              prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)),
+            );
+          },
+        },
+      );
+    },
+    [id, sendMutation],
+  );
+
+  const onRetry = useCallback(
+    (tempId: string) => {
+      const target = optimistic.find((m) => m.id === tempId);
+      if (!target) return;
+      setOptimistic((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, pending: true, failed: false } : m)),
+      );
+      sendBody(tempId, target.body);
+    },
+    [optimistic, sendBody],
+  );
 
   const handleSend = useCallback(() => {
     const body = draft.trim();
@@ -132,35 +221,39 @@ export default function ConversationScreen() {
     ]);
     setDraft('');
     setComposerHeight(MIN_COMPOSER_HEIGHT);
-    sendMutation.mutate(
-      { conversationId: id, body },
-      {
-        onSuccess: () => {
-          setOptimistic((prev) => prev.filter((m) => m.id !== tempId));
-        },
-        onError: () => {
-          setOptimistic((prev) => prev.map((m) => (m.id === tempId ? { ...m, pending: false } : m)));
-        },
-      },
+    sendBody(tempId, body);
+  }, [draft, id, sendBody, user]);
+
+  const onContentSizeChange = useCallback((e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
+    const next = Math.min(
+      MAX_COMPOSER_HEIGHT,
+      Math.max(MIN_COMPOSER_HEIGHT, e.nativeEvent.contentSize.height),
     );
-  }, [draft, id, sendMutation, user],
-  );
+    setComposerHeight(next);
+  }, []);
 
-  const onContentSizeChange = useCallback(
-    (e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
-      const next = Math.min(MAX_COMPOSER_HEIGHT, Math.max(MIN_COMPOSER_HEIGHT, e.nativeEvent.contentSize.height));
-      setComposerHeight(next);
-    },
-    [],
-  );
-
-  const isForbidden = messagesQuery.isError && (messagesQuery.error as { data?: { code?: string } })?.data?.code === 'FORBIDDEN';
+  const isForbidden =
+    messagesQuery.isError &&
+    (messagesQuery.error as { data?: { code?: string } })?.data?.code === 'FORBIDDEN';
 
   return (
     <Screen edges={['left', 'right']} padded={false}>
       <Stack.Screen
         options={{
           title: convo?.otherUser.displayName ?? 'Conversation',
+          headerRight: convo
+            ? () => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="More options: report or block"
+                  onPress={() => setMenuOpen(true)}
+                  hitSlop={8}
+                  style={styles.menuButton}
+                >
+                  <MoreHorizontal size={22} color={colors.ink} />
+                </Pressable>
+              )
+            : undefined,
         }}
       />
 
@@ -184,9 +277,11 @@ export default function ConversationScreen() {
               </Text>
             </View>
             <Text variant="caption" color="inkMuted" numberOfLines={1}>
-              {convo.listing.title}
+              {convo.listing.title} · {formatPrice(convo.listing.currentPriceCents)}
             </Text>
           </View>
+          {convo.listing.seller.isDemo ? <Badge kind="demo" /> : null}
+          <ChevronRight size={18} color={colors.inkFaint} />
         </Pressable>
       ) : null}
 
@@ -223,43 +318,76 @@ export default function ConversationScreen() {
       ) : messagesQuery.isError ? (
         <ErrorState message={messagesQuery.error.message} onRetry={() => messagesQuery.refetch()} />
       ) : (
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 96 : 0}
-        >
-          <MessageList
-            messages={allMessages}
-            viewerId={user?.id ?? ''}
-            hasMore={!!messagesQuery.hasNextPage}
-            onLoadMore={() => messagesQuery.fetchNextPage()}
-            loadingMore={messagesQuery.isFetchingNextPage}
-          />
-
-          <View style={[styles.composer, { minHeight: composerHeight + space.lg }]}>
-            <ComposerInput
-              value={draft}
-              onChangeText={setDraft}
-              onContentSizeChange={onContentSizeChange}
-              height={composerHeight}
+        <View ref={contentRef} onLayout={measureHeader} style={styles.flex}>
+          <KeyboardAvoidingView
+            style={styles.flex}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+          >
+            {safetyNotice ? (
+              <Text variant="label" color="inkMuted" style={styles.notice} accessibilityRole="alert">
+                {safetyNotice}
+              </Text>
+            ) : null}
+            <MessageList
+              messages={allMessages}
+              onRetry={onRetry}
+              viewerId={user?.id ?? ''}
+              hasMore={!!messagesQuery.hasNextPage}
+              onLoadMore={() => messagesQuery.fetchNextPage()}
+              loadingMore={messagesQuery.isFetchingNextPage}
             />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send message"
-              accessibilityState={{ disabled: !draft.trim() }}
-              disabled={!draft.trim() || sendMutation.isPending}
-              onPress={handleSend}
-              style={({ pressed }) => [
-                styles.sendButton,
-                (!draft.trim() || sendMutation.isPending) && styles.sendButtonDisabled,
-                pressed && styles.sendButtonPressed,
-              ]}
-            >
-              <Send size={20} color={colors.white} />
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
+
+            <View style={[styles.composer, { minHeight: composerHeight + space.lg }]}>
+              <ComposerInput
+                value={draft}
+                onChangeText={setDraft}
+                onContentSizeChange={onContentSizeChange}
+                height={composerHeight}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Send message"
+                accessibilityState={{ disabled: !draft.trim() }}
+                disabled={!draft.trim() || sendMutation.isPending}
+                onPress={handleSend}
+                style={({ pressed }) => [
+                  styles.sendButton,
+                  (!draft.trim() || sendMutation.isPending) && styles.sendButtonDisabled,
+                  pressed && styles.sendButtonPressed,
+                ]}
+              >
+                <Send size={20} color={colors.white} />
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       )}
+
+      <Sheet visible={menuOpen} onClose={() => setMenuOpen(false)} title="Conversation options">
+        <View style={styles.menuActions}>
+          <Button
+            title={`Report ${convo?.otherUser.displayName ?? 'this person'}`}
+            variant="secondary"
+            onPress={() => {
+              setMenuOpen(false);
+              setReportOpen(true);
+            }}
+          />
+          <Button
+            title={`Block ${convo?.otherUser.displayName ?? 'this person'}`}
+            variant="danger"
+            onPress={confirmBlock}
+          />
+        </View>
+      </Sheet>
+      <ReportSheet
+        visible={reportOpen}
+        onClose={() => setReportOpen(false)}
+        onSubmit={submitReport}
+        loading={reportMutation.isPending}
+        title="Report this person"
+      />
     </Screen>
   );
 }
@@ -298,7 +426,9 @@ function MessageList({
   hasMore,
   onLoadMore,
   loadingMore,
+  onRetry,
 }: {
+  onRetry: (tempId: string) => void;
   messages: OptimisticMessage[];
   viewerId: string;
   hasMore: boolean;
@@ -310,6 +440,9 @@ function MessageList({
       <View style={styles.emptyWrap}>
         <Text variant="body" color="inkMuted" style={styles.emptyText}>
           No messages yet. Say hello.
+        </Text>
+        <Text variant="label" color="inkMuted" style={styles.safetyNote}>
+          Meet at the public campus spots. Don&apos;t share personal info you don&apos;t need to.
         </Text>
       </View>
     );
@@ -326,8 +459,24 @@ function MessageList({
         const showDaySeparator = !next || !isSameDay(item.createdAt, next.createdAt);
         return (
           <View>
-            <MessageBubble body={item.body} createdAt={item.createdAt.toISOString()} isOwn={item.senderId === viewerId} />
             {showDaySeparator ? <DaySeparator date={item.createdAt} /> : null}
+            <MessageBubble
+              body={item.body}
+              createdAt={item.createdAt.toISOString()}
+              isOwn={item.senderId === viewerId}
+            />
+            {item.failed ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Message not sent. Retry."
+                onPress={() => onRetry(item.id)}
+                style={styles.failed}
+              >
+                <Text variant="caption" weight="600" color="danger">
+                  Not sent · Retry
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         );
       }}
@@ -341,7 +490,11 @@ function MessageList({
 }
 
 function DaySeparator({ date }: { date: Date }) {
-  const label = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).format(date);
+  const label = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
   return (
     <View style={styles.daySeparator}>
       <Text variant="caption" color="inkFaint" weight="600">
@@ -367,9 +520,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
-  listingThumb: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  listingThumb: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
   listingInfo: { flex: 1, gap: 2 },
-  listingHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  listingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
   listingOther: { flexShrink: 1 },
   reservationStrip: {
     flexDirection: 'row',
@@ -382,11 +544,35 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   reservationInfo: { flex: 1 },
-  messagesContent: { paddingHorizontal: space.lg, paddingVertical: space.md, gap: space.xs },
+  messagesContent: {
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    gap: space.xs,
+  },
   daySeparator: { alignItems: 'center', marginVertical: space.md },
   loadingMore: { marginVertical: space.md, marginHorizontal: space.lg },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl },
+  emptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: space.xl,
+  },
   emptyText: { textAlign: 'center' },
+  safetyNote: { textAlign: 'center', marginTop: space.lg, maxWidth: 320 },
+  failed: {
+    alignSelf: 'flex-end',
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: space.xs,
+  },
+  notice: { paddingHorizontal: space.lg, paddingVertical: space.sm },
+  menuButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuActions: { gap: space.sm },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',

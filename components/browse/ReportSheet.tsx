@@ -16,6 +16,8 @@ export interface ReportSheetProps {
   onClose: () => void;
   onSubmit: (reason: ReportReason, details?: string) => void;
   loading?: boolean;
+  /** Sheet heading; defaults to the listing wording. */
+  title?: string;
 }
 
 const REASONS: { value: ReportReason; label: string }[] = [
@@ -26,7 +28,13 @@ const REASONS: { value: ReportReason; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
-export function ReportSheet({ visible, onClose, onSubmit, loading = false }: ReportSheetProps) {
+export function ReportSheet({
+  visible,
+  onClose,
+  onSubmit,
+  loading = false,
+  title = 'Report this listing',
+}: ReportSheetProps) {
   const [reason, setReason] = useState<ReportReason | undefined>();
   const [details, setDetails] = useState('');
 
@@ -36,7 +44,7 @@ export function ReportSheet({ visible, onClose, onSubmit, loading = false }: Rep
   }
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Report this listing">
+    <Sheet visible={visible} onClose={onClose} title={title}>
       <View style={styles.grid}>
         {REASONS.map((r) => (
           <Chip key={r.value} label={r.label} selected={reason === r.value} onPress={() => setReason(r.value)} />

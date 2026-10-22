@@ -13,7 +13,6 @@ import {
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native';
-import { Text } from '@/components/ui/Text';
 import { Image } from 'expo-image';
 import { colors, radius, space } from '@/constants/theme';
 import { resolveMediaUrl } from '@/lib/trpc';
@@ -127,10 +126,23 @@ export function PhotoGallery({ photos, aspectRatio = 4 / 5 }: PhotoGalleryProps)
         )}
       />
       {photos.length > 1 ? (
-        <View style={styles.dots}>
-          {photos.map((p, i) => (
-            <Pressable key={p.id} accessibilityRole="button" accessibilityLabel={`Show photo ${i + 1} of ${photos.length}`} accessibilityState={{ selected: i === index }} onPress={() => { list.current?.scrollToOffset({ offset: i * pageWidth, animated: false }); setIndex(i); }} style={[styles.photoButton, i === index && { backgroundColor: colors.accentSoft, borderWidth: 2, borderColor: colors.accentInk }]}><Text variant="label" weight="700">{i + 1}</Text></Pressable>
-          ))}
+        <View style={styles.dots} pointerEvents="box-none">
+          <View style={styles.dotsPill}>
+            {photos.map((p, i) => (
+              <Pressable
+                key={p.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Show photo ${i + 1} of ${photos.length}`}
+                accessibilityState={{ selected: i === index }}
+                hitSlop={{ top: 14, bottom: 14, left: 6, right: 6 }}
+                onPress={() => {
+                  list.current?.scrollToOffset({ offset: i * pageWidth, animated: false });
+                  setIndex(i);
+                }}
+                style={[styles.dot, i === index && styles.dotActive]}
+              />
+            ))}
+          </View>
         </View>
       ) : null}
     </View>
@@ -147,21 +159,25 @@ const styles = StyleSheet.create({
   // The muted ground is what the letterbox bars show as when a photo is not
   // 4:5. It reads as a deliberate mat around the photo rather than a gap.
   photo: { width: '100%', height: '100%', backgroundColor: colors.surfaceMuted },
+  // Small dots sit over the bottom of the photo; the image keeps its space.
   dots: {
-    marginTop: space.sm,
-    flexWrap: 'wrap',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: space.sm,
+    alignItems: 'center',
+  },
+  dotsPill: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: space.xs,
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: space.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
-  photoButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.warningSoft, borderRadius: radius.pill },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-  },
-  dotActive: { backgroundColor: colors.white, width: 8, height: 8, borderRadius: 4 },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.6)' },
+  dotActive: { backgroundColor: colors.white, width: 9, height: 9, borderRadius: 5 },
 });
 
 export default PhotoGallery;

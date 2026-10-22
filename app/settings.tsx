@@ -1,9 +1,9 @@
 /**
- * Settings screen: Account (editable display name/bio, read-only campus +
- * verification), Safety (blocked users + what reporting does), About this
- * prototype (honest disclosures), Close account (destructive, typed
- * confirmation), Payouts (Stripe Connect seller onboarding), and Sign out. Signed-in only — signed-out shows a sign-in
- * CTA, matching the Profile screen's convention.
+ * Settings screen, grouped: Profile (name, bio, campus), Verification (phone
+ * verified, campus email verified; neither is an ID check), Contact sharing,
+ * Notifications (push + text), Safety (blocked users), About & legal, then
+ * Sign out and Close account separated at the bottom. Payouts stays hidden
+ * while payments are off. Signed-in only; signed-out shows a sign-in CTA.
  */
 import React from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
@@ -24,7 +24,7 @@ import { CloseAccountSection } from '@/components/settings/CloseAccountSection';
 import { ContactSharingSection } from '@/components/profile/ContactSharingSection';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { useAuth } from '@/hooks/useAuth';
-import { space } from '@/constants/theme';
+import { colors, space } from '@/constants/theme';
 
 export default function SettingsScreen() {
   const { status, signOut } = useAuth();
@@ -65,16 +65,16 @@ export default function SettingsScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
       >
-        <SettingsSection title="Account">
+        <SettingsSection title="Profile">
           <AccountSection />
+        </SettingsSection>
+
+        <SettingsSection title="Verification">
+          <PhoneAccountSection part="verification" />
         </SettingsSection>
 
         <SettingsSection title="Contact sharing">
           <ContactSharingSection />
-        </SettingsSection>
-
-        <SettingsSection title="Account & phone">
-          <PhoneAccountSection />
         </SettingsSection>
 
         {paymentsEnabled ? (
@@ -85,31 +85,31 @@ export default function SettingsScreen() {
 
         <SettingsSection title="Notifications">
           <NotificationsSection />
+          <PhoneAccountSection part="texts" />
         </SettingsSection>
 
         <SettingsSection title="Safety">
           <SafetySection />
         </SettingsSection>
 
-        <SettingsSection title="About this prototype">
+        <SettingsSection title="About & legal" hideDivider>
           <AboutPrototypeSection />
-        </SettingsSection>
-
-        <SettingsSection title="Legal">
           <LegalSection />
         </SettingsSection>
 
-        <Button
-          title="Sign out"
-          variant="ghost"
-          onPress={signOut}
-          style={styles.signOut}
-          accessibilityLabel="Sign out"
-        />
-
-        <SettingsSection title="Close account" hideDivider>
-          <CloseAccountSection />
-        </SettingsSection>
+        <View style={styles.bottom}>
+          <Button
+            title="Sign out"
+            variant="secondary"
+            onPress={signOut}
+            accessibilityLabel="Sign out"
+          />
+          <View style={styles.danger}>
+            <SettingsSection title="Close account" hideDivider>
+              <CloseAccountSection />
+            </SettingsSection>
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </Screen>
   );
@@ -118,5 +118,11 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1, paddingBottom: space.huge },
   loadingWrap: { gap: space.md, paddingTop: space.xl },
-  signOut: { marginTop: space.lg },
+  bottom: {
+    marginTop: space.section,
+    paddingTop: space.xl,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  danger: { marginTop: space.section },
 });

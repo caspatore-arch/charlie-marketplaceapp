@@ -398,7 +398,7 @@ export function PhoneAuthFlow({
       />
       <Button title={tryAgain ? 'Try again' : submitLabel} onPress={() => sendCode(false)} loading={busy} />
       {onUseEmail ? (
-        <Button title="Use campus email instead" variant="ghost" onPress={onUseEmail} />
+        <Button title="Use campus email instead" variant="link" onPress={onUseEmail} />
       ) : null}
     </View>
   );

@@ -1,14 +1,15 @@
 /**
- * "Meetups & messages" stack screen (moved off the tab bar): three segments —
- * Meetups (reservation.mine, grouped "As buyer" / "As seller"), Offers
- * (offer.mine, with Accept/Decline for a seller's pending offers) and
- * Messages (conversation.list). Requires auth; polls every 10s while focused
- * as a stand-in for push notifications.
+ * "Meetups & messages" stack screen (moved off the tab bar): Meetups
+ * (reservation.mine; needs-reply and upcoming first by start time, finished
+ * ones collapsed under "Earlier"), Messages (conversation.list) and, only when
+ * OFFERS_ENABLED, Offers (offer.mine, with Accept/Decline for a seller's
+ * pending offers). Requires auth; polls every 10s while focused as a
+ * stand-in for push notifications.
  */
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter, useIsFocused, Stack } from 'expo-router';
-import { MessageCircle, Inbox as InboxIcon, Tag } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, MessageCircle, Inbox as InboxIcon, Tag } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -19,6 +20,7 @@ import { SegmentedTabs } from '@/components/inbox/SegmentedTabs';
 import { OfferRow } from '@/components/inbox/OfferRow';
 import { ConversationRow } from '@/components/inbox/ConversationRow';
 import { ReservationRow } from '@/components/inbox/ReservationRow';
+import { OFFERS_ENABLED } from '@/constants/features';
 import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { confirmAction } from '@/utils/confirm';
@@ -52,7 +54,7 @@ export default function InboxScreen() {
         <EmptyState
           icon={<MessageCircle size={40} color={colors.inkFaint} />}
           title="Sign in to see your meetups and messages"
-          body="Your meetups, offers, and messages with buyers and sellers show up here."
+          body="Your meetups and messages with buyers and sellers show up here."
           actionLabel="Sign in"
           onAction={() => router.push('/auth/sign-in')}
         />
@@ -79,6 +81,7 @@ function SignedInInbox() {
 
   const offersQuery = trpc.offer.mine.useQuery(undefined, {
     refetchInterval: isFocused ? POLL_MS : false,
+    enabled: OFFERS_ENABLED,
   });
   const utils = trpc.useUtils();
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
@@ -125,7 +128,11 @@ function SignedInInbox() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([conversationsQuery.refetch(), reservationsQuery.refetch(), offersQuery.refetch()]);
+      await Promise.all([
+        conversationsQuery.refetch(),
+        reservationsQuery.refetch(),
+        ...(OFFERS_ENABLED ? [offersQuery.refetch()] : []),
+      ]);
     } finally {
       setRefreshing(false);
     }
@@ -137,9 +144,7 @@ function SignedInInbox() {
   );
   const needsReplyCount = useMemo(() => {
     if (!user) return 0;
-    return (reservationsQuery.data ?? []).filter(
-      (r) => (r.status === 'requested' || r.status === 'countered') && r.proposedById !== user.id,
-    ).length;
+    return (reservationsQuery.data ?? []).filter((r) => needsReply(r, user.id)).length;
   }, [reservationsQuery.data, user]);
 
   const pendingOffersToAnswer = useMemo(
@@ -153,16 +158,21 @@ function SignedInInbox() {
       <View style={styles.tabsWrap}>
         <SegmentedTabs
           segments={[
-            { key: 'meetups', label: 'Meetups', badge: needsReplyCount || undefined },
-            { key: 'offers', label: 'Offers', badge: pendingOffersToAnswer || undefined },
-            { key: 'messages', label: 'Messages', badge: unreadCount || undefined },
+            { key: 'meetups', label: 'Meetups', badge: needsReplyCount || undefined, badgeLabel: 'need your reply' },
+            ...(OFFERS_ENABLED
+              ? [{ key: 'offers' as const, label: 'Offers', badge: pendingOffersToAnswer || undefined, badgeLabel: 'to answer' }]
+              : []),
+            { key: 'messages', label: 'Messages', badge: unreadCount || undefined, badgeLabel: 'unread' },
           ]}
           value={tab}
-          onChange={setTab}
+          onChange={(next) => {
+            setOfferError(null);
+            setTab(next);
+          }}
         />
       </View>
 
-      {tab === 'offers' ? (
+      {OFFERS_ENABLED && tab === 'offers' ? (
         <OffersList
           data={offersQuery.data}
           isPending={offersQuery.isPending}
@@ -188,6 +198,7 @@ function SignedInInbox() {
           refreshing={refreshing}
           onRefresh={onRefresh}
           onPress={(id) => router.push(`/conversation/${id}`)}
+          onBrowse={() => router.replace('/')}
         />
       ) : (
         <RequestsList
@@ -200,6 +211,7 @@ function SignedInInbox() {
           refreshing={refreshing}
           onRefresh={onRefresh}
           onPress={(id) => router.push(`/reservation/${id}`)}
+          onBrowse={() => router.replace('/')}
         />
       )}
     </Screen>
@@ -215,6 +227,7 @@ function MessagesList({
   refreshing,
   onRefresh,
   onPress,
+  onBrowse,
 }: {
   data: ConversationSummary[] | undefined;
   isPending: boolean;
@@ -224,6 +237,7 @@ function MessagesList({
   refreshing: boolean;
   onRefresh: () => void;
   onPress: (id: string) => void;
+  onBrowse: () => void;
 }) {
   if (isPending) {
     return (
@@ -247,6 +261,8 @@ function MessagesList({
         icon={<MessageCircle size={40} color={colors.inkFaint} />}
         title="No messages yet"
         body="Message a seller from a listing to start a conversation."
+        actionLabel="Browse listings"
+        onAction={onBrowse}
       />
     );
   }
@@ -353,6 +369,7 @@ function RequestsList({
   refreshing,
   onRefresh,
   onPress,
+  onBrowse,
 }: {
   data: ReservationDetail[] | undefined;
   isPending: boolean;
@@ -363,7 +380,9 @@ function RequestsList({
   refreshing: boolean;
   onRefresh: () => void;
   onPress: (id: string) => void;
+  onBrowse: () => void;
 }) {
+  const [showEarlier, setShowEarlier] = useState(false);
   if (isPending) {
     return (
       <View style={styles.listContent}>
@@ -390,50 +409,87 @@ function RequestsList({
           icon={<InboxIcon size={40} color={colors.inkFaint} />}
           title="No meetups yet"
           body="When you book a meetup, or someone books one on your listing, it shows up here."
+          actionLabel="Browse listings"
+          onAction={onBrowse}
         />
       </ScrollView>
     );
   }
 
-  const asBuyer = reservations.filter((r) => r.buyerId === viewerId);
-  const asSeller = reservations.filter((r) => r.sellerId === viewerId);
+  const isEarlier = (r: ReservationDetail) =>
+    r.status === 'completed' || r.status === 'cancelled' || r.status === 'declined' || r.status === 'expired';
+  const byStart = (a: ReservationDetail, b: ReservationDetail) => a.startsAt.getTime() - b.startsAt.getTime();
+  const needsYou = reservations.filter((r) => !isEarlier(r) && needsReply(r, viewerId)).sort(byStart);
+  const upcoming = reservations.filter((r) => !isEarlier(r) && !needsReply(r, viewerId)).sort(byStart);
+  const earlier = reservations.filter(isEarlier).sort((a, b) => byStart(b, a));
+  const roleOf = (r: ReservationDetail): 'buyer' | 'seller' => (r.sellerId === viewerId ? 'seller' : 'buyer');
 
   return (
     <ScrollView
       contentContainerStyle={styles.listContent}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
     >
-      {asSeller.length > 0 ? (
-        <ReservationGroup title="As seller" reservations={asSeller} viewerId={viewerId} role="seller" onPress={onPress} />
+      {needsYou.length > 0 ? (
+        <ReservationGroup title="Needs your reply" reservations={needsYou} viewerId={viewerId} roleOf={roleOf} onPress={onPress} />
       ) : null}
-      {asBuyer.length > 0 ? (
-        <ReservationGroup title="As buyer" reservations={asBuyer} viewerId={viewerId} role="buyer" onPress={onPress} />
+      {upcoming.length > 0 ? (
+        <ReservationGroup title="Upcoming" reservations={upcoming} viewerId={viewerId} roleOf={roleOf} onPress={onPress} />
+      ) : null}
+      {needsYou.length === 0 && upcoming.length === 0 ? (
+        <Text variant="body" color="inkMuted" style={styles.noUpcoming}>
+          Nothing upcoming. Browse listings to book a meetup.
+        </Text>
+      ) : null}
+      {earlier.length > 0 ? (
+        <View style={styles.group}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showEarlier }}
+            accessibilityLabel={`Earlier, ${earlier.length} past meetups. ${showEarlier ? 'Hide' : 'Show'}.`}
+            onPress={() => setShowEarlier((v) => !v)}
+            style={styles.earlierToggle}
+          >
+            <Text variant="label" color="inkMuted" style={styles.earlierText}>
+              EARLIER ({earlier.length})
+            </Text>
+            {showEarlier ? <ChevronUp size={18} color={colors.inkMuted} /> : <ChevronDown size={18} color={colors.inkMuted} />}
+          </Pressable>
+          {showEarlier ? (
+            <ReservationGroup reservations={earlier} viewerId={viewerId} roleOf={roleOf} onPress={onPress} />
+          ) : null}
+        </View>
       ) : null}
     </ScrollView>
   );
+}
+
+function needsReply(r: ReservationDetail, viewerId: string): boolean {
+  return (r.status === 'requested' || r.status === 'countered') && r.proposedById !== viewerId;
 }
 
 function ReservationGroup({
   title,
   reservations,
   viewerId,
-  role,
+  roleOf,
   onPress,
 }: {
-  title: string;
+  title?: string;
   reservations: ReservationDetail[];
   viewerId: string;
-  role: 'buyer' | 'seller';
+  roleOf: (r: ReservationDetail) => 'buyer' | 'seller';
   onPress: (id: string) => void;
 }) {
   return (
     <View style={styles.group}>
-      <Text variant="label" color="inkMuted" style={styles.groupTitle}>
-        {title.toUpperCase()}
-      </Text>
+      {title ? (
+        <Text variant="label" color="inkMuted" style={styles.groupTitle}>
+          {title.toUpperCase()}
+        </Text>
+      ) : null}
       {reservations.map((r, i) => (
         <View key={r.id}>
-          <ReservationRow reservation={r} viewerId={viewerId} role={role} onPress={() => onPress(r.id)} />
+          <ReservationRow reservation={r} viewerId={viewerId} role={roleOf(r)} onPress={() => onPress(r.id)} />
           {i < reservations.length - 1 ? <Divider /> : null}
         </View>
       ))}
@@ -462,4 +518,7 @@ const styles = StyleSheet.create({
   rowSkeletonInfo: { flex: 1, gap: space.sm, justifyContent: 'center' },
   group: { marginBottom: space.xl },
   groupTitle: { marginBottom: space.xs, marginTop: space.md },
+  noUpcoming: { marginTop: space.lg, marginBottom: space.lg },
+  earlierToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
+  earlierText: { flex: 1 },
 });

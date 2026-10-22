@@ -34,6 +34,10 @@ export interface ProfileHeaderProps {
   uploadError?: string | null;
   /** Follow button (others) or edit link (self). */
   action?: React.ReactNode;
+  /** Compact layout: smaller avatar with name, campus and badges beside it. */
+  compact?: boolean;
+  /** Own profile only: label the demo badge "Demo account". */
+  demoAccountLabel?: boolean;
 }
 
 function Stat({
@@ -68,7 +72,88 @@ function Stat({
   );
 }
 
+function CompactHeader(p: ProfileHeaderProps) {
+  return (
+    <View style={styles.compactHeader}>
+      <View style={styles.compactTop}>
+        <View style={styles.compactAvatarCol}>
+          <View>
+            <Avatar uri={p.avatarUrl} name={p.displayName} size={88} />
+            {p.uploading ? (
+              <View style={[styles.uploading, { borderRadius: 44 }]}>
+                <ActivityIndicator color={colors.white} />
+              </View>
+            ) : null}
+          </View>
+        </View>
+        <View style={styles.compactInfo}>
+          <Text variant="title" numberOfLines={2}>
+            {p.displayName}
+          </Text>
+          {p.campusName ? (
+            <Text variant="label" color="inkMuted" numberOfLines={1}>
+              {p.campusName}
+            </Text>
+          ) : null}
+          <View style={styles.compactBadges}>
+            {p.campusEmailVerified ? <Badge kind="verified" /> : null}
+            {p.isDemo ? (
+              p.demoAccountLabel ? (
+                <View style={styles.demoPill}>
+                  <Text variant="caption" weight="600" color="demo">
+                    Demo account
+                  </Text>
+                </View>
+              ) : (
+                <DemoBadge visible />
+              )
+            ) : null}
+          </View>
+        </View>
+      </View>
+      {p.onChangePhoto ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={p.avatarUrl ? 'Change profile picture' : 'Add a profile picture'}
+          onPress={p.onChangePhoto}
+          disabled={p.uploading}
+          style={({ pressed }) => [styles.compactChangePhoto, pressed && styles.pressed]}
+        >
+          <Camera size={18} color={colors.accentInk} />
+          <Text variant="label" weight="600" color="accentInk">
+            {p.avatarUrl ? 'Change photo' : 'Add a photo'}
+          </Text>
+        </Pressable>
+      ) : null}
+      {p.uploadError ? (
+        <Text variant="caption" color="danger">
+          {p.uploadError}
+        </Text>
+      ) : null}
+      {p.bio ? <Text variant="body">{p.bio}</Text> : null}
+      <View style={styles.compactStats}>
+        <Stat
+          count={p.followerCount}
+          singular="follower"
+          plural="followers"
+          active={p.openList === 'followers'}
+          onPress={() => p.onToggleList('followers')}
+        />
+        <Stat
+          count={p.followingCount}
+          singular="following"
+          plural="following"
+          active={p.openList === 'following'}
+          onPress={() => p.onToggleList('following')}
+        />
+      </View>
+      {p.action ? <View style={styles.compactAction}>{p.action}</View> : null}
+    </View>
+  );
+}
+
 export function ProfileHeader(p: ProfileHeaderProps) {
+  if (p.compact) return <CompactHeader {...p} />;
   return (
     <View style={styles.header}>
       <View>
@@ -161,6 +246,27 @@ export function ProfileHeader(p: ProfileHeaderProps) {
 }
 
 const styles = StyleSheet.create({
+  compactHeader: { gap: space.sm, paddingVertical: space.lg },
+  compactTop: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
+  compactAvatarCol: { alignItems: 'center' },
+  compactInfo: { flex: 1, gap: space.xs },
+  compactBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  compactChangePhoto: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    minHeight: minTouchHeight,
+    alignSelf: 'flex-start',
+  },
+  compactStats: { flexDirection: 'row', gap: space.sm },
+  compactAction: { alignItems: 'stretch' },
+  demoPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: space.md,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: colors.demoSoft,
+  },
   header: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
   uploading: {
     position: 'absolute',

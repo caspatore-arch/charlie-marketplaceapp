@@ -69,8 +69,11 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
   const [actionPost, setActionPost] = useState<CommunityPost | null>(null);
   const [reportPost, setReportPost] = useState<CommunityPost | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const me = trpc.auth.me.useQuery();
+  const unread = trpc.conversation.unreadTotal.useQuery(undefined, { refetchInterval: 15_000 });
+  const inboxBadge = (unread.data?.conversations ?? 0) + (unread.data?.actionableReservations ?? 0);
   const feed = trpc.community.feed.useInfiniteQuery(
     { kind, sort, limit: 20 },
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
@@ -96,10 +99,14 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
     onError: (e) => setActionError(e.message),
   });
   const report = trpc.community.report.useMutation({
-    onSuccess: () => setReportPost(null),
+    onSuccess: () => {
+      setReportPost(null);
+      setNotice("Thanks. We'll review the post.");
+    },
   });
   const block = trpc.user.block.useMutation({
     onSuccess: () => {
+      setNotice('User blocked. You will no longer see their posts.');
       void refetchFeed();
       void utils.user.blocked.invalidate();
     },
@@ -110,8 +117,21 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
 
   const header = (
     <View style={styles.listHeader}>
-      <PostComposer onPosted={refetchFeed} />
+      <PostComposer
+        kind={kind}
+        onKind={setKind}
+        onPosted={(posted) => {
+          setKind(posted);
+          void refetchFeed();
+        }}
+        campusEmailVerified={me.data ? me.data.campusEmailVerifiedAt != null : undefined}
+      />
       <FeedControls kind={kind} sort={sort} onKind={setKind} onSort={setSort} />
+      {notice ? (
+        <Text variant="label" color="success" accessibilityRole="alert">
+          {notice}
+        </Text>
+      ) : null}
       {actionError ? (
         <Text variant="label" color="danger" accessibilityRole="alert">
           {actionError}
@@ -158,11 +178,18 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Meetups and messages"
+          accessibilityLabel={inboxBadge > 0 ? `Meetups and messages, ${inboxBadge} need attention` : 'Meetups and messages'}
           onPress={onOpenInbox}
           style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
         >
           <MessagesSquare size={24} color={colors.ink} />
+          {inboxBadge > 0 ? (
+            <View style={styles.badge}>
+              <Text variant="caption" weight="600" color="white">
+                {inboxBadge > 9 ? '9+' : inboxBadge}
+              </Text>
+            </View>
+          ) : null}
         </Pressable>
       </View>
 
@@ -181,6 +208,7 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
             onPressAuthor={() => router.push(`/user/${item.author.id}`)}
             onOpenActions={() => {
               setActionError(null);
+              setNotice(null);
               setActionPost(item);
             }}
           />
@@ -264,6 +292,18 @@ const styles = StyleSheet.create({
   titleText: { flex: 1 },
   iconButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.7 },
+  badge: {
+    position: 'absolute',
+    top: 6,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   listContent: { paddingHorizontal: space.lg, paddingBottom: space.xxxl, flexGrow: 1 },
   listHeader: { gap: space.md, paddingBottom: space.md },
   actions: { gap: space.sm },

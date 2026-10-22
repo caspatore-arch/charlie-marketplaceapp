@@ -1,10 +1,27 @@
 import React from 'react';
 import { InfoPage } from '@/components/marketing/InfoPage';
+
 export default function About() {
-  return <InfoPage title="Good stuff. Another semester." intro="Dibbs is an independent marketplace starting with the University of Arizona campus community. Buy and sell used goods nearby, with a clear plan for meeting up." sections={[
-    { title: 'Turn unused stuff into money', body: 'The jacket you never wear. The textbook you finished. The lamp that won’t fit next semester. Post photos, describe the condition, set an asking price, and choose when and where you can meet.' },
-    { title: 'Find what you need for less', body: 'Shop secondhand clothes, shoes, books, tech, and dorm essentials. Compare prices and condition, ask questions, or make an offer. A good deal starts with knowing what you’re buying.' },
-    { title: 'From a listing to a real handoff', body: 'Buyers book a 15-minute slot from the seller’s available times and campus spots. Use messages to settle details, inspect the item in person, arrange payment directly, and confirm the handoff in Dibbs.' },
-    { title: 'Keep it moving around campus', body: 'Listings and Community posts expire after 24 hours. Share a listing link with friends, post what you’re looking for in Community, and upvote useful posts. Confirmed meetups remain available after a listing expires.' },
-  ]} />;
+  return (
+    <InfoPage
+      current="about"
+      numbered
+      title="Dibbs is the campus marketplace for UArizona students."
+      intro="Sell what you no longer use and find secondhand things nearby. Free to use, and sellers keep 100% of their price."
+      sections={[
+        {
+          title: 'List it for 24 hours',
+          body: 'Add a photo, a price, and when you can meet. Your listing stays up for a day. If it does not sell, the market has spoken: repost it at a lower price.',
+        },
+        {
+          title: 'A buyer books a time and spot',
+          body: 'No back-and-forth and no haggling. A buyer who likes the price picks a 15-minute slot at a public campus meetup spot from the times you offered.',
+        },
+        {
+          title: 'Meet, check it, hand it over',
+          body: 'Meet in public on campus. Check the item together, pay the seller directly however you agree, and confirm the handoff in Dibbs. Dibbs never holds your money.',
+        },
+      ]}
+    />
+  );
 }

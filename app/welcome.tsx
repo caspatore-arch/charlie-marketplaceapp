@@ -21,6 +21,8 @@ import { Image } from 'expo-image';
 import { Redirect, Stack, useRouter } from 'expo-router';
 import { Text } from '@/components/ui/Text';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { TextLink } from '@/components/ui/TextLink';
+import { useReduceMotion } from '@/components/browse/useReduceMotion';
 import { AuthMethods } from '@/components/auth/AuthMethods';
 import type { AuthFinish, AuthMode } from '@/components/auth/EmailAuthFlow';
 import { useAuth } from '@/hooks/useAuth';
@@ -35,15 +37,36 @@ const WIDE = 880;
 const STEPS = [
   {
     title: 'List it for 24 hours',
-    body: 'A photo, a price, and when you can meet. Posts expire after a day, keeping yesterday’s listings out of today’s feed.',
+    body: 'A photo, a price, and when you can meet. Listings expire after a day. If yours does not sell, repost it lower.',
   },
   {
-    title: 'Buyers book an exact time and spot',
-    body: 'No “is this still available?” Pick a 15-minute slot at a campus meetup spot from the times the seller already offered.',
+    title: 'A buyer books a time and spot',
+    body: 'No “is this still available?” A buyer who likes the price picks a 15-minute slot at a public campus spot, from the times you offered.',
   },
   {
-    title: 'Meet, check it, make it yours',
-    body: 'Meet in public on campus. Check the item together, arrange payment directly, and confirm the handoff in Dibbs.',
+    title: 'Meet, check it, hand it over',
+    body: 'Meet in public on campus. Check the item together, pay the seller directly, and confirm the handoff in Dibbs.',
+  },
+];
+
+// The four reasons, in the owner's order. Safe-and-sure is worded as facts the
+// app makes true, never as a guarantee.
+const PITCH = [
+  {
+    title: 'Quick, with no haggling',
+    body: 'The price is the price. Buyers decide if it is right and agree to a time and place, so there is no negotiating and no lowball spam.',
+  },
+  {
+    title: 'Sell the same day',
+    body: 'Need money for a trip or a night out? Sell the thing you have not touched in months today. Did not sell in a day? Repost it lower.',
+  },
+  {
+    title: 'Free, and you keep 100%',
+    body: 'No fees and no transaction costs. Sellers keep everything they ask for.',
+  },
+  {
+    title: 'Safe and sure',
+    body: 'Public spots on campus, other students who verified a campus email, a booked time with a reminder, and report and block when you need them.',
   },
 ];
 
@@ -52,7 +75,9 @@ export default function WelcomeScreen() {
   const wide = width >= WIDE;
   const router = useRouter();
   const scroll = useRef<ScrollView>(null);
-  const sections = useRef<Record<string, number>>({});
+  const howRef = useRef<View>(null);
+  const cardRef = useRef<View>(null);
+  const reduceMotion = useReduceMotion();
   const { status } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signup');
   // Once the card finishes we navigate ourselves; this stops the signed-in
@@ -61,6 +86,18 @@ export default function WelcomeScreen() {
 
   // A returning visitor with a live session skips the front door.
   if (status === 'signedIn' && !finishing) return <Redirect href="/" />;
+
+  // Measure the target against the scroll content itself, so the offset is in
+  // one coordinate frame no matter how deeply the target is nested.
+  const scrollToRef = (target: React.RefObject<View | null>) => {
+    const content = scroll.current?.getInnerViewNode();
+    if (!target.current || !content) return;
+    target.current.measureLayout(
+      content as never,
+      (_x, y) => scroll.current?.scrollTo({ y: Math.max(0, y - space.lg), animated: !reduceMotion }),
+      () => {},
+    );
+  };
 
   const onFinished = ({ isNewAccount }: AuthFinish) => {
     setFinishing(true);
@@ -92,7 +129,7 @@ export default function WelcomeScreen() {
         {mode === 'signup' ? 'Make your Dibbs account' : 'Welcome back'}
       </Text>
 
-      <Text variant="body" color="inkMuted">Sell what you no longer use, discover affordable secondhand finds, and book a campus meetup. Verify your campus email to start buying, selling, or posting.</Text>
+      <Text variant="body" color="inkMuted">Use your campus email to buy, sell and book a meetup. It is free, and sellers keep 100%.</Text>
 
       {status === 'loading' || finishing ? (
         <View style={styles.loading}>
@@ -105,18 +142,13 @@ export default function WelcomeScreen() {
         <AuthMethods key={mode} mode={mode} hideFirstHeading cardIntro onFinished={onFinished} />
       )}
 
-      <Text variant="small" color="inkMuted" style={styles.switchLine}>
-        {mode === 'signup' ? 'Already have an account? ' : 'New to Dibbs? '}
-        <Text
-          variant="caption"
-          weight="700"
-          color="accent"
-          accessibilityRole="link"
-          onPress={() => setMode(mode === 'signup' ? 'login' : 'signup')}
-        >
-          {mode === 'signup' ? 'Log in' : 'Create an account'}
-        </Text>
-      </Text>
+      <TextLink
+        align="center"
+        variant="small"
+        onPress={() => setMode(mode === 'signup' ? 'login' : 'signup')}
+      >
+        {mode === 'signup' ? 'Already have an account? Log in' : 'New to Dibbs? Create an account'}
+      </TextLink>
     </View>
   );
 
@@ -127,18 +159,26 @@ export default function WelcomeScreen() {
         {/* Hero: the logo's own red, so the transparent wordmark has no seam. */}
         <View style={styles.hero}>
           <View style={styles.inner}>
-            <Image
-              source={WORDMARK}
-              accessibilityLabel="Dibbs"
-              contentFit="contain"
-              style={{ width: wide ? 268 : 190, aspectRatio: WORDMARK_RATIO }}
-            />
-            <View style={styles.nav}>
-              {['About us', 'How it works', 'Why use Dibbs', 'Get started'].map((label) => (
-                <Pressable key={label} accessibilityRole="button" onPress={() => label === 'About us' ? router.push('/about') : label === 'Why use Dibbs' ? router.push('/why-dibbs') : scroll.current?.scrollTo({ y: (sections.current.content ?? 0) + (sections.current[label] ?? 0) + (label === 'Get started' ? (sections.current.cardOffset ?? 0) : 0), animated: false })} style={styles.navLink}>
-                  <Text variant="label" weight="700">{label}</Text>
-                </Pressable>
-              ))}
+            <View style={styles.topRow}>
+              <Image
+                source={WORDMARK}
+                accessibilityLabel="Dibbs"
+                contentFit="contain"
+                style={{ width: wide ? 268 : 150, aspectRatio: WORDMARK_RATIO }}
+              />
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Log in"
+                onPress={() => {
+                  setMode('login');
+                  scrollToRef(cardRef);
+                }}
+                style={styles.loginLink}
+              >
+                <Text variant="label" weight="700" color="white" style={styles.loginText}>
+                  Log in
+                </Text>
+              </Pressable>
             </View>
             <Text variant="label" weight="600" color="white" style={styles.tagline}>
               CAMPUS MARKETPLACE
@@ -152,43 +192,55 @@ export default function WelcomeScreen() {
               accessibilityRole="header"
               style={[styles.h1, wide ? styles.h1Wide : null]}
             >
-              Buy and sell on campus, one day at a time.
+              Sell it today. Buy it tomorrow.
             </Text>
             <Text variant="lead" color="white" weight="600" style={styles.lede}>
-              A marketplace just for UArizona students — clothes, shoes, dorm stuff, books and tech, handed off in
-              person on campus.
+              The quick, free campus marketplace for UArizona students. No haggling, sellers keep 100%, handed off in person on campus.
             </Text>
             <View style={styles.pill}>
               <Text variant="small" color="white" weight="600" style={styles.pillText}>
                 University of Arizona students
               </Text>
             </View>
+            <View style={styles.ctaRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Create account"
+                onPress={() => {
+                  setMode('signup');
+                  scrollToRef(cardRef);
+                }}
+                style={({ pressed }) => [styles.cta, pressed ? { opacity: 0.85 } : null]}
+              >
+                <Text variant="heading" weight="700" color="accentInk">
+                  Create account
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="How it works"
+                onPress={() => scrollToRef(howRef)}
+                style={styles.navLink}
+              >
+                <Text variant="label" weight="700">How it works</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
 
-        <View style={styles.inner} onLayout={(e) => { sections.current['content'] = e.nativeEvent.layout.y; }}>
-          <View style={styles.about} onLayout={(e) => { sections.current['About us'] = e.nativeEvent.layout.y; }}>
-            <Text variant="title" accessibilityRole="header">About us</Text>
-            <Text variant="body">Good stuff deserves another semester.</Text>
-            <Text variant="body" color="inkMuted">Dibbs is an independent campus marketplace starting at the University of Arizona. We’re making it easier to pass along the clothes, books, tech, and dorm finds you no longer need to someone nearby who does.</Text>
-          </View>
-          <View style={styles.benefits} onLayout={(e) => { sections.current['Why use Dibbs'] = e.nativeEvent.layout.y; }}>
-            <Text variant="title" accessibilityRole="header">Why use Dibbs?</Text>
-            <Text variant="body">Less back-and-forth. More actual meetups.</Text>
-            {[
-              ['Stay close to campus', 'Browse your campus community and choose a campus meetup spot. Less travel makes a handoff easier to fit between classes.'],
-              ['Know when you can meet', 'Sellers share availability up front. Buyers book an exact 15-minute slot, so both people have a clear plan.'],
-              ['Find something fresh', 'Listings expire after 24 hours. Share your link with friends while it’s live, or make an offer on a find you love.'],
-            ].map(([title, body]) => (
-              <View key={title} style={styles.benefit}>
-                <Text variant="heading" accessibilityRole="header">{title}</Text>
-                <Text variant="body">{body}</Text>
+        <View style={styles.inner}>
+          <View style={styles.benefits}>
+            <Text variant="displaySm" accessibilityRole="header">Why students use Dibbs</Text>
+            {PITCH.map((item) => (
+              <View key={item.title} style={styles.benefit}>
+                <Text variant="heading" accessibilityRole="header">{item.title}</Text>
+                <Text variant="bodySm">{item.body}</Text>
               </View>
             ))}
           </View>
-          <View onLayout={(e) => { sections.current['How it works'] = e.nativeEvent.layout.y; sections.current['Get started'] = sections.current['How it works']; }} style={[styles.panel, wide ? styles.panelWide : null]}>
+          <View style={[styles.panel, wide ? styles.panelWide : null]}>
 
-            <View style={[styles.steps, wide ? styles.stepsWide : null]}>
+            <View ref={howRef} collapsable={false} style={[styles.steps, wide ? styles.stepsWide : null]}>
               <Text variant="caption" weight="700" color="accentInk" style={styles.sectionLabel}>
                 HOW IT WORKS
               </Text>
@@ -211,7 +263,7 @@ export default function WelcomeScreen() {
               ))}
             </View>
 
-            <View onLayout={(e) => { sections.current.cardOffset = e.nativeEvent.layout.y; }} style={wide ? styles.cardCol : undefined}>{card}</View>
+            <View ref={cardRef} collapsable={false} style={wide ? styles.cardCol : undefined}>{card}</View>
           </View>
 
           <View style={styles.plain}>
@@ -219,8 +271,7 @@ export default function WelcomeScreen() {
               What Dibbs is not
             </Text>
             <Text variant="label" color="inkMuted">
-              Dibbs doesn’t hold your money, handle payment, or check who anyone is. A campus email proves someone is
-              in control of that campus email address. It does not verify identity or trustworthiness. Meet in public, on campus, and use your own judgment.
+              Dibbs doesn’t hold your money, handle payment, or check who anyone is. A campus email shows someone controls that address, not who they are or whether to trust them. Meet in public, on campus, and use your own judgment.
             </Text>
           </View>
 
@@ -230,12 +281,10 @@ export default function WelcomeScreen() {
               Arizona.
             </Text>
             <View style={styles.legalRow}>
-              <Text variant="caption" color="accent" weight="600" accessibilityRole="link" onPress={() => router.push('/legal/terms')}>
-                Terms
-              </Text>
-              <Text variant="caption" color="accent" weight="600" accessibilityRole="link" onPress={() => router.push('/legal/privacy')}>
-                Privacy
-              </Text>
+              <TextLink variant="small" href="/legal/terms">Terms</TextLink>
+              <TextLink variant="small" href="/legal/privacy">Privacy</TextLink>
+              <TextLink variant="small" href="/about">About</TextLink>
+              <TextLink variant="small" href="/why-dibbs">Why Dibbs</TextLink>
             </View>
           </View>
         </View>
@@ -245,18 +294,27 @@ export default function WelcomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  nav: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.lg },
-  navLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.md, backgroundColor: colors.white, borderRadius: radius.pill },
-  about: { paddingVertical: space.xxxl, gap: space.md },
-  benefits: { gap: space.md },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  loginLink: { minHeight: 48, justifyContent: 'center', paddingHorizontal: space.sm },
+  loginText: { textDecorationLine: 'underline' },
+  ctaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.md, marginTop: space.xl },
+  cta: {
+    minHeight: 54,
+    justifyContent: 'center',
+    paddingHorizontal: space.xxxl,
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+  },
+  navLink: { minHeight: 48, justifyContent: 'center', paddingHorizontal: space.md, backgroundColor: colors.white, borderRadius: radius.pill },
+  benefits: { gap: space.md, paddingTop: space.xxxl },
   benefit: { padding: space.xl, borderRadius: radius.lg, gap: space.sm, backgroundColor: colors.tint },
   page: { flex: 1, backgroundColor: colors.bg },
   scroll: { flexGrow: 1, paddingBottom: 72 },
   inner: { width: '100%', maxWidth: 1060, alignSelf: 'center', paddingHorizontal: space.lg },
 
   hero: { backgroundColor: colors.brand, paddingTop: space.huge + space.xs, paddingBottom: 52 },
-  tagline: { marginTop: 10, letterSpacing: 2.2 },
-  h1: { marginTop: 30, maxWidth: 560 },
+  tagline: { marginTop: space.xl, letterSpacing: 2.2 },
+  h1: { marginTop: space.lg, maxWidth: 560 },
   h1Wide: { fontSize: 60, lineHeight: 63, letterSpacing: -1.3 },
   lede: { marginTop: 18, maxWidth: 520 },
   pill: {
@@ -314,7 +372,6 @@ const styles = StyleSheet.create({
   tab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 11 },
   tabActive: { backgroundColor: colors.surface, ...shadow },
   loading: { gap: space.md },
-  switchLine: { textAlign: 'center', marginTop: space.xs },
 
   plain: {
     marginTop: space.section,
@@ -332,5 +389,5 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
     gap: space.md,
   },
-  legalRow: { flexDirection: 'row', gap: space.xl },
+  legalRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: space.lg },
 });

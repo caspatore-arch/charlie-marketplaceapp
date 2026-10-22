@@ -276,7 +276,12 @@ export function EmailAuthFlow({
         editable={!busy}
       />
       <Button title={network ? 'Try again' : submitLabel} onPress={() => sendCode(false)} loading={busy} />
-      {onUsePhone ? <Button title="Use your phone number instead" variant="ghost" onPress={onUsePhone} /> : null}
+      {mode !== 'login' ? (
+        <Text variant="small" color="inkMuted">
+          New here? We’ll ask for your name after the code.
+        </Text>
+      ) : null}
+      {onUsePhone ? <Button title="Use your phone number instead" variant="link" onPress={onUsePhone} /> : null}
     </View>
   );
 }

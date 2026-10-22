@@ -1,5 +1,5 @@
 /**
- * Two-segment tab control for the Inbox screen (Messages / Requests).
+ * Segmented tab control (Inbox: Meetups / Messages; Moderation: Open / Reviewed).
  * Usage: <SegmentedTabs segments={[{key:'messages',label:'Messages'},...]}
  *   value={tab} onChange={setTab} />
  */
@@ -13,6 +13,8 @@ export interface SegmentedTabOption<T extends string> {
   label: string;
   /** Optional small badge count, e.g. unread messages or requests needing reply. */
   badge?: number;
+  /** Spoken after the count, e.g. "need your reply" or "unread". Defaults to "new". */
+  badgeLabel?: string;
 }
 
 export interface SegmentedTabsProps<T extends string> {
@@ -31,11 +33,19 @@ export function SegmentedTabs<T extends string>({ segments, value, onChange }: S
             key={seg.key}
             accessibilityRole="tab"
             accessibilityState={{ selected }}
-            accessibilityLabel={seg.badge ? `${seg.label}, ${seg.badge} new` : seg.label}
+            accessibilityLabel={seg.badge ? `${seg.label}, ${seg.badge} ${seg.badgeLabel ?? 'new'}` : seg.label}
             onPress={() => onChange(seg.key)}
             style={({ pressed }) => [styles.segment, selected && styles.segmentSelected, pressed && styles.pressed]}
           >
-            <Text variant="heading" weight="600" color={selected ? 'ink' : 'inkMuted'}>
+            <Text
+              variant="label"
+              weight="600"
+              color={selected ? 'ink' : 'inkMuted'}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              style={styles.label}
+            >
               {seg.label}
             </Text>
             {seg.badge ? (
@@ -73,6 +83,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   pressed: { opacity: 0.85 },
+  label: { flexShrink: 1 },
   badge: {
     minWidth: 18,
     height: 18,

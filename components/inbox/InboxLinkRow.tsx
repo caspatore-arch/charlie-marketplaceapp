@@ -8,13 +8,14 @@ import { useRouter } from 'expo-router';
 import { ChevronRight, MessagesSquare } from 'lucide-react-native';
 import { Text } from '../ui/Text';
 import { trpc } from '@/lib/trpc';
+import { OFFERS_ENABLED } from '@/constants/features';
 import { colors, radius, space, minTouchHeight } from '@/constants/theme';
 
 export function InboxLinkRow() {
   const router = useRouter();
   const unread = trpc.conversation.unreadTotal.useQuery(undefined, { refetchInterval: 15_000 });
-  const offers = trpc.offer.mine.useQuery({ role: 'seller' }, { refetchInterval: 15_000 });
-  const pendingOffers = (offers.data ?? []).filter((o) => o.status === 'pending').length;
+  const offers = trpc.offer.mine.useQuery({ role: 'seller' }, { refetchInterval: 15_000, enabled: OFFERS_ENABLED });
+  const pendingOffers = !OFFERS_ENABLED ? 0 : (offers.data ?? []).filter((o) => o.status === 'pending').length;
   const total = (unread.data?.conversations ?? 0) + (unread.data?.actionableReservations ?? 0) + pendingOffers;
 
   return (
@@ -28,7 +29,7 @@ export function InboxLinkRow() {
       <View style={styles.text}>
         <Text variant="heading">Meetups & messages</Text>
         <Text variant="caption" color="inkMuted">
-          Meetups, offers, and chats with buyers and sellers
+          {OFFERS_ENABLED ? 'Meetups, offers, and chats with buyers and sellers' : 'Meetups and chats with buyers and sellers'}
         </Text>
       </View>
       {total > 0 ? (

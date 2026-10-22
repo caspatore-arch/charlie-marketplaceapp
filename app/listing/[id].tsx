@@ -4,7 +4,7 @@
  * "more from this seller", share/save/report, and a sticky bottom action bar
  * that differs for the seller vs. everyone else.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +22,7 @@ import { Text } from '@/components/ui/Text';
 import { PriceText } from '@/components/ui/PriceText';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { TextLink } from '@/components/ui/TextLink';
 import { Divider } from '@/components/ui/Divider';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ListingDetailSkeleton } from '@/components/ui/ListingDetailSkeleton';
@@ -41,11 +42,13 @@ import { ReservationStatusPill } from '@/components/ReservationStatusPill';
 import { exactMeetupTime } from '@/components/booking/time';
 import { ListingComments } from '@/components/listing/ListingComments';
 import { ReportSheet } from '@/components/browse/ReportSheet';
+import { expiresInLabel, expiresSoon } from '@/components/browse/expiry';
+import { OFFERS_ENABLED } from '@/constants/features';
 import { trpc } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { confirmAction } from '@/utils/confirm';
 import { shareListing } from '@/utils/shareListing';
-import { colors, space } from '@/constants/theme';
+import { colors, radius, space } from '@/constants/theme';
 import { conditionLabel, categoryLabel, formatMeetupTime, formatPrice } from '@/utils/format';
 import type { ReportReason } from '@/types';
 
@@ -58,7 +61,9 @@ export default function ListingDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const requireAuth = useRequireAuth();
-  const { status: authStatus } = useAuth();
+  const { status: authStatus, user } = useAuth();
+  const scrollRef = useRef<ScrollView>(null);
+  const meetupsRef = useRef<View>(null);
   const utils = trpc.useUtils();
 
   const [reportOpen, setReportOpen] = useState(false);
@@ -308,16 +313,40 @@ export default function ListingDetailScreen() {
         ? 'This item has already been sold.'
         : listing.status === 'expired'
           ? 'This listing has expired.'
-          : slotsQuery.data && !slotsQuery.data.open
-            ? (slotsQuery.data.closedReason ?? undefined)
-            : undefined;
-  const bookable = !isAuction && listing.status === 'active' && slotsQuery.data?.open !== false;
+          : slotsQuery.isError
+            ? 'Could not check open times. Try again in a moment.'
+            : slotsQuery.data && !slotsQuery.data.open
+              ? (slotsQuery.data.closedReason ?? undefined)
+              : undefined;
+  const bookable =
+    !isAuction && listing.status === 'active' && !slotsQuery.isError && slotsQuery.data?.open !== false;
   const noOpenTimes =
     bookable && !!slotsQuery.data && slotsQuery.data.slots.every((sl) => !sl.available);
   const heldByOther = !!offers?.heldByOther;
   const heldByViewer = !!offers?.heldByViewer;
   const heldOffer = heldByViewer ? offers?.offers.find((o) => o.status === 'accepted') : undefined;
   const bookingPriceCents = heldOffer?.amountCents ?? listing.priceCents;
+  const signedOut = authStatus === 'signedOut';
+  const campusUnverified = authStatus === 'signedIn' && !!user && !user.campusEmailVerifiedAt;
+  const expiryText = listing.status === 'active' ? expiresInLabel(listing.expiresAt, now) : null;
+  const expiringSoon = listing.status === 'active' && expiresSoon(listing.expiresAt, now);
+  const pendingOffers = (offers?.offers ?? []).filter((o) => o.status === 'pending').length;
+  const meetupCount = (meetupsQuery.data ?? []).length;
+  const scrollToMeetups = () => {
+    const content = scrollRef.current?.getInnerViewNode();
+    if (!meetupsRef.current || !content) return;
+    meetupsRef.current.measureLayout(
+      content as never,
+      (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - space.lg), animated: true }),
+      () => {},
+    );
+  };
+  const sellerPillText = [
+    OFFERS_ENABLED && pendingOffers > 0 ? `${pendingOffers} offer${pendingOffers === 1 ? '' : 's'}` : null,
+    meetupCount > 0 ? `${meetupCount} meetup${meetupCount === 1 ? '' : 's'}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const messageIconButton = (
     <Pressable
@@ -338,18 +367,22 @@ export default function ListingDetailScreen() {
   return (
     <Screen padded={false}>
       <Stack.Screen options={{ title: listing.title }} />
-      <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} style={styles.flex} showsVerticalScrollIndicator={false}>
         <PhotoGallery photos={listing.photos} />
 
         <View style={styles.content}>
           <StatusBanner status={listing.status} />
 
           <View style={styles.priceRow}>
-            <View>
-              <PriceText cents={listing.priceCents} />
-              {!isAuction ? (
-                <Text variant="caption" color="inkMuted">
-                  Asking price
+            <View style={styles.flex}>
+              <PriceText cents={listing.priceCents} size="lg" />
+              {expiryText ? (
+                <Text
+                  variant="small"
+                  weight={expiringSoon ? '700' : '500'}
+                  color={expiringSoon ? 'accentInk' : 'inkMuted'}
+                >
+                  {expiryText}
                 </Text>
               ) : null}
             </View>
@@ -362,21 +395,31 @@ export default function ListingDetailScreen() {
               >
                 <ShareIcon size={22} color={colors.ink} />
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={listing.isSaved ? 'Remove from saved items' : 'Save this listing'}
-                accessibilityState={{ selected: listing.isSaved }}
-                onPress={onToggleSave}
-                style={styles.iconBtn}
-              >
-                <Heart
-                  size={22}
-                  color={listing.isSaved ? colors.accent : colors.ink}
-                  fill={listing.isSaved ? colors.accent : 'none'}
-                />
-              </Pressable>
+              {isSeller ? null : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={listing.isSaved ? 'Remove from saved items' : 'Save this listing'}
+                  accessibilityState={{ selected: listing.isSaved }}
+                  onPress={onToggleSave}
+                  style={styles.iconBtn}
+                >
+                  <Heart
+                    size={22}
+                    color={listing.isSaved ? colors.accent : colors.ink}
+                    fill={listing.isSaved ? colors.accent : 'none'}
+                  />
+                </Pressable>
+              )}
             </View>
           </View>
+
+          {expiringSoon ? (
+            <View style={styles.soonBanner} accessibilityRole="alert">
+              <Text variant="label" weight="600" color="warning">
+                Less than an hour left. Book a time soon.
+              </Text>
+            </View>
+          ) : null}
 
           <Text variant="title" style={styles.titleText}>
             {listing.title}
@@ -389,6 +432,19 @@ export default function ListingDetailScreen() {
             <Badge kind="status" label={categoryLabel(listing.category)} tone="neutral" />
           </View>
 
+          {isSeller && sellerPillText ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${sellerPillText}. Jump to booked meetups.`}
+              onPress={scrollToMeetups}
+              style={styles.sellerPill}
+            >
+              <Text variant="label" weight="600" color="accentInk">
+                {sellerPillText}
+              </Text>
+            </Pressable>
+          ) : null}
+
           {isAuction ? (
             <View style={styles.noticeBox}>
               <Text variant="body" color="inkMuted">
@@ -397,7 +453,7 @@ export default function ListingDetailScreen() {
             </View>
           ) : null}
 
-          {!isAuction && !isSeller && offers ? (
+          {OFFERS_ENABLED && !isAuction && !isSeller && offers ? (
             <BuyerOfferCard
               data={offers}
               timeZone={timeZone}
@@ -406,7 +462,7 @@ export default function ListingDetailScreen() {
               onBook={(offerId, cents) => onBook(offerId, cents)}
             />
           ) : null}
-          {!isAuction && !isSeller && offersActionError ? (
+          {OFFERS_ENABLED && !isAuction && !isSeller && offersActionError ? (
             <View style={styles.noticeBox}>
               <ServerErrorNote error={offersActionError} />
             </View>
@@ -473,6 +529,8 @@ export default function ListingDetailScreen() {
           {isSeller && !isAuction ? (
             <>
               <Divider style={styles.divider} />
+              {OFFERS_ENABLED ? (
+                <>
               <Text variant="heading" style={styles.sectionTitle}>
                 Offers
               </Text>
@@ -495,7 +553,11 @@ export default function ListingDetailScreen() {
                 />
               )}
 
-              <Text variant="heading" style={[styles.sectionTitle, styles.sectionGap]}>
+                </>
+              ) : null}
+
+              <View ref={meetupsRef} collapsable={false}>
+              <Text variant="heading" style={[styles.sectionTitle, OFFERS_ENABLED ? styles.sectionGap : null]}>
                 Booked meetups
               </Text>
               {meetupsQuery.isPending ? (
@@ -523,7 +585,6 @@ export default function ListingDetailScreen() {
                         </Text>
                         <Text variant="caption" color="inkMuted">
                           {formatPrice(m.priceCents)}
-                          {m.offerId ? ' · agreed offer' : ''}
                         </Text>
                       </View>
                       <ReservationStatusPill status={m.status} />
@@ -531,6 +592,7 @@ export default function ListingDetailScreen() {
                   ))}
                 </View>
               )}
+              </View>
             </>
           ) : null}
 
@@ -566,18 +628,22 @@ export default function ListingDetailScreen() {
             canComment={listing.status === 'active' || listing.status === 'reserved'}
           />
 
-          <Divider style={styles.divider} />
+          {isSeller ? null : (
+            <>
+              <Divider style={styles.divider} />
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Report this listing"
-            onPress={onReport}
-            style={styles.reportBtn}
-          >
-            <Text variant="label" color="inkFaint">
-              Report this listing
-            </Text>
-          </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Report this listing"
+                onPress={onReport}
+                style={styles.reportBtn}
+              >
+                <Text variant="label" color="inkFaint">
+                  Report this listing
+                </Text>
+              </Pressable>
+            </>
+          )}
         </View>
       </ScrollView>
 
@@ -590,7 +656,28 @@ export default function ListingDetailScreen() {
               onPress={() => router.push(`/listing/${listing.id}/edit`)}
               style={styles.footerBtnFlex}
             />
+            {listing.status === 'expired' ? (
+              // The edit screen holds the relist control (pick times, new 24 hours).
+              <Button
+                title="Relist"
+                onPress={() => router.push(`/listing/${listing.id}/edit`)}
+                style={styles.footerBtnFlex}
+                accessibilityLabel="Relist for another 24 hours"
+              />
+            ) : null}
           </View>
+        ) : signedOut ? (
+          <>
+            <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
+              Verify your campus email to trade.
+            </Text>
+            <Button
+              title="Log in to book"
+              onPress={() => requireAuth(`/listing/${id}`)}
+              disabled={isAuction}
+              style={styles.footerBtnFlex}
+            />
+          </>
         ) : (
           <>
             {unavailableCopy ? (
@@ -599,29 +686,39 @@ export default function ListingDetailScreen() {
               </Text>
             ) : heldByOther ? (
               <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
-                Another buyer&apos;s offer was accepted; this may open up again.
+                This item is on hold for another buyer; it may open up again.
               </Text>
             ) : noOpenTimes ? (
               <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
-                No open times — message the seller.
+                No open times. Message the seller.
               </Text>
+            ) : null}
+            {campusUnverified ? (
+              <View style={styles.unavailableNote}>
+                <Text variant="caption" color="inkMuted">
+                  Verify your campus email to book.
+                </Text>
+                <TextLink href="/settings" variant="small">
+                  Verify in Settings
+                </TextLink>
+              </View>
             ) : null}
             <View style={styles.footerRow}>
               {messageIconButton}
               {isAuction ? null : (
                 <>
-                  {heldByViewer ? null : (
+                  {OFFERS_ENABLED && !heldByViewer ? (
                     <Button
                       title="Offer"
                       variant="secondary"
                       onPress={onMakeOffer}
-                      disabled={!bookable || heldByOther || offers?.offers[0]?.status === 'pending'}
+                      disabled={!bookable || heldByOther || (offers?.offers ?? []).some((o) => o.status === 'pending')}
                       style={styles.footerBtnOffer}
                       accessibilityLabel="Make an offer below the asking price"
                     />
-                  )}
+                  ) : null}
                   <Button
-                    title={heldByViewer && heldOffer ? `Book at ${formatPrice(bookingPriceCents)}` : 'Book meetup'}
+                    title={`Book at ${formatPrice(bookingPriceCents)}`}
                     onPress={() => onBook(heldOffer?.id, heldOffer?.amountCents)}
                     disabled={!bookable || heldByOther}
                     style={styles.footerBtnBook}
@@ -638,6 +735,7 @@ export default function ListingDetailScreen() {
         )}
       </View>
 
+      {OFFERS_ENABLED ? (
       <OfferSheet
         visible={offerOpen}
         onClose={() => setOfferOpen(false)}
@@ -659,6 +757,7 @@ export default function ListingDetailScreen() {
           });
         }}
       />
+      ) : null}
 
       <ReportSheet
         visible={reportOpen}
@@ -696,6 +795,22 @@ const styles = StyleSheet.create({
   sellerListContent: { gap: space.md, paddingRight: space.lg },
   sellerListCell: { width: 150 },
   reportBtn: { minHeight: 48, justifyContent: 'center' },
+  soonBanner: {
+    marginTop: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.warningSoft,
+  },
+  sellerPill: {
+    alignSelf: 'flex-start',
+    minHeight: 48,
+    justifyContent: 'center',
+    marginTop: space.sm,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+  },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,

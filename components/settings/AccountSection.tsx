@@ -5,6 +5,8 @@
  */
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useNavigation } from 'expo-router';
+import { confirmAction } from '@/utils/confirm';
 import { Text } from '@/components/ui/Text';
 import { Input, TextArea } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -20,6 +22,19 @@ export function AccountSection() {
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const navigation = useNavigation();
+
+  // Warn before leaving the screen with unsaved edits.
+  useEffect(() => {
+    if (!dirty) return;
+    return navigation.addListener('beforeRemove', (e) => {
+      e.preventDefault();
+      confirmAction('Discard changes?', 'You have unsaved edits to your name or bio.', 'Discard', () =>
+        navigation.dispatch(e.data.action),
+      );
+    });
+  }, [dirty, navigation]);
 
   // Seed local edit state from the server once, and whenever a fresh save
   // response comes back (so the fields reflect what actually persisted).
@@ -33,6 +48,7 @@ export function AccountSection() {
   const updateMutation = trpc.user.updateMe.useMutation({
     onSuccess: async (updated) => {
       setDirty(false);
+      setSaved(true);
       setDisplayName(updated.displayName);
       setBio(updated.bio ?? '');
       await utils.auth.me.invalidate();
@@ -68,6 +84,7 @@ export function AccountSection() {
         value={displayName}
         onChangeText={(v) => {
           setDisplayName(v);
+          setSaved(false);
           setDirty(true);
         }}
         maxLength={60}
@@ -78,6 +95,7 @@ export function AccountSection() {
         value={bio}
         onChangeText={(v) => {
           setBio(v);
+          setSaved(false);
           setDirty(true);
         }}
         maxLength={400}
@@ -96,9 +114,12 @@ export function AccountSection() {
           onPress={onSave}
           loading={updateMutation.isPending}
           disabled={!canSave}
-          variant="secondary"
           style={styles.save}
         />
+      ) : saved ? (
+        <Text variant="label" color="success" accessibilityRole="alert">
+          Saved
+        </Text>
       ) : null}
 
       <View style={styles.readOnlyRow}>

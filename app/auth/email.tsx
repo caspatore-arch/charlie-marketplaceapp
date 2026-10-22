@@ -1,31 +1,10 @@
 /**
- * Campus-email sign-in as its own route (kept for old links). The flow lives in
- * <EmailAuthFlow>; "Use your phone number instead" goes to /auth/sign-in?method=phone.
- *
- * Shares <AuthScreenShell> with /auth/sign-in so an old link does not land on a
- * differently-branded page than the current one.
+ * Legacy route kept for old links. There is one sign-in screen, so this just
+ * forwards to /auth/sign-in, carrying `returnTo` only when it was given.
  */
-import React from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { AuthScreenShell } from '@/components/auth/AuthScreenShell';
-import { EmailAuthFlow } from '@/components/auth/EmailAuthFlow';
+import { Redirect, useLocalSearchParams } from 'expo-router';
 
 export default function EmailSignInScreen() {
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
-  const router = useRouter();
-
-  return (
-    <AuthScreenShell title="Sign in or sign up">
-      <EmailAuthFlow
-        hideFirstHeading
-        submitLabel="Email me a code"
-        onFinished={({ isNewAccount }) =>
-          router.replace((isNewAccount ? '/create-profile' : returnTo || '/') as never)
-        }
-        onUsePhone={() =>
-          router.replace({ pathname: '/auth/sign-in', params: { returnTo: returnTo ?? '', method: 'phone' } })
-        }
-      />
-    </AuthScreenShell>
-  );
+  return <Redirect href={returnTo ? { pathname: '/auth/sign-in', params: { returnTo } } : '/auth/sign-in'} />;
 }

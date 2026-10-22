@@ -1,6 +1,6 @@
 /**
- * A feed row: the existing PostCard with the upvote control pinned to its
- * bottom-right corner (the author button sits bottom-left and hugs its content),
+ * A feed row: the existing PostCard with the upvote control in its footer row
+ * (author on the left, vote on the right, never overlaid),
  * and a "N comments" toggle underneath that opens the thread inline. Inline,
  * not a detail route, because posts live 24 hours and the feed is where people
  * already are: a reply should never cost a navigation and a lost scroll spot.
@@ -26,12 +26,10 @@ export function FeedPost(props: PostCardProps) {
 
   return (
     <View>
-      <View>
-        <PostCard {...props} />
-        <View style={styles.vote} pointerEvents="box-none">
-          <VoteButton postId={post.id} voteCount={post.voteCount} viewerVoted={post.viewerVoted} />
-        </View>
-      </View>
+      <PostCard
+        {...props}
+        footerRight={<VoteButton postId={post.id} voteCount={post.voteCount} viewerVoted={post.viewerVoted} />}
+      />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${label}. ${open ? 'Hide' : 'Show'} comments.`}
@@ -51,7 +49,6 @@ export function FeedPost(props: PostCardProps) {
 }
 
 const styles = StyleSheet.create({
-  vote: { position: 'absolute', right: space.md, bottom: space.sm },
   toggle: {
     flexDirection: 'row',
     alignItems: 'center',

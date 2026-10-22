@@ -10,7 +10,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Heart, LayoutGrid, Layers, Search } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
-import { Logo } from '@/components/ui/Logo';
+import { RefetchBanner } from '@/components/ui/RefetchBanner';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -294,15 +294,14 @@ export default function BrowseScreen() {
   const headerBlock = (
     <View style={styles.header}>
       <View style={styles.brandRow}>
-        <Logo variant="wordmark" width={104} />
-        {campus?.name ? <Text variant="title">{campus.name}</Text> : null}
+        {campus?.name ? <Text variant="heading">{campus.name}</Text> : null}
+        {campus?.isDemo ? (
+          <Text variant="caption" color="inkFaint" style={styles.demoNote}>
+            Demo campus: listings and spots are for demonstration only
+          </Text>
+        ) : null}
       </View>
-      <Text variant="body" color="inkMuted">Find your next campus favorite. Book a time. Meet nearby.</Text>
-      {campus?.isDemo ? (
-        <Text variant="caption" color="inkFaint" style={styles.demoNote}>
-          Demo campus — listings and locations are for demonstration only.
-        </Text>
-      ) : null}
+      {feedQuery.isError && items.length > 0 ? <RefetchBanner onRetry={() => feedQuery.refetch()} /> : null}
     </View>
   );
 
@@ -460,9 +459,9 @@ export default function BrowseScreen() {
 const styles = StyleSheet.create({
   bodyPad: { flex: 1 },
   padHorizontal: { paddingHorizontal: space.lg },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  header: { paddingTop: space.sm, paddingBottom: space.md, paddingHorizontal: space.lg },
-  demoNote: { marginTop: 2 },
+  brandRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: space.sm },
+  header: { paddingTop: space.xs, paddingBottom: space.sm, paddingHorizontal: space.lg },
+  demoNote: { flexShrink: 1 },
   controls: {
     paddingHorizontal: space.lg,
     paddingTop: space.sm,

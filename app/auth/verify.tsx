@@ -3,5 +3,5 @@ import { Redirect, useLocalSearchParams } from 'expo-router';
 
 export default function VerifyCodeScreen() {
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
-  return <Redirect href={{ pathname: '/auth/email', params: { returnTo: returnTo ?? '' } }} />;
+  return <Redirect href={returnTo ? { pathname: '/auth/sign-in', params: { returnTo } } : '/auth/sign-in'} />;
 }

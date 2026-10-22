@@ -1,12 +1,14 @@
 /**
- * One row in the Inbox > Requests list (grouped "As buyer" / "As seller").
+ * One row in the Inbox > Meetups list.
  * Usage: <ReservationRow reservation={r} viewerId={user.id} onPress={() => router.push(`/reservation/${r.id}`)} />
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
+import { ImageOff } from 'lucide-react-native';
 import { colors, radius, space } from '@/constants/theme';
 import { Text } from '../ui/Text';
+import { Badge } from '../ui/Badge';
 import { ReservationStatusPill } from '../ReservationStatusPill';
 import { resolveMediaUrl } from '@/lib/trpc';
 import { formatMeetupTime } from '@/utils/format';
@@ -20,6 +22,7 @@ export interface ReservationRowProps {
 }
 
 export function ReservationRow({ reservation, viewerId, role, onPress }: ReservationRowProps) {
+  const [imageFailed, setImageFailed] = useState(false);
   const otherParty = role === 'buyer' ? reservation.seller : reservation.buyer;
   const needsReply =
     (reservation.status === 'requested' || reservation.status === 'countered') &&
@@ -32,21 +35,29 @@ export function ReservationRow({ reservation, viewerId, role, onPress }: Reserva
       onPress={onPress}
       style={({ pressed }) => [styles.row, needsReply && styles.rowEmphasis, pressed && styles.pressed]}
     >
-      <Image
-        source={{ uri: resolveMediaUrl(reservation.listing.coverPhotoUrl) }}
-        style={styles.thumb}
-        contentFit="cover"
-        transition={150}
-      />
+      {imageFailed || !reservation.listing.coverPhotoUrl ? (
+        <View style={[styles.thumb, styles.thumbFallback]}>
+          <ImageOff size={20} color={colors.inkFaint} />
+        </View>
+      ) : (
+        <Image
+          source={{ uri: resolveMediaUrl(reservation.listing.coverPhotoUrl) }}
+          style={styles.thumb}
+          contentFit="cover"
+          transition={150}
+          onError={() => setImageFailed(true)}
+        />
+      )}
       <View style={styles.info}>
-        <View style={styles.topLine}>
-          <Text variant="label" weight="600" numberOfLines={1} style={styles.title}>
-            {reservation.listing.title}
-          </Text>
+        <Text variant="label" weight="600" numberOfLines={2}>
+          {reservation.listing.title}
+        </Text>
+        <View style={styles.pillLine}>
           <ReservationStatusPill status={reservation.status} />
+          {reservation.seller.isDemo ? <Badge kind="demo" /> : null}
         </View>
         <Text variant="caption" color="inkMuted" numberOfLines={1}>
-          {otherParty.displayName} · {reservation.spot?.name ?? 'Custom address'}
+          {role === 'seller' ? 'Selling to' : 'Buying from'} {otherParty.displayName} · {reservation.spot?.name ?? 'Custom address'}
         </Text>
         <Text variant="caption" color="inkFaint" numberOfLines={1}>
           {formatMeetupTime(reservation.startsAt.toISOString())}
@@ -73,8 +84,8 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.85 },
   thumb: { width: 52, height: 52, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
   info: { flex: 1, gap: 2, justifyContent: 'center' },
-  topLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
-  title: { flexShrink: 1 },
+  thumbFallback: { alignItems: 'center', justifyContent: 'center' },
+  pillLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.xs, marginVertical: 2 },
   needsReply: { marginTop: 2 },
 });
 

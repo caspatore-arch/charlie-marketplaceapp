@@ -52,3 +52,8 @@ export function secondsFromMessage(message: string): number | undefined {
   if (unit.startsWith('m')) return n * 60;
   return n;
 }
+
+/** Only same-app paths: starts with one `/` and is not a protocol-relative `//`. */
+export function safeReturnTo(value: string | undefined): string {
+  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/';
+}
