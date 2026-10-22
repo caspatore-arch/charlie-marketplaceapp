@@ -423,6 +423,9 @@ export const listingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // The archive shows listings past their deadline even if the periodic
+      // sweep hasn't flipped the stored status yet; settle it before checking.
+      await applyExpiry(ctx.db);
       const existing = await loadOwnListing(ctx.db, input.id, ctx.user.id);
       if (existing.status !== 'expired' && existing.status !== 'removed') {
         throw new TRPCError({

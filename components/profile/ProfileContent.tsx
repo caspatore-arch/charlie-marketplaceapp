@@ -18,13 +18,15 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ListingCard } from '@/components/ListingCard';
 import { trpc } from '@/lib/trpc';
 import { timeLeftLabel, useNow } from '@/components/community/useNow';
-import { formatRelative } from '@/utils/format';
+import { Button } from '@/components/ui/Button';
+import { formatPrice, formatRelative } from '@/utils/format';
 import { colors, minTouchHeight, radius, space } from '@/constants/theme';
 
-type Tab = 'listings' | 'posts' | 'comments';
+type Tab = 'listings' | 'archive' | 'posts' | 'comments';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'listings', label: 'Listings' },
+  { key: 'archive', label: 'Archive' },
   { key: 'posts', label: 'Posts' },
   { key: 'comments', label: 'Comments' },
 ];
@@ -51,6 +53,18 @@ export function ProfileContent({
     ? (mine.data ?? []).filter((l) => l.status === 'active')
     : (theirs.data ?? []);
 
+  // Archive (own profile only): unsold listings whose 24 hours ran out. The
+  // stored status can lag the deadline briefly, so check expiresAt too. Sold
+  // and removed listings never appear.
+  const archived = isSelf
+    ? (mine.data ?? []).filter(
+        (l) =>
+          l.status === 'expired' ||
+          (l.status === 'active' && l.expiresAt != null && new Date(l.expiresAt).getTime() <= now),
+      )
+    : [];
+  const tabs = isSelf ? TABS : TABS.filter((t) => t.key !== 'archive');
+
   const postsQuery = trpc.user.posts.useQuery({ userId }, { enabled: tab === 'posts' });
   const commentsQuery = trpc.user.comments.useQuery({ userId }, { enabled: tab === 'comments' });
 
@@ -58,7 +72,7 @@ export function ProfileContent({
     <View>
       {/* Equal-width tabs at the label size, so "Comments" never clips on a phone. */}
       <View style={styles.tabs} accessibilityRole="tablist">
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const selected = tab === t.key;
           return (
             <Pressable
@@ -108,6 +122,37 @@ export function ProfileContent({
                 </View>
               )}
             />
+          )
+        ) : tab === 'archive' && isSelf ? (
+          mine.isPending ? (
+            <Skeleton height={120} />
+          ) : mine.isError ? (
+            <ErrorState message={mine.error.message} onRetry={() => mine.refetch()} />
+          ) : archived.length === 0 ? (
+            <EmptyState
+              title="Nothing in your archive"
+              body="Listings that don't sell in 24 hours land here, ready to repost."
+            />
+          ) : (
+            <View style={styles.posts}>
+              {archived.map((item) => (
+                <Card key={item.id} style={styles.post}>
+                  <Pressable accessibilityRole="button" onPress={() => router.push(`/listing/${item.id}`)}>
+                    <Text variant="heading" numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                  </Pressable>
+                  <Text variant="body" color="inkMuted">
+                    {formatPrice(item.priceCents)} · Didn&apos;t sell in 24 hours
+                  </Text>
+                  <Button
+                    title="Repost"
+                    variant="secondary"
+                    onPress={() => router.push(`/listing/${item.id}/edit`)}
+                  />
+                </Card>
+              ))}
+            </View>
           )
         ) : tab === 'comments' ? (
           commentsQuery.isPending ? (

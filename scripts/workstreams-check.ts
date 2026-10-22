@@ -381,6 +381,37 @@ async function main() {
     eq(after.status, 'cancelled', 'record retained after cancellation');
   });
 
+  await check('archive: expired listing leaves the feed, shows as archived for its owner, relists lower with a fresh 24h', async () => {
+    const listing = await makeListing(MAYA, { priceCents: 5000 });
+    await db.update(schema.listings).set({ expiresAt: new Date(Date.now() - 1000) }).where(d.eq(schema.listings.id, listing.id));
+    const maya = await as(MAYA);
+    const feed = await anon.listing.feed({ campusId: CAMPUS, limit: 50 });
+    assert(!feed.items.some((i) => i.id === listing.id), 'expired listing is not in the feed');
+    // The query the Archive tab uses: listing.mine, filtered to expired or
+    // past-deadline (the stored status can lag the sweep) and unsold.
+    const isArchived = (l: { status: string; expiresAt: Date | string | null }) =>
+      l.status === 'expired' || (l.status === 'active' && l.expiresAt != null && new Date(l.expiresAt).getTime() <= Date.now());
+    const archived = (await maya.listing.mine()).filter(isArchived);
+    assert(archived.some((l) => l.id === listing.id), 'owner sees it as archived');
+    const others = (await (await as(JORDAN)).listing.mine()).filter((l) => l.id === listing.id);
+    eq(others.length, 0, 'another user never gets it from mine');
+    const before = Date.now();
+    const s = nextSlot(Date.now() + HOUR);
+    const relisted = await maya.listing.relist({
+      id: listing.id,
+      isSellToday: true,
+      priceCents: 4000,
+      windows: [{ startsAt: new Date(s), endsAt: new Date(s + HOUR) }],
+    });
+    eq(relisted.status, 'active', 'live again');
+    eq(relisted.priceCents, 4000, 'lower price applied');
+    const hrs = (relisted.expiresAt!.getTime() - before) / HOUR;
+    assert(hrs > 23.9 && hrs <= 24.1, `fresh 24h expiry (${hrs})`);
+    const feed2 = await anon.listing.feed({ campusId: CAMPUS, limit: 50 });
+    assert(feed2.items.some((i) => i.id === listing.id), 'back in the feed');
+    assert(!(await maya.listing.mine()).filter(isArchived).some((l) => l.id === listing.id), 'gone from archive');
+  });
+
   await check('listing: availability must be within the rolling 24 hours, and at least one window', async () => {
     const maya = await as(MAYA);
     const base = {
