@@ -198,6 +198,8 @@ async function shapeComments(
   return rows.map(({ comment, author }) => ({
     id: comment.id,
     postId: comment.postId,
+    /** Null for a top-level comment; otherwise the top-level comment this replies to. */
+    parentId: comment.parentId,
     body: comment.body,
     createdAt: comment.createdAt,
     author: toPublicUser(author),
@@ -371,6 +373,8 @@ export const communityRouter = router({
     .input(
       z.object({
         postId: z.uuid(),
+        /** Reply to this comment. Replies are one level deep: replying to a reply attaches to its top-level comment. */
+        parentId: z.uuid().optional(),
         body: z
           .string()
           .trim()
@@ -380,9 +384,18 @@ export const communityRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const post = await loadVisible(ctx.db, input.postId, ctx.user);
+      let parentId: string | null = null;
+      if (input.parentId) {
+        // Must be readable to the viewer (not removed, not blocked) and on this post.
+        const parent = await loadVisibleComment(ctx.db, input.parentId, ctx.user);
+        if (parent.postId !== post.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'That comment is on a different post.' });
+        }
+        parentId = parent.parentId ?? parent.id;
+      }
       const [comment] = await ctx.db
         .insert(communityComments)
-        .values({ postId: post.id, authorId: ctx.user.id, body: input.body })
+        .values({ postId: post.id, parentId, authorId: ctx.user.id, body: input.body })
         .returning();
       const [shaped] = await shapeComments(ctx.db, [{ comment: comment!, author: ctx.user }], ctx.user.id);
       return shaped!;

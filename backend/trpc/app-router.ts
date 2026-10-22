@@ -5,6 +5,7 @@ import { campusRouter } from './routes/campus';
 import { communityRouter } from './routes/community';
 import { conversationRouter } from './routes/conversation';
 import { listingRouter } from './routes/listing';
+import { listingCommentRouter } from './routes/listingComment';
 import { moderationRouter } from './routes/moderation';
 import { notificationRouter } from './routes/notification';
 import { offerRouter } from './routes/offer';
@@ -16,6 +17,7 @@ export const appRouter = router({
   auth: authRouter,
   campus: campusRouter,
   listing: listingRouter,
+  listingComment: listingCommentRouter,
   bid: bidRouter,
   offer: offerRouter,
   community: communityRouter,

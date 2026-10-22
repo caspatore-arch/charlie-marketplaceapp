@@ -16,6 +16,7 @@ import {
   uniqueIndex,
   index,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 /* ------------------------------------------------------------------ enums */
@@ -780,6 +781,10 @@ export const communityPostVotes = pgTable(
  * the foreign key cascades so hard-deleting a post leaves no comments behind.
  * `removedAt` is the soft removal used by the author and by moderators,
  * mirroring `communityPosts.removedAt`.
+ *
+ * Replies are one level deep: `parentId` always points at a top-level comment
+ * on the same post (a reply to a reply is stored against that top-level
+ * comment). The server enforces this; the column only cascades.
  */
 export const communityComments = pgTable(
   'community_comments',
@@ -788,6 +793,7 @@ export const communityComments = pgTable(
     postId: uuid('post_id')
       .notNull()
       .references(() => communityPosts.id, { onDelete: 'cascade' }),
+    parentId: uuid('parent_id').references((): AnyPgColumn => communityComments.id, { onDelete: 'cascade' }),
     authorId: uuid('author_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -799,6 +805,37 @@ export const communityComments = pgTable(
   (t) => [
     index('community_comments_post_idx').on(t.postId, t.createdAt),
     index('community_comments_author_idx').on(t.authorId, t.createdAt),
+    index('community_comments_parent_idx').on(t.parentId),
+  ],
+);
+
+/**
+ * Public questions and answers on a listing ("Is this still available?",
+ * "Does it come with the charger?"). Same shape as community comments:
+ * one level of replies via `parentId` (always a top-level comment on the same
+ * listing, enforced by the server), soft removal via `removedAt` by the
+ * author, the listing's seller, or a moderator. Readable while the listing is
+ * not removed; writable only while it is active or reserved.
+ */
+export const listingComments = pgTable(
+  'listing_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    parentId: uuid('parent_id').references((): AnyPgColumn => listingComments.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    removedAt: ts('removed_at'),
+    removedById: uuid('removed_by_id').references(() => users.id),
+  },
+  (t) => [
+    index('listing_comments_listing_idx').on(t.listingId, t.createdAt),
+    index('listing_comments_parent_idx').on(t.parentId),
   ],
 );
 
@@ -930,6 +967,7 @@ export type OfferStatus = Offer['status'];
 export type CommunityPost = typeof communityPosts.$inferSelect;
 export type CommunityPostVote = typeof communityPostVotes.$inferSelect;
 export type CommunityComment = typeof communityComments.$inferSelect;
+export type ListingComment = typeof listingComments.$inferSelect;
 export type Follow = typeof follows.$inferSelect;
 export type SmsMessage = typeof smsMessages.$inferSelect;
 export type ReservationEvent = typeof reservationEvents.$inferSelect;

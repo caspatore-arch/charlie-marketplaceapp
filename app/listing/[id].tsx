@@ -38,6 +38,7 @@ import { SellerOffersList } from '@/components/offers/SellerOffersList';
 import { ServerErrorNote, type ServerErrorLike } from '@/components/offers/ServerErrorNote';
 import { ReservationStatusPill } from '@/components/ReservationStatusPill';
 import { exactMeetupTime } from '@/components/booking/time';
+import { ListingComments } from '@/components/listing/ListingComments';
 import { ReportSheet } from '@/components/browse/ReportSheet';
 import { trpc } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
@@ -559,6 +560,13 @@ export default function ListingDetailScreen() {
               />
             </>
           ) : null}
+
+          <Divider style={styles.divider} />
+
+          <ListingComments
+            listingId={listing.id}
+            canComment={listing.status === 'active' || listing.status === 'reserved'}
+          />
 
           <Divider style={styles.divider} />
 

@@ -533,3 +533,24 @@ app SMS consent and cancel scheduled texts atomically. Duplicate callbacks are
 safe. START does not re-enable app consent: re-opt-in is via app settings after
 carrier unblocking. Twilio handles its own opt-out reply; the app returns empty
 TwiML. Already-sending messages may be in flight. Live delivery is unverified.
+
+## Comment replies and listing comments (October 22, 2026)
+
+- **Replies are one level deep** on both community comments and listing
+  comments. `parent_id` always names a top-level comment on the same post or
+  listing; replying to a reply stores it against that top-level comment.
+  Lists come back flat and oldest first, each item with `parentId`; the client
+  groups them. A reply whose parent was removed stays readable.
+- `community.addComment` takes optional `parentId` (must be readable to the
+  caller and on the same post, else NOT_FOUND / BAD_REQUEST).
+  `community.comments` items include `parentId`. Post `commentCount` counts replies.
+- New `listing_comments` table and `listingComment` router:
+  - `list({ listingId })` public. NOT_FOUND for a removed listing. Hides removed
+    comments, closed accounts and (signed in) blocked users either way. Each
+    item has `isSeller`, `isMine`, `canRemove`.
+  - `add({ listingId, parentId?, body })` campus-verified, 1–500 chars, only
+    while the listing is `active` or `reserved`; NOT_FOUND if the caller and
+    seller are blocked either way.
+  - `remove({ id })` soft removal by the author, the listing's seller, or a
+    moderator. `moderatorRemove({ id })` for the queue.
+- Tested by `npm run test:comments`.

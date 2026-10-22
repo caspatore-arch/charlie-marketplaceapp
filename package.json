@@ -68,6 +68,7 @@
     "db:reset": "tsx backend/db/guard.ts && rm -rf backend/data/pg && tsx backend/db/seed.ts",
     "db:check": "tsx scripts/check-db-url.ts",
     "db:seed-campus": "tsx scripts/seed-pilot-campus.ts",
+    "test:comments": "tsx scripts/comments-check.ts",
     "test:e2e": "tsx scripts/e2e.ts",
     "test:geo": "tsx scripts/geo-check.ts",
     "test:payments": "tsx scripts/payments-check.ts",
