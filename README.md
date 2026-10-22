@@ -2,7 +2,11 @@
 
 iPhone‑first marketplace for college students to buy and sell small secondhand items nearby, with fast same‑day campus meetups. Prototype — demo data, simulated payments, simulated email delivery.
 
-**Start here:** [docs/HANDOFF.md](docs/HANDOFF.md) — run instructions, what was tested, what is simulated, Rork setup.
+**Start here:** [Project directives and work queue](docs/PROJECT-DIRECTIVES.md) — current direction, ordered tasks, deployment status and owner approval rules.
+
+**GitHub:** [caspatore-arch/charlie-marketplaceapp](https://github.com/caspatore-arch/charlie-marketplaceapp).
+
+[Historical handoff](docs/HANDOFF.md) contains run instructions and past verification; consult the directives before following older launch steps.
 
 ```bash
 npm install && npm run db:seed && npm run env:lan

@@ -47,3 +47,8 @@ backend/data/
 .env
 .env.*
 !.env.example
+
+# local research / slide build output (kept on disk, not in the repo)
+.codex-deck-build/
+output/
+*.pptx
