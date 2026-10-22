@@ -301,6 +301,9 @@ export default function BrowseScreen() {
           </Text>
         ) : null}
       </View>
+      <Text variant="bodySm" color="inkMuted">
+        Buy and sell the same day. Get cash for things you don&apos;t use, or buy something at a college discount.
+      </Text>
       {feedQuery.isError && items.length > 0 ? <RefetchBanner onRetry={() => feedQuery.refetch()} /> : null}
     </View>
   );
