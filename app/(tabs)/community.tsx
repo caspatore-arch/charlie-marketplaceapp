@@ -16,6 +16,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { FeedPost } from '@/components/community/FeedPost';
+import { ListingPost } from '@/components/community/ListingPost';
 import { FeedControls, type CommunitySort } from '@/components/community/FeedControls';
 import { PostComposer } from '@/components/community/PostComposer';
 import { PostReportSheet } from '@/components/community/PostReportSheet';
@@ -64,7 +65,9 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
   const router = useRouter();
   const utils = trpc.useUtils();
   const now = useNow();
-  const [kind, setKind] = useState<CommunityPostKind>('buying');
+  // Every new listing is posted here automatically as a 'selling' post, so the
+  // feed opens on Sellers where they are; Buyers is one tap away.
+  const [kind, setKind] = useState<CommunityPostKind>('selling');
   const [sort, setSort] = useState<CommunitySort>('new');
   const [actionPost, setActionPost] = useState<CommunityPost | null>(null);
   const [reportPost, setReportPost] = useState<CommunityPost | null>(null);
@@ -201,18 +204,24 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
         ItemSeparatorComponent={() => <View style={{ height: space.md }} />}
-        renderItem={({ item }) => (
-          <FeedPost
-            post={item}
-            now={now}
-            onPressAuthor={() => router.push(`/user/${item.author.id}`)}
-            onOpenActions={() => {
+        renderItem={({ item }) => {
+          const props = {
+            post: item,
+            now,
+            onPressAuthor: () => router.push(`/user/${item.author.id}`),
+            onOpenActions: () => {
               setActionError(null);
               setNotice(null);
               setActionPost(item);
-            }}
-          />
-        )}
+            },
+          };
+          // A listing post is the listing's own thread and likes (see ListingPost).
+          return item.listing && item.engagement ? (
+            <ListingPost {...props} listing={item.listing} engagement={item.engagement} />
+          ) : (
+            <FeedPost {...props} />
+          );
+        }}
         refreshControl={
           <RefreshControl
             refreshing={feed.isRefetching && !feed.isFetchingNextPage}

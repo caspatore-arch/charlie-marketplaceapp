@@ -557,3 +557,27 @@ TwiML. Already-sending messages may be in flight. Live delivery is unverified.
   - `remove({ id })` soft removal by the author, the listing's seller, or a
     moderator. `moderatorRemove({ id })` for the queue.
 - Tested by `npm run test:comments`.
+
+## Likes, shares and Hottest; Community listing posts (October 22, 2026)
+
+Migration `0016_listing_engagement` (additive only: two new tables, one nullable column, one unique index; no backfill, nothing rewritten).
+
+**Likes** (`listing_likes`, PK `(listing_id, user_id)`). Public popularity, separate from Saved (`saved_listings`, a private bookmark; neither affects the other).
+- `listing.setLike { id, liked }` protected. Sets (never toggles) the viewer's like, so a double-tap or retry cannot add a second row. Returns `{ id, likeCount, viewerLiked }`. Liking needs the listing to be live (active, before its deadline), on the viewer's campus, not owned by someone in a block relationship with the viewer; otherwise NOT_FOUND. Taking a like back never needs the listing to still be live.
+
+**Shares** (`listing_shares`, PK `(listing_id, user_id)`). One honest counting rule: a share is counted when a **signed-in** person handed the listing link to the OS/browser share sheet and did **not** cancel it, or copied the link. One per person per listing. The platform never reports what the other app did with the link, so this is "shares started", never "posted to Instagram": no copy in the app claims otherwise. Known limits: on Android the OS cannot report a dismissed share sheet, so a cancelled sheet may count there; the intent-URL chips (WhatsApp, X, ...) are not counted because opening a destination is not observable completion; signed-out taps still share but are not counted.
+- `listing.recordShare { id, via: 'share_sheet' | 'copy_link' }` protected, same visibility rules as `setLike`. Returns `{ id, shareCount, viewerShared, counted }` (`counted` is false for a repeat).
+
+**Engagement on feed rows.** Every `listing.feed` item and every Community listing post carries `engagement: { likeCount, viewerLiked, shareCount, viewerShared, commentCount, topComments[] }`, read by one helper (`backend/trpc/engagement.ts`) from the listing's own rows so Browse and Community can never disagree. `commentCount` counts the comments the viewer can read, replies included (same as the thread). `topComments` is at most two **top-level** comments (author id, name, avatar, body, time; no vote totals, listing comments have none), most-discussed first (readable replies), then oldest first. Removed comments, closed accounts and blocked people never appear.
+
+**Hottest.** `listing.feed` takes `sort: 'new' | 'hot'` (default `'new'`: strictly `createdAt desc, id desc`, unchanged). `'hot'` scores each listing as Σ time-decayed signals, using the same recipe as Community posts (`backend/trpc/hot.ts`: half-life 30 min, 6 h window): each like x1, each readable comment x2 (`HOT_COMMENT_WEIGHT`), each share x1. Ties fall back to newest. Pagination uses a JSON cursor that freezes `asOf`, like `community.feed`. Community's `top` and `hot` sorts score a listing post from its listing's likes/comments/shares by the same formula.
+
+**Community listing posts.** `community_posts.listing_id` (nullable, **UNIQUE**) marks the automatic compact post every listing gets. It is a pointer row: `kind` is `selling`, author is the seller, and caption, price, photo, status, likes, shares and comments are read from the listing at query time.
+- Created by `listing.create` and refreshed by `listing.relist` via an upsert on `listing_id` (`backend/trpc/listing-post.ts`), so retries and relists never add a second post. A failure to write it never fails the listing.
+- Visible only while the listing is `active` and before its deadline (same as Browse); sold, expired or removed listings leave Community at the same moment. Campus scope and blocks (either direction) apply as for any post. The post's own `removedAt` is only a moderator takedown of the Community entry.
+- `community.feed` items add `listing` (the live listing card, or `null` for a text post) and `engagement` (or `null`); for a listing post `voteCount`/`viewerVoted`/`commentCount` are the listing's like and comment numbers and `body` is the live caption (description, else title).
+- There is **no separate thread or vote** on a listing post: `community.setVote`, `comments`, `addComment` reject it (BAD_REQUEST, "like, comment or report it from the listing"); likes and comments go through `listing.setLike` and `listingComment.*`. `community.remove` rejects it (remove the listing instead). `community.report` on a listing post files the report against the **listing** (`targetListingId`, `targetPostId` null), so moderators handle it in the same queue as Browse reports.
+- Automatic posts do not count toward `COMMUNITY_MAX_LIVE_POSTS`, and are left out of a profile's text posts (`user.posts`) and the admin "community posts" count.
+- Ordinary text posts (buying/selling) are unchanged.
+- Tested by `npm run test:engagement` (58 checks).
+

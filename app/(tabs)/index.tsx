@@ -1,8 +1,10 @@
 /**
- * Browse tab: campus header, filter row (category / pickup today / price /
- * size), infinite-scrolling 2-col listing grid, pull-to-refresh, skeleton
- * loading, and empty/error states. Works signed-out — every query here is
- * `listing.feed` (public) plus `campus.list` (public).
+ * Browse tab: campus header, filter row (category / Hottest / pickup today /
+ * price / size), infinite-scrolling listing grid (1 column on phones up to 4 on
+ * wide desktops), pull-to-refresh, skeleton loading, and empty/error states.
+ * Newest first unless Hottest is on. Each listing shows its likes, shares and
+ * up to two top comments. Works signed-out — every query here is
+ * `listing.feed` (public) plus `campus.list` (public); liking needs sign-in.
  */
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
@@ -14,8 +16,8 @@ import { RefetchBanner } from '@/components/ui/RefetchBanner';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { ListingCard } from '@/components/ListingCard';
-import { FilterBar, type CategoryFilter } from '@/components/browse/FilterBar';
+import { FeedListingCard } from '@/components/browse/FeedListingCard';
+import { FilterBar, type BrowseSort, type CategoryFilter } from '@/components/browse/FilterBar';
 import { SearchBar } from '@/components/browse/SearchBar';
 import { PriceFilterSheet } from '@/components/browse/PriceFilterSheet';
 import { SizeFilterSheet } from '@/components/browse/SizeFilterSheet';
@@ -23,14 +25,28 @@ import { BrowseGridSkeleton } from '@/components/browse/BrowseGridSkeleton';
 import { SwipeDeck } from '@/components/browse/SwipeDeck';
 import { trpc } from '@/lib/trpc';
 import { useRequireAuth } from '@/hooks/useAuth';
-import { breakpoints, colors, maxContentWidth, minTouchHeight, radius, space } from '@/constants/theme';
+import { breakpoints, colors, minTouchHeight, radius, space } from '@/constants/theme';
 import { DEFAULT_CAMPUS_SLUG, CLOTHING_SIZE_OPTIONS, SHOE_SIZE_OPTIONS } from '@/constants/campus';
 import { formatPrice } from '@/utils/format';
-import type { ListingCard as ListingCardType } from '@/types';
+import type { FeedListing, ListingCard as ListingCardType } from '@/types';
 
 type ViewMode = 'grid' | 'swipe';
 
-const keyExtractor = (item: ListingCardType) => item.id;
+const keyExtractor = (item: FeedListing) => item.id;
+
+/**
+ * Desktop content cap for Browse. The other tabs keep the 860px column; the
+ * listing grid is the one screen that should use a wide monitor.
+ */
+const BROWSE_MAX_WIDTH = 1280;
+
+/** Columns by window width: one roomy photo-post column on phones, up to four on wide screens. */
+function columnsFor(windowWidth: number): 1 | 2 | 3 | 4 {
+  if (windowWidth >= 1200) return 4;
+  if (windowWidth >= 900) return 3;
+  if (windowWidth >= breakpoints.md) return 2;
+  return 1;
+}
 
 /**
  * One grid cell. Memoized so a parent state change (typing in search, opening
@@ -41,15 +57,18 @@ const keyExtractor = (item: ListingCardType) => item.id;
 const GridCell = memo(function GridCell({
   item,
   maxWidth,
+  inset,
   onOpen,
 }: {
-  item: ListingCardType;
+  item: FeedListing;
   maxWidth: `${number}%`;
+  /** Side padding for the single phone column (multi-column rows pad themselves). */
+  inset: boolean;
   onOpen: (id: string) => void;
 }) {
   return (
-    <View style={[styles.gridCell, { maxWidth }]}>
-      <ListingCard listing={item} onPressListing={onOpen} />
+    <View style={[styles.gridCell, { maxWidth }, inset && styles.cellInset]}>
+      <FeedListingCard item={item} onOpen={onOpen} />
     </View>
   );
 });
@@ -63,16 +82,10 @@ export default function BrowseScreen() {
   // Use useWindowDimensions (not Dimensions.get) so resizing a desktop
   // browser window updates the column count. Dimensions.get freezes at the
   // width the app started at (see components/PhotoGallery.tsx ~line 31).
-  // The available grid width is capped at maxContentWidth when the viewport
-  // exceeds breakpoints.lg, matching the centred column in Screen.tsx.
+  // Phones get one roomy column (large photos, like a photo post); the count
+  // grows with the window up to 4 on wide desktops (see columnsFor).
   const { width: windowWidth } = useWindowDimensions();
-  const gridWidth = windowWidth >= breakpoints.lg
-    ? Math.min(windowWidth, maxContentWidth)
-    : windowWidth;
-  // 2 columns up to lg breakpoint; 3 columns from lg upward (≥768px).
-  // A 3rd column at 768px gives ~240px per card — wide enough for a photo
-  // and price, and still comfortable in a half-screen laptop window.
-  const numColumns = gridWidth >= breakpoints.lg ? 3 : 2;
+  const numColumns = columnsFor(windowWidth);
 
   const campusQuery = trpc.campus.list.useQuery();
   const campus = useMemo(() => {
@@ -81,6 +94,7 @@ export default function BrowseScreen() {
   }, [campusQuery.data]);
 
   const [category, setCategory] = useState<CategoryFilter>('all');
+  const [sort, setSort] = useState<BrowseSort>('new');
   const [pickupToday, setPickupToday] = useState(false);
   const [minCents, setMinCents] = useState<number | undefined>(undefined);
   const [maxCents, setMaxCents] = useState<number | undefined>(undefined);
@@ -106,6 +120,7 @@ export default function BrowseScreen() {
 
   const filtersActive =
     category !== 'all' ||
+    sort !== 'new' ||
     pickupToday ||
     minCents !== undefined ||
     maxCents !== undefined ||
@@ -113,6 +128,7 @@ export default function BrowseScreen() {
 
   const clearFilters = useCallback(() => {
     setCategory('all');
+    setSort('new');
     setPickupToday(false);
     setMinCents(undefined);
     setMaxCents(undefined);
@@ -143,6 +159,7 @@ export default function BrowseScreen() {
       maxCents,
       size: sizeVisible ? size : undefined,
       pickupToday: pickupToday || undefined,
+      sort,
       limit: 20,
     },
     {
@@ -153,7 +170,7 @@ export default function BrowseScreen() {
   );
 
   const items = useMemo(
-    () => feedQuery.data?.pages.flatMap((p) => p.items) ?? ([] as ListingCardType[]),
+    () => feedQuery.data?.pages.flatMap((p) => p.items) ?? ([] as FeedListing[]),
     [feedQuery.data],
   );
 
@@ -190,8 +207,9 @@ export default function BrowseScreen() {
         maxCents,
         size: sizeVisible ? size : undefined,
         pickupToday,
+        sort,
       }),
-    [campus?.id, hasSearch, debouncedSearch, category, minCents, maxCents, sizeVisible, size, pickupToday],
+    [campus?.id, hasSearch, debouncedSearch, category, minCents, maxCents, sizeVisible, size, pickupToday, sort],
   );
 
   // The campus name is identity, so it scrolls away with the content. Search
@@ -216,7 +234,7 @@ export default function BrowseScreen() {
   // Scroll position. Tab screens stay mounted under a pushed listing, but on
   // web the hidden screen's scroller can come back at 0, so remember the
   // offset (a ref: no re-renders while scrolling) and restore it on focus.
-  const listRef = useRef<FlatList<ListingCardType>>(null);
+  const listRef = useRef<FlatList<FeedListing>>(null);
   const scrollOffset = useRef(0);
   const onScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
     scrollOffset.current = e.nativeEvent.contentOffset.y;
@@ -238,8 +256,13 @@ export default function BrowseScreen() {
     feedQuery.refetch();
   }, [feedQuery.refetch]);
   const renderItem = useCallback(
-    ({ item }: { item: ListingCardType }) => (
-      <GridCell item={item} maxWidth={`${(100 / numColumns).toFixed(4)}%` as `${number}%`} onOpen={goToListing} />
+    ({ item }: { item: FeedListing }) => (
+      <GridCell
+        item={item}
+        maxWidth={`${(100 / numColumns).toFixed(4)}%` as `${number}%`}
+        inset={numColumns === 1}
+        onOpen={goToListing}
+      />
     ),
     [numColumns, goToListing],
   );
@@ -277,6 +300,8 @@ export default function BrowseScreen() {
         <FilterBar
           category={category}
           onCategoryChange={handleCategoryChange}
+          sort={sort}
+          onToggleHottest={() => setSort((s) => (s === 'hot' ? 'new' : 'hot'))}
           pickupToday={pickupToday}
           onTogglePickupToday={() => setPickupToday((v) => !v)}
           priceLabel={priceLabel}
@@ -362,7 +387,9 @@ export default function BrowseScreen() {
         data={items}
         keyExtractor={keyExtractor}
         numColumns={numColumns}
-        columnWrapperStyle={styles.gridRow}
+        // columnWrapperStyle is only valid with 2+ columns; the single phone
+        // column gets its side padding from each cell instead (GridCell inset).
+        columnWrapperStyle={numColumns > 1 ? styles.gridRow : undefined}
         contentContainerStyle={styles.gridContent}
         ListHeaderComponent={headerBlock}
         renderItem={renderItem}
@@ -381,7 +408,8 @@ export default function BrowseScreen() {
         scrollEventThrottle={32}
         keyboardDismissMode="on-drag"
         // Counts are rows (numColumns cells each). No getItemLayout: row
-        // height is photo (width-dependent 4:5) + 2-5 text lines, so a fixed
+        // height is photo (width-dependent 4:5) + text lines + like/share row
+        // + up to two comments, so a fixed
         // guess would be wrong and cause jumps; memoized cells keep a wide
         // window cheap instead.
         initialNumToRender={5}
@@ -435,7 +463,7 @@ export default function BrowseScreen() {
   }
 
   return (
-    <Screen padded={false}>
+    <Screen padded={false} maxWidth={BROWSE_MAX_WIDTH}>
       {controlsBlock}
       {body}
       <PriceFilterSheet
@@ -493,6 +521,7 @@ const styles = StyleSheet.create({
   // `1/numColumns %` so a lone last-row cell never stretches to full width.
   // The static 50% is gone — see the renderItem inline style above.
   gridCell: { flex: 1 },
+  cellInset: { paddingHorizontal: space.lg },
   footerLoading: { paddingTop: space.md },
   footerNote: { alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingTop: space.lg },
   footerText: { textAlign: 'center' },

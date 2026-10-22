@@ -106,7 +106,8 @@ export async function getAdminStats() {
         .orderBy(desc(users.createdAt))
         .limit(10),
       ctx.db.select({ n: count() }).from(listings),
-      ctx.db.select({ n: count() }).from(communityPosts),
+      // Text posts only: every listing also gets an automatic post, which is not separate activity.
+      ctx.db.select({ n: count() }).from(communityPosts).where(isNull(communityPosts.listingId)),
       ctx.db.select({ n: count() }).from(messages),
     ]);
 

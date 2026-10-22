@@ -196,3 +196,22 @@ checks, Twilio integration and running-cost scenarios.
   calculated assumptions and scenarios are in `docs/RUNNING-COSTS.md`.
 - No DNS/billing/credential/account changes or production deployment performed.
   Existing uncommitted AGENTS.md, README.md and research outputs are preserved.
+
+## October 22 feed additions (local, uncommitted, not deployed)
+
+Owner-approved additive work: likes, shares and Hottest on Browse; automatic listing posts in Community; story art and an optional video email after posting. Existing look, controls, auth, offers, booking and 24-hour expiry were preserved. Nothing here is committed, pushed or deployed; the hosted database has NOT been migrated.
+
+Verified locally on a throwaway sandbox database (never the shared dev DB or production), October 22:
+- Backend: `npm run typecheck`; new `npm run test:engagement` 58/58; existing `test:workstreams` 42/42, `test:e2e` 17/17, `test:comments` 24/24, `test:save` 9/9, `test:payments` 39/39, `test:geo` 6/6.
+- Browser (headless Chrome, 1440x900 and 390x844): Browse is newest-first by default; Hottest chip beside All; 4 columns at >= 1200px, 3 at >= 900, 2 at >= 600, 1 on phones; filter-row arrows scroll the chips; likes persist across reload and show identically in Community; a rapid double tap is one like; Saved is separate and unrenamed; the same listing comment shows under the Browse card, on the Community listing post and in the listing page thread; replies, save/unsave and swipe view still work; no console errors. Screenshots of welcome, saved, profile, sell and listing detail are byte-identical before/after at both widths.
+- After posting (web, 1440x900 / 390x844 / 320x640): the success modal keeps its existing content and adds an optional "Share to your story" image (real 1080x1920 PNG with the Dibbs logo, photo, price and title; Save downloads it; Share image uses the browser file share when supported, else saves) and a free, optional "Email your video" `mailto:` (nothing is uploaded or auto-published; "a feature is not guaranteed"). Both appear only in the post-publish modal, never on the Sell form. The copy never says anything was posted to Instagram.
+- Share count rule (see `docs/CONTRACT.md` "Likes, shares and Hottest"): signed-in person, share sheet not cancelled or link copied, one per person per listing. It is not proof of an Instagram (or any) post.
+
+Decisions and open items for the owner:
+- Community now opens on the Sellers tab (listing posts are `selling` posts); it was Buyers. One-line revert in `app/(tabs)/community.tsx`.
+- No dedicated video inbox exists. The "Email your video" section reuses `hello@trydibbs.com` (the Cloudflare-routed founder inbox recorded above); override with `EXPO_PUBLIC_VIDEO_EMAIL`. Owner to confirm or name another inbox.
+- Migration `0016_listing_engagement` is additive (no backfill): listings created before it have no Community post; new and relisted ones do. Review it with the existing hosted-migration prechecks before rollout.
+- Not counted as shares: the listing page's own share button and the intent chips (WhatsApp, X, ...). On Android the OS cannot report a cancelled share sheet, so a cancelled sheet may count there.
+- Native (iPhone/Android) was not run: no Xcode on this machine. The iPhone story-image export (react-native-svg `toDataURL`, `expo-file-system`, iOS share sheet) is written and typechecks but is untested on a device; the Story section is hidden on Android because React Native's `Share` ignores `url` there (the video email still shows).
+- Lint: `npx expo lint` still reports the pre-existing errors (e.g. `Confetti.tsx`, `Skeleton.tsx`); none are in the files added or changed for this work.
+

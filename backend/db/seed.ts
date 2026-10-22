@@ -27,6 +27,7 @@ import {
 import { storage as configuredStorage } from '../storage';
 import { refuseIfBackendRunning } from './guard';
 import { LISTING_LIFETIME_MS, localDayBounds } from '../trpc/lib';
+import { upsertListingPost } from '../trpc/listing-post';
 
 const TIMEZONE = 'America/Phoenix';
 
@@ -611,6 +612,12 @@ export async function seed(): Promise<void> {
   }
   // Demo bids from the old auction demos are dropped with their auctions.
   await db.delete(bids).where(inArray(bids.listingId, ids));
+
+  // Every demo listing gets its automatic Community post, exactly like a real
+  // one (idempotent: the post is unique per listing).
+  for (const l of await db.select().from(listings).where(inArray(listings.id, ids))) {
+    await upsertListingPost(db, l);
+  }
 
   // Demo users get their fictional numbers even on a database seeded earlier.
   for (const [id, phone] of [

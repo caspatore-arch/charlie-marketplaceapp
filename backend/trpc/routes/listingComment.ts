@@ -15,12 +15,13 @@
  *    moderator can remove a comment.
  */
 import { TRPCError } from '@trpc/server';
-import { and, eq, isNull, notInArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { listingComments, listings, users, type Listing } from '../../db/schema';
 import type { Db } from '../../db/client';
 import { env } from '../../env';
+import { readableListingComments } from '../engagement';
 import { blockedUserIds, toPublicUser } from '../lib';
 import { campusVerifiedProcedure, moderatorProcedure, protectedProcedure, publicProcedure, router } from '../trpc';
 
@@ -34,13 +35,7 @@ async function loadListing(db: Db, id: string): Promise<Listing> {
   return listing;
 }
 
-function readable(hidden: string[]) {
-  return and(
-    isNull(listingComments.removedAt),
-    isNull(users.deletedAt),
-    hidden.length > 0 ? notInArray(listingComments.authorId, hidden) : undefined,
-  )!;
-}
+const readable = readableListingComments;
 
 export const listingCommentRouter = router({
   /** Every readable comment on a listing, oldest first. Flat list; group by `parentId` on the client. */

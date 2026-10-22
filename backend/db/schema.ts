@@ -738,6 +738,14 @@ export const communityPosts = pgTable(
     expiresAt: ts('expires_at').notNull(),
     removedAt: ts('removed_at'),
     removedById: uuid('removed_by_id').references(() => users.id),
+    /**
+     * Set for the automatic "compact listing post" every listing gets in
+     * Community. The post is only a pointer: caption, price, photo, status,
+     * likes, shares and comments are all read from the listing itself, so
+     * Browse and Community can never disagree. UNIQUE (NULLs are distinct), so
+     * a retried create or a relist upserts the same row instead of adding one.
+     */
+    listingId: uuid('listing_id').references(() => listings.id, { onDelete: 'cascade' }),
   },
   (t) => [
     index('community_posts_feed_idx').on(
@@ -746,6 +754,58 @@ export const communityPosts = pgTable(
       t.id.desc().nullsFirst(),
     ),
     index('community_posts_author_idx').on(t.authorId),
+    uniqueIndex('community_posts_listing_uniq').on(t.listingId),
+  ],
+);
+
+/**
+ * Likes on listings: a public popularity signal, kept separate from
+ * `saved_listings` (a private bookmark). Same guarantees as the post votes:
+ * the composite primary key is the UNIQUE constraint (one like per person per
+ * listing, a double-tap hits ON CONFLICT DO NOTHING) and counts are always
+ * COUNT(*), so they cannot drift or go negative.
+ */
+export const listingLikes = pgTable(
+  'listing_likes',
+  {
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listingId, t.userId] }),
+    // Recent-activity scans for the "hot" ranking.
+    index('listing_likes_recent_idx').on(t.createdAt),
+  ],
+);
+
+/**
+ * Shares of a listing, counted by one honest rule (docs/CONTRACT.md "Likes,
+ * shares and Hottest"): a signed-in person handed the listing link to the OS
+ * or browser share sheet and did not cancel it, or copied the link. One row per
+ * person per listing. It is NOT proof that anyone posted anywhere: the platform
+ * does not tell us what the other app did with it. `via` records which of the
+ * two observable paths counted.
+ */
+export const listingShares = pgTable(
+  'listing_shares',
+  {
+    listingId: uuid('listing_id')
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    via: text('via').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listingId, t.userId] }),
+    index('listing_shares_recent_idx').on(t.createdAt),
   ],
 );
 

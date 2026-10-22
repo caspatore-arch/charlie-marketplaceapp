@@ -70,6 +70,7 @@
     "db:seed-campus": "tsx scripts/seed-pilot-campus.ts",
     "test:comments": "tsx scripts/comments-check.ts",
     "test:e2e": "tsx scripts/e2e.ts",
+    "test:engagement": "tsx scripts/engagement-check.ts",
     "test:geo": "tsx scripts/geo-check.ts",
     "test:payments": "tsx scripts/payments-check.ts",
     "test:save": "tsx scripts/save-check.ts",

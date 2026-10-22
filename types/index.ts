@@ -11,7 +11,9 @@ export type RouterOutputs = inferRouterOutputs<AppRouter>;
 export type RouterInputs = inferRouterInputs<AppRouter>;
 
 // ---- listing ----
-export type ListingCard = RouterOutputs['listing']['feed']['items'][number];
+export type ListingCard = RouterOutputs['listing']['bySeller'][number];
+/** A Browse feed row: the card plus its likes, shares and preview comments. */
+export type FeedListing = RouterOutputs['listing']['feed']['items'][number];
 export type ListingDetail = RouterOutputs['listing']['byId'];
 
 // ---- reservation ----

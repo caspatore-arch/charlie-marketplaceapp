@@ -1,6 +1,7 @@
 /**
  * Celebration shown right after a listing is published: congratulations, a
- * read-only preview of what was just posted, share options, and the 24-hour
+ * read-only preview of what was just posted, share options (link chips, then an
+ * optional story image and an optional "email your video" mailto), and the 24-hour
  * reminder. Dismissing (primary button, backdrop, or Android back) always
  * routes through `onViewListing`, so nobody is left on a dead form screen.
  */
@@ -16,6 +17,8 @@ import { listingShareUrl } from '@/utils/shareListing';
 import { formatPrice } from '@/utils/format';
 import { Confetti } from './Confetti';
 import { ShareRow } from './ShareRow';
+import { StorySection } from './StorySection';
+import { VideoEmailSection } from './VideoEmailSection';
 
 export interface PublishedListing {
   id: string;
@@ -78,7 +81,10 @@ export function PostPublishModal({ listing, onViewListing, onBackToFeed }: Props
 
             <Text variant="heading">Send your listing to a friend</Text>
             <Text selectable variant="caption" color="accentInk">{content.url}</Text>
-            <ShareRow content={content} />
+            <ShareRow content={content} listingId={listing.id} />
+
+            <StorySection listing={listing} />
+            <VideoEmailSection title={listing.title} url={content.url} />
 
             <Button title="View my listing" size="lg" onPress={onViewListing} />
             <Button title="Back to the feed" variant="ghost" onPress={onBackToFeed} />

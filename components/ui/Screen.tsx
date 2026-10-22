@@ -23,6 +23,8 @@ export interface ScreenProps {
   style?: ViewStyle;
   contentContainerStyle?: ScrollViewProps['contentContainerStyle'];
   backgroundColor?: string;
+  /** Desktop content cap in px. Defaults to `maxContentWidth`; a screen with a multi-column grid (Browse) can ask for more. */
+  maxWidth?: number;
 }
 
 export function Screen({
@@ -33,6 +35,7 @@ export function Screen({
   style,
   contentContainerStyle,
   backgroundColor = colors.bg,
+  maxWidth = maxContentWidth,
 }: ScreenProps) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= breakpoints.lg;
@@ -48,7 +51,7 @@ export function Screen({
   const centredColumn: ViewStyle | null = isDesktop
     ? {
         width: '100%',
-        maxWidth: maxContentWidth,
+        maxWidth,
         alignSelf: 'center',
         flex: 1,
       }

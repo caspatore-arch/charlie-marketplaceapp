@@ -14,14 +14,29 @@ import { trpc } from '@/lib/trpc';
 import { confirmAction } from '@/utils/confirm';
 import { space } from '@/constants/theme';
 
-export function ListingComments({ listingId, canComment }: { listingId: string; canComment: boolean }) {
+export function ListingComments({
+  listingId,
+  canComment,
+  showTitle = true,
+}: {
+  listingId: string;
+  canComment: boolean;
+  /** The listing page titles its own section; the Community feed shows the thread under a post and does not. */
+  showTitle?: boolean;
+}) {
   const utils = trpc.useUtils();
   const requireAuth = useRequireAuth();
   const [error, setError] = useState<string | null>(null);
   const [cleared, setCleared] = useState(0);
 
   const comments = trpc.listingComment.list.useQuery({ listingId });
-  const refresh = () => void utils.listingComment.list.invalidate({ listingId });
+  // The same thread backs Browse's previews and Community's listing posts, so
+  // their counts and top comments are refreshed along with the thread.
+  const refresh = () => {
+    void utils.listingComment.list.invalidate({ listingId });
+    void utils.listing.feed.invalidate();
+    void utils.community.feed.invalidate();
+  };
 
   const add = trpc.listingComment.add.useMutation({
     onSuccess: () => {
@@ -40,9 +55,11 @@ export function ListingComments({ listingId, canComment }: { listingId: string; 
 
   return (
     <View style={styles.wrap}>
-      <Text variant="title">
-        Questions & comments{comments.data ? ` (${comments.data.length})` : ''}
-      </Text>
+      {showTitle ? (
+        <Text variant="title">
+          Questions & comments{comments.data ? ` (${comments.data.length})` : ''}
+        </Text>
+      ) : null}
       {comments.isPending ? (
         <Skeleton height={56} />
       ) : comments.isError ? (

@@ -1,16 +1,19 @@
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, gt, gte, ilike, inArray, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, gte, ilike, inArray, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
 import {
   availabilityWindows,
   bids,
+  listingLikes,
   listingPhotos,
+  listingShares,
   listingSpots,
   listings,
   meetupSpots,
   savedListings,
+  type Listing,
 } from '../../db/schema';
 import { enqueueListingPosted } from '../../sms/outbox';
 import { ListingDraftError, draftListingFromPhotos } from '../../ai/listing-draft';
@@ -27,6 +30,8 @@ import {
   toListingCards,
   toListingDetail,
 } from '../lib';
+import { engagementFor, listingHotExpr, listingHotParts } from '../engagement';
+import { upsertListingPostQuietly } from '../listing-post';
 import { campusVerifiedProcedure, protectedProcedure, publicProcedure, router } from '../trpc';
 
 /** Below $1 a platform fee cannot round sensibly. */
@@ -181,6 +186,45 @@ async function replaceWindows(
   }
 }
 
+const hotCursorSchema = z.object({
+  score: z.number().finite(),
+  asOf: z.number().int(),
+  createdAt: z.number().int(),
+  id: z.uuid(),
+});
+
+/** Feed cards plus each listing's likes, shares and preview comments (one grouped read per signal). */
+async function withEngagement(db: Db, rows: Listing[], viewerId: string | null) {
+  const [cards, engagement] = await Promise.all([
+    toListingCards(db, rows),
+    engagementFor(db, rows.map((l) => l.id), viewerId),
+  ]);
+  return cards.map((card) => ({ ...card, engagement: engagement.get(card.id)! }));
+}
+
+/**
+ * A listing the viewer may like or share: live (active, not past its deadline),
+ * on their campus, and not owned by anyone in a block relationship with them.
+ * Anything else reads as gone, like the feed.
+ */
+async function loadReactable(db: Db, id: string, viewer: { id: string; campusId: string }): Promise<Listing> {
+  const gone = () => new TRPCError({ code: 'NOT_FOUND', message: 'That item is no longer available.' });
+  const [listing] = await db.select().from(listings).where(eq(listings.id, id)).limit(1);
+  if (
+    !listing ||
+    listing.campusId !== viewer.campusId ||
+    listing.status !== 'active' ||
+    (listing.expiresAt !== null && listing.expiresAt.getTime() <= Date.now())
+  ) {
+    throw gone();
+  }
+  if (listing.sellerId !== viewer.id) {
+    const hidden = await blockedUserIds(db, viewer.id);
+    if (hidden.includes(listing.sellerId)) throw gone();
+  }
+  return listing;
+}
+
 export const listingRouter = router({
   feed: publicProcedure
     .input(
@@ -192,12 +236,15 @@ export const listingRouter = router({
         maxCents: z.number().int().min(0).optional(),
         size: z.string().max(40).optional(),
         pickupToday: z.boolean().optional(),
-        cursor: z.string().optional(),
+        /** 'new' (default) is strictly newest first. 'hot' ranks by recent likes, comments and shares. */
+        sort: z.enum(['new', 'hot']).default('new'),
+        cursor: z.string().max(300).optional(),
         limit: z.number().int().min(1).max(50).default(20),
       }),
     )
     .query(async ({ ctx, input }) => {
       await applyExpiryForRead(ctx.db);
+      const hot = input.sort === 'hot';
 
       const conditions = [
         eq(listings.campusId, input.campusId),
@@ -226,10 +273,8 @@ export const listingRouter = router({
       }
 
       // Hide listings from anyone in a block relationship with the viewer.
-      if (ctx.user) {
-        const hidden = await blockedUserIds(ctx.db, ctx.user.id);
-        if (hidden.length > 0) conditions.push(notInArray(listings.sellerId, hidden));
-      }
+      const hidden = ctx.user ? await blockedUserIds(ctx.db, ctx.user.id) : [];
+      if (hidden.length > 0) conditions.push(notInArray(listings.sellerId, hidden));
 
       if (input.pickupToday) {
         const { end } = localDayBounds('America/Phoenix');
@@ -239,6 +284,56 @@ export const listingRouter = router({
                        and w.starts_at <= ${end.toISOString()}
                        and w.ends_at >= now())`,
         );
+      }
+
+      if (hot) {
+        // The Hottest score depends on the clock, so the cursor freezes `asOf`
+        // from the first page and later pages are scored at that same instant.
+        let cursor: z.infer<typeof hotCursorSchema> | null = null;
+        if (input.cursor) {
+          try {
+            cursor = hotCursorSchema.parse(JSON.parse(input.cursor));
+          } catch {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid cursor.' });
+          }
+        }
+        const asOf = cursor ? new Date(cursor.asOf) : new Date();
+        const parts = listingHotParts(ctx.db, asOf, hidden);
+        const scoreExpr = listingHotExpr(parts);
+        if (cursor) {
+          const cAt = new Date(cursor.createdAt);
+          conditions.push(
+            or(
+              sql`${scoreExpr} < ${cursor.score}::float8`,
+              and(
+                sql`${scoreExpr} = ${cursor.score}::float8`,
+                or(lt(listings.createdAt, cAt), and(eq(listings.createdAt, cAt), lt(listings.id, cursor.id))),
+              ),
+            )!,
+          );
+        }
+        const rows = await ctx.db
+          .select({ listing: listings, score: scoreExpr })
+          .from(listings)
+          .leftJoin(parts.likes, eq(parts.likes.listingId, listings.id))
+          .leftJoin(parts.comments, eq(parts.comments.listingId, listings.id))
+          .leftJoin(parts.shares, eq(parts.shares.listingId, listings.id))
+          .where(and(...conditions))
+          .orderBy(sql`${scoreExpr} desc`, desc(listings.createdAt), desc(listings.id))
+          .limit(input.limit + 1);
+        const page = rows.slice(0, input.limit);
+        const last = rows.length > input.limit ? page[page.length - 1] : undefined;
+        return {
+          items: await withEngagement(ctx.db, page.map((r) => r.listing), ctx.user?.id ?? null),
+          nextCursor: last
+            ? JSON.stringify({
+                score: Number(last.score),
+                asOf: asOf.getTime(),
+                createdAt: last.listing.createdAt.getTime(),
+                id: last.listing.id,
+              })
+            : undefined,
+        };
       }
 
       // Keyset pagination on (createdAt, id) so new listings never shift a page.
@@ -264,7 +359,7 @@ export const listingRouter = router({
       const next = rows.length > input.limit ? page[page.length - 1] : undefined;
 
       return {
-        items: await toListingCards(ctx.db, page),
+        items: await withEngagement(ctx.db, page, ctx.user?.id ?? null),
         nextCursor: next ? `${next.createdAt.toISOString()}|${next.id}` : undefined,
       };
     }),
@@ -334,6 +429,7 @@ export const listingRouter = router({
     await replaceSpots(ctx.db, listing!.id, ctx.user.campusId, input.spotIds);
     await replaceWindows(ctx.db, listing!.id, input.windows);
     await enqueueListingPosted(ctx.db, listing!.id);
+    await upsertListingPostQuietly(ctx.db, listing!);
 
     return toListingDetail(ctx.db, listing!, ctx.user.id);
   }),
@@ -464,6 +560,7 @@ export const listingRouter = router({
         .returning();
       await replaceWindows(ctx.db, existing.id, input.windows ?? []);
       await enqueueListingPosted(ctx.db, existing.id);
+      await upsertListingPostQuietly(ctx.db, updated!);
       return toListingDetail(ctx.db, updated!, ctx.user.id);
     }),
 
@@ -499,6 +596,59 @@ export const listingRouter = router({
           .onConflictDoNothing();
       }
       return { saved: true };
+    }),
+
+  /**
+   * Set (not toggle) the viewer's like. Idempotent by design: a double-tap or a
+   * retry sends the same target state and cannot flip it back or add a second
+   * row (the (listing_id, user_id) primary key makes a duplicate insert a
+   * no-op even under concurrency). A like is public popularity; Saved stays
+   * the private bookmark and is untouched by this.
+   */
+  setLike: protectedProcedure
+    .input(z.object({ id: z.uuid(), liked: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.liked) {
+        const listing = await loadReactable(ctx.db, input.id, ctx.user);
+        await ctx.db
+          .insert(listingLikes)
+          .values({ listingId: listing.id, userId: ctx.user.id })
+          .onConflictDoNothing();
+      } else {
+        // Taking a like back never needs the listing to still be live.
+        await ctx.db
+          .delete(listingLikes)
+          .where(and(eq(listingLikes.listingId, input.id), eq(listingLikes.userId, ctx.user.id)));
+      }
+      const [row] = await ctx.db
+        .select({ total: count() })
+        .from(listingLikes)
+        .where(eq(listingLikes.listingId, input.id));
+      return { id: input.id, likeCount: Number(row?.total ?? 0), viewerLiked: input.liked };
+    }),
+
+  /**
+   * Records that the viewer shared this listing, under the one rule in
+   * docs/CONTRACT.md "Likes, shares and Hottest": the client calls this only
+   * after the OS/browser share sheet handed the link over without being
+   * cancelled, or after the link was copied. One row per person per listing, so
+   * retries and repeat shares never inflate the count. The server cannot see
+   * what the other app did with the link, and nothing here claims it posted.
+   */
+  recordShare: protectedProcedure
+    .input(z.object({ id: z.uuid(), via: z.enum(['share_sheet', 'copy_link']) }))
+    .mutation(async ({ ctx, input }) => {
+      const listing = await loadReactable(ctx.db, input.id, ctx.user);
+      const inserted = await ctx.db
+        .insert(listingShares)
+        .values({ listingId: listing.id, userId: ctx.user.id, via: input.via })
+        .onConflictDoNothing()
+        .returning({ listingId: listingShares.listingId });
+      const [row] = await ctx.db
+        .select({ total: count() })
+        .from(listingShares)
+        .where(eq(listingShares.listingId, listing.id));
+      return { id: listing.id, shareCount: Number(row?.total ?? 0), viewerShared: true, counted: inserted.length > 0 };
     }),
 
   saved: protectedProcedure.query(async ({ ctx }) => {

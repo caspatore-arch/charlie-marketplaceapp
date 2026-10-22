@@ -2,6 +2,12 @@
  * Campus community feed: short "interest check" posts from buyers and sellers
  * ("Anyone selling a mini fridge?", "Anyone want shirts? I have a bunch").
  *
+ * Every listing also gets an automatic compact "listing post" here (a pointer
+ * row with `listing_id`; see ../listing-post.ts). Its caption, price, photo,
+ * status, likes, shares and comments are the LISTING's own, read live, so
+ * Browse and Community can never show two different threads or counts. Writes
+ * (like, comment, report, delete) go to the listing's own endpoints.
+ *
  * Rules the server owns:
  *  - Campus-scoped: you only ever see, open, or report posts from your campus.
  *  - Every post expires exactly 24h after it is created. Expiry is enforced in
@@ -12,7 +18,7 @@
  *  - Posting needs a verified campus email; reading needs a signed-in account.
  */
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql, type AnyColumn } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql, type AnyColumn } from 'drizzle-orm';
 import { z } from 'zod';
 
 import {
@@ -20,12 +26,16 @@ import {
   communityComments,
   communityPostVotes,
   communityPosts,
+  listings,
   reports,
   users,
   type CommunityPost,
 } from '../../db/schema';
 import type { Db } from '../../db/client';
-import { blockedUserIds, toPublicUser } from '../lib';
+import { engagementFor, listingHotExpr, listingHotParts } from '../engagement';
+import { HOT_COMMENT_VOTE_WEIGHT, HOT_COMMENT_WEIGHT, decayedSum } from '../hot';
+import { listingCaption } from '../listing-post';
+import { blockedUserIds, toListingCards, toPublicUser } from '../lib';
 import { campusVerifiedProcedure, moderatorProcedure, protectedProcedure, router } from '../trpc';
 
 export const COMMUNITY_POST_TTL_MS = 24 * 60 * 60 * 1000;
@@ -83,20 +93,51 @@ async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
     .where(and(inArray(communityComments.postId, postIds), commentReadable(hidden)))
     .groupBy(communityComments.postId);
   const commentsById = new Map(commentTotals.map((t) => [t.postId, Number(t.total)]));
-  return rows.map((p) => ({
-    id: p.id,
-    kind: p.kind,
-    body: p.body,
-    createdAt: p.createdAt,
-    expiresAt: p.expiresAt,
-    author: toPublicUser(byId.get(p.authorId)!),
-    isMine: p.authorId === viewerId,
-    /** Popularity only. Never an endorsement, and not a safety signal. */
-    voteCount: totalById.get(p.id) ?? 0,
-    viewerVoted: votedIds.has(p.id),
-    /** Popularity only, like votes. Counts comments this viewer can read. */
-    commentCount: commentsById.get(p.id) ?? 0,
-  }));
+
+  // Listing posts: the listing is the source of truth for everything shown.
+  const listingIds = [...new Set(rows.flatMap((r) => (r.listingId ? [r.listingId] : [])))];
+  const listingRows = listingIds.length
+    ? await db.select().from(listings).where(inArray(listings.id, listingIds))
+    : [];
+  const [cards, engagement] = await Promise.all([
+    toListingCards(db, listingRows),
+    engagementFor(db, listingIds, viewerId),
+  ]);
+  const cardById = new Map(cards.map((c) => [c.id, c]));
+  const listingById = new Map(listingRows.map((l) => [l.id, l]));
+
+  return rows.map((p) => {
+    const eng = p.listingId ? engagement.get(p.listingId) : undefined;
+    const listing = p.listingId ? listingById.get(p.listingId) : undefined;
+    return {
+      id: p.id,
+      kind: p.kind,
+      body: listing ? listingCaption(listing) : p.body,
+      createdAt: p.createdAt,
+      expiresAt: listing?.expiresAt ?? p.expiresAt,
+      author: toPublicUser(byId.get(p.authorId)!),
+      isMine: p.authorId === viewerId,
+      /** Popularity only. Never an endorsement, and not a safety signal. For a listing post: the listing's likes. */
+      voteCount: eng ? eng.likeCount : (totalById.get(p.id) ?? 0),
+      viewerVoted: eng ? eng.viewerLiked : votedIds.has(p.id),
+      /** Popularity only, like votes. Counts comments this viewer can read. For a listing post: the listing's comments. */
+      commentCount: eng ? eng.commentCount : (commentsById.get(p.id) ?? 0),
+      /** Null for an ordinary text post. Otherwise the live listing card this post links to. */
+      listing: (p.listingId ? (cardById.get(p.listingId) ?? null) : null),
+      /** Null for an ordinary text post. Otherwise the listing's likes, shares and preview comments. */
+      engagement: eng ?? null,
+    };
+  });
+}
+
+/** A listing post is only visible while its listing is: active and not past its deadline. */
+function listingLive(now: Date) {
+  return and(eq(listings.status, 'active'), or(isNull(listings.expiresAt), gt(listings.expiresAt, now)))!;
+}
+
+const LISTING_POST_NOTE = 'That post is a listing. Like, comment or report it from the listing.';
+function assertNotListingPost(post: CommunityPost) {
+  if (post.listingId) throw new TRPCError({ code: 'BAD_REQUEST', message: LISTING_POST_NOTE });
 }
 
 /**
@@ -118,12 +159,11 @@ async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
  *    an expired or removed post never contribute (the post filters in `feed`
  *    still apply to the whole query).
  * The hot score depends on the clock, so the cursor freezes `asOf` from the
- * first page and later pages are scored at that same instant.
+ * first page and later pages are scored at that same instant. The recipe lives
+ * in ../hot so Browse's Hottest uses the very same decay. A listing post is
+ * scored from its listing's likes, comments and shares (same formula as Browse).
  */
-export const HOT_HALF_LIFE_MIN = 30;
-export const HOT_WINDOW_HOURS = 6;
-export const HOT_COMMENT_WEIGHT = 2;
-export const HOT_COMMENT_VOTE_WEIGHT = 0.5;
+export { HOT_HALF_LIFE_MIN, HOT_WINDOW_HOURS, HOT_COMMENT_WEIGHT, HOT_COMMENT_VOTE_WEIGHT } from '../hot';
 
 export const communitySorts = ['new', 'top', 'hot'] as const;
 
@@ -142,6 +182,14 @@ async function loadVisible(db: Db, id: string, viewer: { id: string; campusId: s
     .where(and(eq(communityPosts.id, id), eq(communityPosts.campusId, viewer.campusId), liveFilter(new Date())))
     .limit(1);
   if (!post) throw new TRPCError({ code: 'NOT_FOUND', message: 'That post has expired or was removed.' });
+  if (post.listingId) {
+    const [live] = await db
+      .select({ id: listings.id })
+      .from(listings)
+      .where(and(eq(listings.id, post.listingId), listingLive(new Date())))
+      .limit(1);
+    if (!live) throw new TRPCError({ code: 'NOT_FOUND', message: 'That post has expired or was removed.' });
+  }
   if (post.authorId !== viewer.id) {
     const hidden = await blockedUserIds(db, viewer.id);
     if (hidden.includes(post.authorId)) {
@@ -233,7 +281,17 @@ export const communityRouter = router({
       }
       const now = cursor ? new Date(cursor.asOf) : new Date();
       // Expiry/removal are judged at the real current time, never the frozen one.
-      const conditions = [eq(communityPosts.campusId, ctx.user.campusId), liveFilter(new Date())!];
+      const realNow = new Date();
+      const conditions = [
+        eq(communityPosts.campusId, ctx.user.campusId),
+        // Text posts: the post's own 24h expiry. Listing posts: the listing's
+        // own status and deadline (so sold, expired or removed listings leave
+        // Community exactly when they leave Browse).
+        or(
+          and(isNull(communityPosts.listingId), liveFilter(realNow)),
+          and(isNotNull(communityPosts.listingId), isNull(communityPosts.removedAt), listingLive(realNow)),
+        )!,
+      ];
       if (input.kind) conditions.push(eq(communityPosts.kind, input.kind));
       const hidden = await blockedUserIds(ctx.db, ctx.user.id);
       if (hidden.length > 0) conditions.push(notInArray(communityPosts.authorId, hidden));
@@ -244,7 +302,7 @@ export const communityRouter = router({
         .select({
           postId: communityPostVotes.postId,
           total: count().as('total'),
-          hot: sql<number>`coalesce(sum(power(0.5, extract(epoch from (${asOfIso}::timestamptz - ${communityPostVotes.createdAt})) / ${HOT_HALF_LIFE_MIN * 60}::float8)) filter (where ${communityPostVotes.createdAt} <= ${asOfIso}::timestamptz and ${communityPostVotes.createdAt} > ${asOfIso}::timestamptz - make_interval(hours => ${HOT_WINDOW_HOURS})), 0)::float8`.as('v_hot'),
+          hot: decayedSum(asOfIso, communityPostVotes.createdAt).as('v_hot'),
         })
         .from(communityPostVotes)
         .groupBy(communityPostVotes.postId)
@@ -252,8 +310,7 @@ export const communityRouter = router({
 
       // Decayed comment activity and comment-upvote activity, per post. Same
       // readability rules the viewer gets when reading the comments.
-      const decayed = (col: AnyColumn) =>
-        sql<number>`coalesce(sum(power(0.5, extract(epoch from (${asOfIso}::timestamptz - ${col})) / ${HOT_HALF_LIFE_MIN * 60}::float8)) filter (where ${col} <= ${asOfIso}::timestamptz and ${col} > ${asOfIso}::timestamptz - make_interval(hours => ${HOT_WINDOW_HOURS})), 0)::float8`;
+      const decayed = (col: AnyColumn) => decayedSum(asOfIso, col);
       const cm = ctx.db
         .select({ postId: communityComments.postId, hot: decayed(communityComments.createdAt).as('cm_hot') })
         .from(communityComments)
@@ -270,8 +327,11 @@ export const communityRouter = router({
         .groupBy(communityComments.postId)
         .as('cv');
 
-      const totalExpr = sql<number>`coalesce(${v.total}, 0)::float8`;
-      const hotExpr = sql<number>`(coalesce(${v.hot}, 0) + ${HOT_COMMENT_WEIGHT}::float8 * coalesce(${cm.hot}, 0) + ${HOT_COMMENT_VOTE_WEIGHT}::float8 * coalesce(${cv.hot}, 0))::float8`;
+      // A listing post is ranked by its listing's own likes, comments and
+      // shares (the same formula Browse's Hottest uses); text posts have none.
+      const lp = listingHotParts(ctx.db, now, hidden);
+      const totalExpr = sql<number>`(coalesce(${v.total}, 0) + coalesce(${lp.likes.total}, 0))::float8`;
+      const hotExpr = sql<number>`(coalesce(${v.hot}, 0) + ${HOT_COMMENT_WEIGHT}::float8 * coalesce(${cm.hot}, 0) + ${HOT_COMMENT_VOTE_WEIGHT}::float8 * coalesce(${cv.hot}, 0) + ${listingHotExpr(lp)})::float8`;
       const scoreExpr = input.sort === 'top' ? totalExpr : input.sort === 'hot' ? hotExpr : sql<number>`0::float8`;
 
       if (cursor) {
@@ -298,6 +358,10 @@ export const communityRouter = router({
         .leftJoin(v, eq(v.postId, communityPosts.id))
         .leftJoin(cm, eq(cm.postId, communityPosts.id))
         .leftJoin(cv, eq(cv.postId, communityPosts.id))
+        .leftJoin(listings, eq(listings.id, communityPosts.listingId))
+        .leftJoin(lp.likes, eq(lp.likes.listingId, communityPosts.listingId))
+        .leftJoin(lp.comments, eq(lp.comments.listingId, communityPosts.listingId))
+        .leftJoin(lp.shares, eq(lp.shares.listingId, communityPosts.listingId))
         .where(and(...conditions))
         .orderBy(...ordering)
         .limit(input.limit + 1);
@@ -331,6 +395,7 @@ export const communityRouter = router({
     .input(z.object({ id: z.uuid(), voted: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const post = await loadVisible(ctx.db, input.id, ctx.user);
+      assertNotListingPost(post);
       if (input.voted) {
         await ctx.db
           .insert(communityPostVotes)
@@ -358,6 +423,7 @@ export const communityRouter = router({
     .input(z.object({ postId: z.uuid(), limit: z.number().int().min(1).max(100).default(100) }))
     .query(async ({ ctx, input }) => {
       const post = await loadVisible(ctx.db, input.postId, ctx.user);
+      assertNotListingPost(post);
       const hidden = await blockedUserIds(ctx.db, ctx.user.id);
       const rows = await ctx.db
         .select({ comment: communityComments, author: users })
@@ -384,6 +450,7 @@ export const communityRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const post = await loadVisible(ctx.db, input.postId, ctx.user);
+      assertNotListingPost(post);
       let parentId: string | null = null;
       if (input.parentId) {
         // Must be readable to the viewer (not removed, not blocked) and on this post.
@@ -474,7 +541,8 @@ export const communityRouter = router({
       const live = await ctx.db
         .select({ id: communityPosts.id })
         .from(communityPosts)
-        .where(and(eq(communityPosts.authorId, ctx.user.id), liveFilter(now)));
+        // Automatic listing posts are not "posts you wrote": they must not eat the cap.
+        .where(and(eq(communityPosts.authorId, ctx.user.id), isNull(communityPosts.listingId), liveFilter(now)));
       if (live.length >= COMMUNITY_MAX_LIVE_POSTS) {
         throw new TRPCError({
           code: 'TOO_MANY_REQUESTS',
@@ -503,6 +571,12 @@ export const communityRouter = router({
     if (post.authorId !== ctx.user.id) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only delete your own posts.' });
     }
+    if (post.listingId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'This post is your listing. Remove the listing itself to take it down.',
+      });
+    }
     await ctx.db
       .update(communityPosts)
       .set({ removedAt: new Date(), removedById: ctx.user.id })
@@ -526,7 +600,10 @@ export const communityRouter = router({
       await ctx.db.insert(reports).values({
         reporterId: ctx.user.id,
         targetUserId: post.authorId,
-        targetPostId: post.id,
+        // A listing post is reported as the LISTING, so the moderator sees the
+        // item (and can remove it) in the same queue as reports from Browse.
+        targetListingId: post.listingId,
+        targetPostId: post.listingId ? null : post.id,
         reason: input.reason,
         details: input.details || null,
       });

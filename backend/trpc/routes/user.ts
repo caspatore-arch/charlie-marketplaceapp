@@ -301,6 +301,8 @@ export const userRouter = router({
             eq(communityPosts.campusId, ctx.user.campusId),
             gt(communityPosts.expiresAt, new Date()),
             isNull(communityPosts.removedAt),
+            // Automatic listing posts are shown as listings, not as text posts.
+            isNull(communityPosts.listingId),
           ),
         )
         .orderBy(desc(communityPosts.createdAt))
