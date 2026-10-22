@@ -18,6 +18,9 @@ If a cheaper agent's output fails verification, retry once one tier up.
 
 Reading:
 - `docs/CONTRACT.md` is large; grep for the section you need instead of reading it whole.
+- UI overhaul: `docs/OVERHAUL.md` is the page-by-page checklist with owner decisions
+  under "Your call". Read only the group being worked on. Refresh screenshots with
+  `node scripts/screenshots.mjs` (backend + web running).
 - Read other docs only when the task touches them: `DEPLOY.md` / `DEPLOY-WEB.md`
   (hosting), `DESIGN.md` + `constants/theme.ts` (UI), `APP-STORE.md`, `LEGAL-TODO.md`.
 - Skip as historical: `HANDOFF.md`, `AUCTIONS.md`, `API-WORKSTREAMS.md`,

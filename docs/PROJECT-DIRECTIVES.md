@@ -32,7 +32,7 @@ within the owner's current authorization; keep the remaining queue intact.
   a temporary launch choice and verify signup storage before using it.
 - Fixed asking prices and offers replace new auctions. Listings and Community
   posts expire after 24 hours; confirmed meetups survive listing expiry.
-- Bookings use exact 30-minute slots and campus-local display times. Preserve
+- Bookings use exact 30-minute slots and campus-local display times (owner decided 2026-10-22 to move to 15-minute slots inside seller-chosen blocks; see `docs/OVERHAUL.md` "The pitch"). Preserve
   concurrency protection, price checks, report/block behavior and account privacy.
 - Tabs: Browse, Sell, Community, Profile. Meetups/messages remain accessible
   through the inbox route and relevant item/meetup screens.
