@@ -151,7 +151,7 @@ Added after the section above; nothing earlier in this document was rewritten. W
 
 **Seller‑facing numbers are now estimates.** Because the seller pays Stripe's fee, "price minus 10%" is no longer what they keep, and Stripe's exact fee is unknown until settlement. The app shows the platform fee exactly, the card fee as an estimate, and the seller's take‑home as an estimate with that word attached. Do not let any future copy state an exact seller net.
 
-**One change still needed that this pass was not allowed to make:** `components/FeeBreakdown.tsx` (the fee panel on the request‑meetup sheet) still labels its bottom row "Seller receives" over a figure that is the price minus the platform fee only — i.e. before Stripe's fee. It should read "Seller receives (before card fee)", or show `sellerNetEstimateCents` with the estimate wording. The data it needs is already on `payment.quote`.
+~~**One change still needed that this pass was not allowed to make:** `components/FeeBreakdown.tsx` (the fee panel on the request‑meetup sheet) still labels its bottom row "Seller receives" over a figure that is the price minus the platform fee only — i.e. before Stripe's fee. It should read "Seller receives (before card fee)", or show `sellerNetEstimateCents` with the estimate wording. The data it needs is already on `payment.quote`.~~ **Done in a later pass** (see §10) — this paragraph was left stale after the fix landed; `FeeBreakdown.tsx` has read "Seller receives (estimated)" over `sellerNetEstimateCents`, with `estimateNote` shown underneath, since before 2026‑10‑22.
 
 ## 9. Buildable and submittable (2026‑09‑16, third pass): eas.json, app identity, App Store guide
 
@@ -166,3 +166,23 @@ Added after everything above; nothing earlier in this document was rewritten.
 | `docs/APP-STORE.md` | New — a founder-readable guide to the Apple Developer Program ($99/yr), what `eas build`/`eas submit` do, TestFlight, a drafted (placeholder) App Store listing, an App Privacy "nutrition label" table derived from `backend/db/schema.ts`, and the specific App Review guidelines this app touches (5.1.1(v) account deletion, 1.2 report/block, no IAP needed, safety-feature scrutiny). |
 | Verification run this pass | `npm run typecheck` — clean. `npm run test:e2e` — 8/8. `npx expo-doctor` — 18/21 checks pass; the 3 failures (an `app.json` schema warning for `newArchEnabled`, a missing `react-native-worklets` peer dependency, and two packages slightly behind the SDK's expected patch version) all **pre-exist this pass** and were not introduced by it — no packages were installed or changed, per this pass's constraints. |
 | Not done, not claimed | No `eas build`, `eas init`, or `eas submit` was run — this machine has no Apple Developer account, no Xcode, no registered EAS project. No Apple/EAS IDs were invented anywhere. |
+
+## 10. Typecheck fixed (2026‑10‑22, automated daily pass)
+
+Added after everything above; nothing earlier in this document was rewritten.
+
+`npm run typecheck` was failing (`backend/sms/outbox.ts(331,9): error TS2339: Property 'unref' does not exist on type 'number'.`), so this document's own claims that typecheck was "clean" had gone stale since whatever change introduced the break. This blocks nothing in the running app — the SMS dispatcher worked fine at runtime — but a red typecheck is a real regression against this repo's own non‑negotiable, and a founder relying on "typecheck passes" as a go/no‑go signal was getting a false pass if they didn't run it themselves.
+
+**What was wrong.** This repo's `tsconfig.json` extends Expo's base config, which sets `"lib": ["DOM", "ESNext"]` for the app side. That makes the *global* `setInterval`/`clearInterval` ambient types resolve to the browser overload (`setInterval(...): number`, no `.unref()`) even inside backend‑only files that only ever run under Node, where the real return value is a `Timeout` object. `backend/sms/outbox.ts`'s dispatcher start‑up code called `.unref()` on that value, which the DOM‑shaped type doesn't have.
+
+**What was fixed.** One file, no dependency changes, no tsconfig changes (changing `lib`/`types` repo‑wide risks breaking the app side's use of DOM‑only types like `fetch`/`URL`, which this pass was not scoped to touch or verify): `backend/sms/outbox.ts` now types `timer` as `NodeJS.Timeout | null` and casts the `setInterval(...)` result to that type with a comment explaining why, instead of inferring the ambiguous global return type. Behavior at runtime is unchanged — it is still the same Node `setInterval` call, same interval, same `.unref()`; only what TypeScript believes the return type is changed, to match reality.
+
+**Verified today** (fresh `npm install`, local PGlite, `PAYMENTS_MODE`/`SMS_MODE`/`EMAIL_MODE` all simulated by default — no real money, texts, or emails sent):
+- `npm run typecheck` — clean.
+- `npm run test:e2e` — **17/17** criteria passed (the suite has grown past the 8 criteria this document's §1 table describes; that table is otherwise still accurate for criteria 1–8, it's just no longer the whole suite).
+- `npm run test:geo` — 6/6.
+- `npx tsx scripts/payments-check.ts` — 39/39, fake gateway only, confirms no money moves.
+- `npm run test:workstreams` — 36/36.
+- `npx tsx scripts/buyout-concept-check.ts` — 11/11 (the disabled buyout concept's math stays correct even though nothing links to it).
+
+**Not done, not claimed:** no feature work, no dependency bumps, no Expo/tsconfig changes, nothing on a physical iPhone or against a real Stripe/Twilio/Resend account. The stale §1 "8/8" claim and the stale §7 FeeBreakdown note (struck through above) are the only documentation corrections made; everything else in this file describes what it already described.
