@@ -54,9 +54,22 @@ export const env = {
   get devLogin(): boolean {
     return process.env.DEV_LOGIN === '1';
   },
+  /**
+   * Platform fee. 0 while payments are off: Dibbs takes nothing and sellers
+   * keep 100%. Only meaningful if PAYMENTS_ENABLED=1 returns.
+   */
   get platformFeePercent(): number {
-    const n = Number(process.env.PLATFORM_FEE_PERCENT ?? 10);
-    return Number.isFinite(n) ? n : 10;
+    const n = Number(process.env.PLATFORM_FEE_PERCENT ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  },
+  /**
+   * Master switch for in-app payment. OFF by default: booking a meetup needs
+   * no payment, the buyer pays the seller in person, and a booked meetup is
+   * NEVER cancelled or blocked for being unpaid. The Stripe code stays in the
+   * repo, dormant, and returns only when this is set to 1.
+   */
+  get paymentsEnabled(): boolean {
+    return process.env.PAYMENTS_ENABLED === '1';
   },
   get allowedEmailDomains(): string[] {
     return (process.env.ALLOWED_EMAIL_DOMAINS ?? 'arizona.edu,demo.campus.test')

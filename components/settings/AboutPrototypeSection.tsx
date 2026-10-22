@@ -10,7 +10,7 @@ import { Text } from '@/components/ui/Text';
 import { space } from '@/constants/theme';
 
 const NOTES = [
-  'Payments are simulated. No real money moves — the fee breakdown you see is for demonstration only.',
+  'There is no payment in Dibbs. Buyers pay sellers in person, and Dibbs never handles money.',
   'Sign-in codes are printed to the server log in this prototype, not emailed to you.',
   'Demo listings and meetup spots are labeled "Demo" and their locations are unverified — check hours and permission yourself before relying on them.',
 ];

@@ -130,6 +130,8 @@ export async function applyPaymentTimeouts(
   db: Db,
   scope?: { reservationId?: string; userId?: string },
 ): Promise<string[]> {
+  // Payments are off: nothing is ever cancelled for being unpaid.
+  if (!env.paymentsEnabled) return [];
   const cutoff = new Date(Date.now() - PAY_WINDOW_MS);
 
   const filters = [
@@ -177,7 +179,7 @@ export async function applyPaymentTimeouts(
 
 /** True when this reservation's payment window has closed unpaid. */
 export function isTimedOut(reservation: { createdAt: Date; status: string }, paid: boolean): boolean {
-  if (paid) return false;
+  if (paid || !env.paymentsEnabled) return false;
   if (!(OPEN_RESERVATION_STATUSES as readonly string[]).includes(reservation.status)) return false;
   return payDeadline(reservation.createdAt).getTime() < Date.now();
 }

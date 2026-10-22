@@ -117,7 +117,7 @@ const FIELD_ORDER: (keyof FieldErrors)[] = [
   'windows',
 ];
 
-/** The $1 floor a platform fee can round against. */
+/** The $1 minimum asking price. */
 const MIN_PRICE_CENTS = 100;
 
 export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(function ListingForm(
@@ -380,7 +380,7 @@ export const ListingForm = forwardRef<ListingFormHandle, ListingFormProps>(funct
             onBlur={() => setTouched((t) => ({ ...t, price: true }))}
             error={visible('price')}
             keyboardType="decimal-pad"
-            helper="At least $1. Buyers can book at this price or send you an offer below it."
+            helper="At least $1. You keep 100% — buyers pay you in person. Buyers can book at this price or send you an offer below it."
           />
           <PriceGuideBar
             category={category}

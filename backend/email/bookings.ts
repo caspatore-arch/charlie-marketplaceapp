@@ -39,7 +39,7 @@ export async function dispatchBookingEmails(db: Db, now = new Date()) {
       const link = `${process.env.EXPO_PUBLIC_WEB_BASE_URL?.replace(/\/$/, '') || 'https://trydibbs.com'}/reservation/${row.reservation.id}`;
       await emailProvider().send({
         to: row.user.email, subject: 'Your Dibbs meetup is confirmed', idempotencyKey: message.id,
-        text: `Your meetup for "${row.listing.title}" is booked.\n\nWhen: ${when} (${row.campus.timezone})\nWhere: ${spot?.name ?? 'See the agreed place in Dibbs'}${spot?.description ? ` — ${spot.description}` : ''}\nAgreed price: $${(row.reservation.priceCents / 100).toFixed(2)}\n\nView current details: ${link}\n\nMeet in public and inspect the item before paying. Payment is arranged directly; this email is not a payment receipt.`,
+        text: `Your meetup for "${row.listing.title}" is booked.\n\nWhen: ${when} (${row.campus.timezone})\nWhere: ${spot?.name ?? 'See the agreed place in Dibbs'}${spot?.description ? ` — ${spot.description}` : ''}\nAgreed price: $${(row.reservation.priceCents / 100).toFixed(2)}\n\nView current details: ${link}\n\nMeet in public and inspect the item before paying. Pay the seller in person when you meet. Dibbs never handles money.`,
       });
       await db.update(bookingEmails).set({ status: 'sent', updatedAt: now }).where(eq(bookingEmails.id, message.id));
     } catch {

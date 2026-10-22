@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/Card';
 import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
 import { trpc } from '@/lib/trpc';
+import { usePaymentsEnabled } from '@/hooks/usePaymentsEnabled';
 import { formatPrice } from '@/utils/format';
 import { colors, radius, space } from '@/constants/theme';
 
@@ -26,10 +27,12 @@ export interface ReservationPaymentRowProps {
 
 export function ReservationPaymentRow({ reservationId, enabled }: ReservationPaymentRowProps) {
   const router = useRouter();
-  const query = trpc.payment.byReservation.useQuery({ reservationId }, { enabled });
+  const paymentsEnabled = usePaymentsEnabled();
+  const query = trpc.payment.byReservation.useQuery({ reservationId }, { enabled: enabled && paymentsEnabled });
 
-  // While it loads, say nothing rather than flashing a wrong state.
-  if (!enabled || !query.data) return null;
+  // Payments are off: there is nothing to show. While it loads, say nothing
+  // rather than flashing a wrong state.
+  if (!paymentsEnabled || !enabled || !query.data) return null;
 
   const d = query.data;
   const status = d.payment?.status ?? null;

@@ -4,13 +4,15 @@
  *   1. Pick an open 15-minute time (slot chart, campus timezone)
  *   2. Pick a campus meetup place
  *   3. Confirm: exact price, exact local time + date, place -> `reservation.book`
+ *   4. Done: a booking confirmation (no payment step; the buyer pays the seller
+ *      in person). It is the last step of this screen, not a separate route.
  *
  * Booking is final at once (no seller approval step). On CONFLICT the server's
  * message is shown and the slot chart is refetched, because availability was
- * stale. The fee breakdown is simulated and says so.
+ * stale. There is no fee or pay step while payments are dormant.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Alert, Linking, StyleSheet, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Screen } from '@/components/ui/Screen';
@@ -24,13 +26,37 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SpotPicker } from '@/components/SpotPicker';
 import { TimeSlotPicker } from '@/components/TimeSlotPicker';
-import { FeeBreakdown } from '@/components/FeeBreakdown';
 import { ServerErrorNote, type ServerErrorLike } from '@/components/offers/ServerErrorNote';
-import { clockTime, exactMeetupTime, relativeDayLabel, zoneAbbreviation } from '@/components/booking/time';
+import { clockTime, exactMeetupTime, relativeDayLabel, SLOT_MS, zoneAbbreviation } from '@/components/booking/time';
 import { trpc, resolveMediaUrl } from '@/lib/trpc';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { colors, radius, space } from '@/constants/theme';
 import { formatPrice } from '@/utils/format';
+
+interface BookedSummary {
+  id: string;
+  title: string;
+  priceCents: number;
+  startsAt: string;
+  placeName: string;
+  placeNote?: string | null;
+  photoUrl?: string;
+}
+
+/** A Google Calendar "add event" link: works on web and opens the app on phones. */
+function calendarUrl(b: BookedSummary): string {
+  const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const start = new Date(b.startsAt);
+  const end = new Date(start.getTime() + SLOT_MS);
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `Dibbs meetup: ${b.title}`,
+    dates: `${stamp(start)}/${stamp(end)}`,
+    location: b.placeName,
+    details: 'Pay the seller in person when you meet. Dibbs never handles money.',
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
 
 export default function BookingScreen() {
   const { listingId, offerId: offerIdParam, offerCents: offerCentsParam } = useLocalSearchParams<{
@@ -43,7 +69,8 @@ export default function BookingScreen() {
   const requireAuth = useRequireAuth();
   const utils = trpc.useUtils();
 
-  const [step, setStep] = useState<'pick' | 'confirm'>('pick');
+  const [step, setStep] = useState<'pick' | 'confirm' | 'done'>('pick');
+  const [booked, setBooked] = useState<BookedSummary | null>(null);
   const [startsAt, setStartsAt] = useState<string | undefined>();
   const [spotId, setSpotId] = useState<string | undefined>();
   const [error, setError] = useState<ServerErrorLike | null>(null);
@@ -80,8 +107,6 @@ export default function BookingScreen() {
   const offerId = heldOffer?.id ?? (offersQuery.isSuccess ? undefined : offerIdParam);
   const isAgreedOffer = !!offerId && priceCents !== listing?.priceCents;
 
-  const quoteQuery = trpc.payment.quote.useQuery({ priceCents }, { enabled: step === 'confirm' && priceCents > 0 });
-
   const spots = chart?.spots ?? [];
   const selectedSpot = spots.find((s) => s.id === spotId);
   const selectedSlot = chart?.slots.find((s) => new Date(s.startsAt).toISOString() === startsAt);
@@ -98,7 +123,16 @@ export default function BookingScreen() {
         utils.listing.byId.invalidate({ id: listingId! }),
         utils.listing.feed.invalidate(),
       ]);
-      router.replace(`/reservation/${res.id}`);
+      setBooked({
+        id: res.id,
+        title: listing?.title ?? 'Your item',
+        priceCents: res.priceCents,
+        startsAt: new Date(res.startsAt).toISOString(),
+        placeName: selectedSpot?.name ?? 'the agreed place',
+        placeNote: selectedSpot?.description,
+        photoUrl: listing?.photos[0]?.url,
+      });
+      setStep('done');
     },
     onError: (err) => {
       setError(err);
@@ -110,6 +144,11 @@ export default function BookingScreen() {
         utils.listing.byId.invalidate({ id: listingId! });
       }
     },
+  });
+
+  const messageSeller = trpc.conversation.open.useMutation({
+    onSuccess: (convo) => router.push(`/conversation/${convo.id}`),
+    onError: (err) => Alert.alert('Could not open conversation', err.message),
   });
 
   const review = useCallback(() => {
@@ -155,6 +194,52 @@ export default function BookingScreen() {
       ) : null,
     [listing, priceCents, isAgreedOffer],
   );
+
+  if (step === 'done' && booked) {
+    const zone = zoneAbbreviation(timeZone);
+    return (
+      <Screen scroll contentContainerStyle={styles.content}>
+        <Stack.Screen options={{ title: 'Booked', headerBackVisible: false, gestureEnabled: false }} />
+        <Text variant="title">You&apos;re booked</Text>
+        <Card style={styles.gap}>
+          <View style={styles.itemRow}>
+            <Image
+              source={{ uri: resolveMediaUrl(booked.photoUrl) }}
+              style={styles.thumb}
+              contentFit="cover"
+              accessibilityLabel={`Photo of ${booked.title}`}
+            />
+            <View style={styles.itemInfo}>
+              <Text variant="heading" numberOfLines={2}>
+                {booked.title}
+              </Text>
+              <PriceText cents={booked.priceCents} />
+            </View>
+          </View>
+          <Divider />
+          <SummaryRow
+            label="When (15 minutes)"
+            value={exactMeetupTime(booked.startsAt, timeZone, SLOT_MS)}
+            sub={zone ? `Campus time (${zone})` : undefined}
+          />
+          <SummaryRow label="Where" value={booked.placeName} sub={booked.placeNote ?? undefined} />
+        </Card>
+        <Text variant="body">Pay the seller in person when you meet. Dibbs never handles money.</Text>
+        <Button
+          title="Message seller"
+          variant="secondary"
+          onPress={() => messageSeller.mutate({ listingId: listingId! })}
+          loading={messageSeller.isPending}
+        />
+        <Button
+          title="Add to calendar"
+          variant="secondary"
+          onPress={() => Linking.openURL(calendarUrl(booked))}
+        />
+        <Button title="Done" size="lg" onPress={() => router.replace(`/reservation/${booked.id}`)} />
+      </Screen>
+    );
+  }
 
   if (listingQuery.isPending || slotsQuery.isPending || offerLoading) {
     return (
@@ -219,9 +304,8 @@ export default function BookingScreen() {
           />
         </Card>
 
-        {quoteQuery.data ? <FeeBreakdown quote={quoteQuery.data} /> : <Skeleton height={80} radius={14} />}
-        <Text variant="caption" color="inkMuted">
-          Simulated — no money moves. You pay the seller in person or as you both agree.
+        <Text variant="body">
+          Pay the seller in person when you meet. Dibbs never handles money. Seller keeps 100%.
         </Text>
 
         <ServerErrorNote error={error} />

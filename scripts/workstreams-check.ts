@@ -835,6 +835,30 @@ async function main() {
     eq(await handleSmsOptOut(db, params.toString().replace('STOP', 'START'), signature), 403, 'tampering refused');
   });
 
+  await check('payments off: a booked, unpaid meetup is NOT cancelled after the old 24h pay deadline', async () => {
+    eq(process.env.PAYMENTS_ENABLED, undefined, 'payments switch is off in this run');
+    const listing = await makeListing(MAYA, { priceCents: 4000 });
+    const jordan = await as(JORDAN);
+    const slot = (await jordan.reservation.slots({ listingId: listing.id })).slots.find((s) => s.available)!;
+    const booked = await jordan.reservation.book({ listingId: listing.id, spotId: SPOT_A, startsAt: slot.startsAt });
+    eq(booked.status, 'accepted', 'booking needs no payment');
+    // Worst case for the old rule: an auction-type row, 25h past its creation, no payment.
+    await db
+      .update(schema.reservations)
+      .set({ createdAt: new Date(Date.now() - 25 * HOUR) })
+      .where(d.eq(schema.reservations.id, booked.id));
+    await db.update(schema.listings).set({ saleType: 'auction' }).where(d.eq(schema.listings.id, listing.id));
+    const byRes = await jordan.payment.byReservation({ reservationId: booked.id });
+    eq(byRes.timedOut, false, 'the meetup is not reported as timed out');
+    await jordan.payment.mine();
+    await applyExpiry(db);
+    const [row] = await db.select().from(schema.reservations).where(d.eq(schema.reservations.id, booked.id));
+    eq(row!.status, 'accepted', 'still booked after the old deadline');
+    eq(row!.cancelReason, null, 'no cancel reason recorded');
+    eq((await jordan.payment.config()).paymentsEnabled, false, 'config reports payments off');
+    await expectCode('PRECONDITION_FAILED', () => jordan.payment.createIntent({ reservationId: booked.id }));
+  });
+
   /* ------------------------------------------------------------ report */
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);

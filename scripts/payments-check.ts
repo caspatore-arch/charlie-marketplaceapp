@@ -24,6 +24,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// The payment code is dormant in the product (PAYMENTS_ENABLED defaults off).
+// This script exercises it, so it switches the code on, with the original 10% fee.
+process.env.PAYMENTS_ENABLED = '1';
+process.env.PLATFORM_FEE_PERCENT ??= '10';
 process.env.PAYMENTS_MODE ??= 'simulated';
 process.env.DEV_LOGIN = '1';
 process.env.PGLITE_DIR ??= 'backend/data/payments-check-pg';

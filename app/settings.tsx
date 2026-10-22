@@ -17,6 +17,7 @@ import { PhoneAccountSection } from '@/components/settings/PhoneAccountSection';
 import { SafetySection } from '@/components/settings/SafetySection';
 import { NotificationsSection } from '@/components/settings/NotificationsSection';
 import { PayoutsSection } from '@/components/settings/PayoutsSection';
+import { usePaymentsEnabled } from '@/hooks/usePaymentsEnabled';
 import { AboutPrototypeSection } from '@/components/settings/AboutPrototypeSection';
 import { LegalSection } from '@/components/settings/LegalSection';
 import { CloseAccountSection } from '@/components/settings/CloseAccountSection';
@@ -28,6 +29,7 @@ import { space } from '@/constants/theme';
 export default function SettingsScreen() {
   const { status, signOut } = useAuth();
   const router = useRouter();
+  const paymentsEnabled = usePaymentsEnabled();
 
   if (status === 'loading') {
     return (
@@ -75,9 +77,11 @@ export default function SettingsScreen() {
           <PhoneAccountSection />
         </SettingsSection>
 
-        <SettingsSection title="Payouts">
-          <PayoutsSection />
-        </SettingsSection>
+        {paymentsEnabled ? (
+          <SettingsSection title="Payouts">
+            <PayoutsSection />
+          </SettingsSection>
+        ) : null}
 
         <SettingsSection title="Notifications">
           <NotificationsSection />

@@ -158,6 +158,9 @@ user.report           P    { targetUserId?, targetListingId?, reason, details? }
 user.deleteAccount    P    { confirmText: 'DELETE' }        → { ok: true }   (see "Account closure" below)
 
 payment.quote         pub  { priceCents }           → { priceCents, platformFeeCents, sellerNetCents, feePercent, simulated: true, label: 'Simulated — no money moves' }
+payment.config        pub  –                        → { paymentsEnabled, mode, simulated, banner, feePercent, ... }
+
+**Payments are dormant (owner decision).** There is no payment in Dibbs: no platform fee, no card fee, no pay step. `reservation.book` needs no payment and ends on the booking confirmation (last step of `/reservation/request`); the buyer pays the seller in person and the seller keeps 100%. The Stripe code stays in the repo behind one switch, `PAYMENTS_ENABLED` (default off; `PLATFORM_FEE_PERCENT` default 0). While it is off: `payment.createIntent` and `payment.onboardSeller` return `PRECONDITION_FAILED`, the 24-hour unpaid timeout never runs (a booked meetup is never cancelled or blocked for being unpaid), `payment.byReservation` reports `timedOut: false`, and the app hides fee breakdowns, Pay buttons and Settings > Payouts (`payment.config.paymentsEnabled` is false). `/payments/:reservationId` redirects to `/reservation/:id`. `npm run test:payments` turns the switch on to keep the dormant logic tested.
 
 moderation.isModerator P   –                        → boolean  (whether ctx.user.id is in MODERATOR_USER_IDS)
 moderation.reports    M    { status?: 'open'|'reviewed' } → ModerationReport[]  (newest first)

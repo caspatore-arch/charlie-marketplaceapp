@@ -1,4 +1,7 @@
 /**
+ * DORMANT: only reachable when the server has PAYMENTS_ENABLED=1; otherwise
+ * `/payments/*` redirects to the meetup page (see PaymentRoute below).
+ *
  * Payment screen for the buyer of a booked meetup.
  *
  * Shows the item, the price, the fee breakdown, the 24-hour deadline, and a
@@ -18,7 +21,7 @@
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
@@ -42,7 +45,21 @@ function formatDeadline(at: Date): string {
   });
 }
 
-export default function PaymentScreen() {
+/**
+ * Payments are dormant (PAYMENTS_ENABLED off): this route only forwards to the
+ * meetup page, so old links and notifications never land on a pay screen.
+ */
+export default function PaymentRoute() {
+  const { reservationId } = useLocalSearchParams<{ reservationId: string }>();
+  const configQuery = trpc.payment.config.useQuery(undefined, { staleTime: 5 * 60_000 });
+  if (configQuery.isPending) return <Screen><Skeleton height={160} /></Screen>;
+  if (configQuery.data?.paymentsEnabled !== true) {
+    return <Redirect href={reservationId ? `/reservation/${reservationId}` : '/'} />;
+  }
+  return <PaymentScreen />;
+}
+
+function PaymentScreen() {
   const { reservationId } = useLocalSearchParams<{ reservationId: string }>();
   const router = useRouter();
   const { status: authStatus } = useAuth();
@@ -166,7 +183,7 @@ export default function PaymentScreen() {
 
         <Text variant="body" color="inkMuted" style={styles.explainer}>
           You pay now; the seller is paid right away. Arrange the handoff in the app. The payment
-          goes straight to the seller's own payment account — this app does not hold your money at
+          goes straight to the seller&apos;s own payment account — this app does not hold your money at
           any point.
         </Text>
         <Text variant="body" color="inkMuted" style={styles.explainer}>

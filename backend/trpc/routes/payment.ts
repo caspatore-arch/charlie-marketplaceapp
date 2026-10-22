@@ -63,6 +63,16 @@ function toGatewayTrpcError(err: unknown): TRPCError {
   });
 }
 
+/** Pay-step mutations are dormant unless PAYMENTS_ENABLED=1. */
+function requirePaymentsEnabled() {
+  if (!env.paymentsEnabled) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'Payment is not part of Dibbs right now. Pay the seller in person when you meet.',
+    });
+  }
+}
+
 async function loadParticipantReservation(db: Db, reservationId: string, userId: string) {
   const [row] = await db
     .select()
@@ -167,6 +177,8 @@ export const paymentRouter = router({
   /** Server-resolved mode. Every payment surface derives its label from this. */
   config: publicProcedure.query(() => ({
     ...modeInfo(),
+    /** False means no pay step anywhere: the client hides fees, Pay and Payouts. */
+    paymentsEnabled: env.paymentsEnabled,
     feePercent: env.platformFeePercent,
     /** 0 = Stripe's minimum hold for the seller's country. See docs/AUCTIONS.md §3. */
     payoutDelayDays: env.payoutDelayDays,
@@ -181,6 +193,7 @@ export const paymentRouter = router({
    * again rather than caching the URL.
    */
   onboardSeller: protectedProcedure.mutation(async ({ ctx }) => {
+    requirePaymentsEnabled();
     const account = await ensureStripeAccount(ctx.db, ctx.user.id);
 
     let link;
@@ -273,6 +286,7 @@ export const paymentRouter = router({
   createIntent: protectedProcedure
     .input(z.object({ reservationId: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
+      requirePaymentsEnabled();
       await applyPaymentTimeouts(ctx.db, { reservationId: input.reservationId });
 
       const reservation = await loadParticipantReservation(
