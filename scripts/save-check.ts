@@ -82,6 +82,9 @@ async function main() {
   check('flip (no saved) unsaves', (await api.listing.toggleSave({ id })).saved === false);
   check('set saved:false on unsaved stays unsaved', (await api.listing.toggleSave({ id, saved: false })).saved === false);
   check('flip (no saved) saves', (await api.listing.toggleSave({ id })).saved === true);
+  await api.listing.toggleSave({ id, saved: true });
+  const [row] = await api.listing.saved();
+  check('saved rows carry status and expiresAt', row?.status === 'active' && row !== undefined && 'expiresAt' in row);
   check('set saved:false unsaves', (await api.listing.toggleSave({ id, saved: false })).saved === false);
   check('saved list is empty', (await savedIds()).length === 0);
 

@@ -1,22 +1,21 @@
 /**
  * Profile tab. Signed-out: sign-in CTA. Signed-in: your picture (upload),
  * bio, follower counts, trust block, Listings / Posts tabs, your private chats
- * link, saved listings, a link to Settings (account details, blocked users,
+ * link, a "Saved (N)" row that opens the Saved screen, a link to Settings (account details, blocked users,
  * sign out, close account), and (dev builds only) a "Switch test user"
  * panel for the three seeded identities in CONTRACT.md.
  */
-import React, { useCallback, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Divider } from '@/components/ui/Divider';
+import { SavedLinkRow } from '@/components/profile/SavedLinkRow';
 import { InboxLinkRow } from '@/components/inbox/InboxLinkRow';
-import { ListingCard } from '@/components/ListingCard';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
 import { ProfileContent } from '@/components/profile/ProfileContent';
 import { FollowListPanel, type FollowDirection } from '@/components/profile/FollowListPanel';
@@ -25,7 +24,6 @@ import { TrustBlock } from '@/components/TrustSignals';
 import { useAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { space } from '@/constants/theme';
-import type { ListingCard as ListingCardType } from '@/types';
 
 const DEV_TEST_USERS = [
   { id: '00000000-0000-4000-8000-000000000001', label: 'Maya Test' },
@@ -86,7 +84,6 @@ function SignedInProfile({
   const avatar = useAvatarUpload();
   const [openList, setOpenList] = useState<FollowDirection | null>(null);
 
-  const goToListing = useCallback((id: string) => router.push(`/listing/${id}`), [router]);
   const me = selfQuery.data;
   const firstName = displayName.split(' ')[0] || displayName;
 
@@ -122,6 +119,8 @@ function SignedInProfile({
 
       {trustQuery.data ? <TrustBlock summary={trustQuery.data} style={styles.trustBlock} /> : null}
 
+      <SavedLinkRow count={savedQuery.data?.length} />
+
       <ProfileContent userId={userId} isSelf firstName={firstName} />
 
       <View style={styles.inboxLink}>
@@ -130,18 +129,6 @@ function SignedInProfile({
           Your chats and meetups are private. Only you and the other person can see them.
         </Text>
       </View>
-
-      <Section title="Saved">
-        {savedQuery.isPending ? (
-          <GridSkeleton />
-        ) : savedQuery.isError ? (
-          <ErrorState message={savedQuery.error.message} onRetry={() => savedQuery.refetch()} />
-        ) : (savedQuery.data ?? []).length === 0 ? (
-          <EmptyState title="Nothing saved yet" body="Tap the save icon on a listing to keep it here." />
-        ) : (
-          <ListingGrid listings={savedQuery.data ?? []} onPress={goToListing} />
-        )}
-      </Section>
 
       {isModeratorQuery.data ? (
         <Section title="Moderation">
@@ -177,43 +164,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </Text>
       {children}
       <Divider style={styles.sectionDivider} />
-    </View>
-  );
-}
-
-function ListingGrid({
-  listings,
-  onPress,
-  showSeller = true,
-}: {
-  listings: ListingCardType[];
-  onPress: (id: string) => void;
-  /** False for "My listings" — every row would read the viewer's own name.
-   *  Saved items keep it: there the seller is the thing you want to know. */
-  showSeller?: boolean;
-}) {
-  return (
-    <FlatList
-      data={listings}
-      keyExtractor={(item) => item.id}
-      numColumns={2}
-      scrollEnabled={false}
-      columnWrapperStyle={styles.gridRow}
-      contentContainerStyle={styles.gridContent}
-      renderItem={({ item }) => (
-        <View style={styles.gridCell}>
-          <ListingCard listing={item} onPress={() => onPress(item.id)} showSeller={showSeller} />
-        </View>
-      )}
-    />
-  );
-}
-
-function GridSkeleton() {
-  return (
-    <View style={styles.gridRow}>
-      <Skeleton height={180} style={styles.gridCell} />
-      <Skeleton height={180} style={styles.gridCell} />
     </View>
   );
 }

@@ -7,7 +7,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { LayoutGrid, Layers, Search } from 'lucide-react-native';
+import { Heart, LayoutGrid, Layers, Search } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
 import { Logo } from '@/components/ui/Logo';
@@ -250,6 +250,15 @@ export default function BrowseScreen() {
         <View style={styles.searchBarFlex}>
           <SearchBar value={searchInput} onChangeText={setSearchInput} />
         </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Saved items"
+          onPress={() => router.push('/saved')}
+          hitSlop={8}
+          style={({ pressed }) => [styles.viewToggle, pressed && styles.viewTogglePressed]}
+        >
+          <Heart size={20} color={colors.ink} />
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={viewMode === 'grid' ? 'Switch to swipe view' : 'Switch to grid view'}
