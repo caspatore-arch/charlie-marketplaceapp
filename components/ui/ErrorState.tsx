@@ -10,15 +10,17 @@ import { Text } from './Text';
 import { Button } from './Button';
 
 export interface ErrorStateProps {
+  /** Heading; defaults to "Couldn't load this". */
+  title?: string;
   message?: string;
   onRetry?: () => void;
 }
 
-export function ErrorState({ message = 'Something went wrong.', onRetry }: ErrorStateProps) {
+export function ErrorState({ title = "Couldn't load this", message = 'Something went wrong.', onRetry }: ErrorStateProps) {
   return (
-    <View style={styles.wrap} accessibilityRole="alert">
-      <Text variant="heading" style={styles.title}>
-        Couldn&apos;t load this
+    <View style={styles.wrap}>
+      <Text variant="heading" accessibilityRole="header" style={styles.title}>
+        {title}
       </Text>
       <Text variant="body" color="inkMuted" style={styles.body}>
         {message}

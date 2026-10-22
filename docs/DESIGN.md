@@ -6,25 +6,35 @@ Feel: a contemporary campus resale brand — clean, fashion-conscious, warm, soc
 
 ```ts
 colors: {
-  bg: '#FAF8F5',          // warm off-white page ground
+  bg: '#FCF8F7',          // warm near-white ground, nudged toward the brand
   surface: '#FFFFFF',
-  surfaceMuted: '#F1EDE7',
+  surfaceMuted: '#F5F0EE',
+  tint: '#F0EAE6',        // neutral tint for decorative cards (never status colors)
   ink: '#161513',         // primary text
   inkMuted: '#6F6A62',
-  inkFaint: '#A8A29A',
-  line: '#E6E1DA',
-  accent: '#C8442B',      // brick — brand + primary CTA (readable on white ≥ 4.5:1 with white text)
-  accentSoft: '#FBE9E4',
-  success: '#2E7D4F', successSoft: '#E4F3EA',
-  warning: '#9A6B00', warningSoft: '#FBF1D6',
-  danger:  '#B3261E',
-  demo:    '#5B4FCF', demoSoft: '#ECEAFB',   // "Demo" badge
+  inkFaint: '#6E6860',    // still AA on every surface; never lighten
+  line: '#E8E1DE',
+  brand: '#EE3B30',       // the literal logo red: splash, icon, large surfaces only
+  accent: '#DE2F26',      // interactive red: buttons, active tab (white text AA 4.63:1)
+  accentPressed: '#C4281F',
+  accentSoft: '#FDEAE8',
+  accentInk: '#A82018',   // text/links on accentSoft or bg (plain accent fails AA there)
+  success: '#2E7D4F', successSoft: '#E4F3EA',   // status only
+  warning: '#9A6B00', warningSoft: '#FBF1D6',   // status only
+  danger:  '#9B1C1C',
+  demo:    '#5B4FCF', demoSoft: '#ECEAFB',      // "Demo" badge, status only
 }
-radius: { sm: 8, md: 14, lg: 20, pill: 999 }
-space: 4-pt scale: 4, 8, 12, 16, 20, 24, 32, 40
-type: system font (SF). Sizes: display 34/700 (tight letterspacing -0.5), title 22/700, heading 17/600, body 16/400, label 14/500, caption 12/500. Prices: 17/700 tabular-nums.
+radius: { sm: 8, md: 14, lg: 20, xl: 22, pill: 999 }
+space: 4-pt scale: xs 4, sm 8, md 12, lg 16, xl 20, xxl 24, xxxl 32, huge 40, section 56
+type: Montserrat (400/500/600/700 loaded as separate families; use <Text>, never raw fontSize).
+  hero 38/700, display 34/700, displaySm 26/700, title 22/700, heading 17/600, lead 20/400,
+  body 16/400, bodySm 15/400, label 14/500, small 13/500, caption 12/500. Prices 17/700 tabular-nums.
 shadow: one soft card shadow only (ios: opacity .06, radius 12, offset y4)
 ```
+
+Shared components (`components/ui`): Button (variants primary, secondary, ghost, danger, link), TextLink,
+EmptyState, ErrorState, RefetchBanner, ListingDetailSkeleton, ProfileSkeleton, HeaderCloseButton.
+Headers: tabs and welcome show the logo; pushed screens show their title and back button; modals use a close icon.
 
 Dark mode: not required for MVP; keep light palette, respect `userInterfaceStyle: light`.
 

@@ -18,7 +18,7 @@ export interface EmptyStateProps {
 
 export function EmptyState({ icon, title, body, actionLabel, onAction }: EmptyStateProps) {
   return (
-    <View style={styles.wrap} accessibilityRole="text">
+    <View style={styles.wrap}>
       {icon ? <View style={styles.icon}>{icon}</View> : null}
       <Text variant="heading" style={styles.title}>
         {title}

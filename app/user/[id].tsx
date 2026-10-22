@@ -9,6 +9,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ProfileSkeleton } from '@/components/ui/ProfileSkeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { TrustBlock } from '@/components/TrustSignals';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
@@ -61,10 +62,7 @@ export default function PublicProfileScreen() {
   if (profileQuery.isPending) {
     return (
       <Screen>
-        <View style={styles.loading}>
-          <Skeleton width={96} height={96} radius={48} />
-          <Skeleton width={140} height={20} />
-        </View>
+        <ProfileSkeleton />
       </Screen>
     );
   }
@@ -125,7 +123,6 @@ export default function PublicProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  loading: { alignItems: 'center', gap: space.xs, paddingVertical: space.xl },
   trustBlock: { marginBottom: space.xl },
   actions: { flexDirection: 'row', gap: space.md, marginTop: space.xxxl, marginBottom: space.xl },
   actionBtn: { flex: 1 },

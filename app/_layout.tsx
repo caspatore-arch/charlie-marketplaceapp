@@ -18,9 +18,9 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { trpc, trpcClient } from '@/lib/trpc';
 import { AuthProvider } from '@/components/AuthProvider';
-import { colors } from '@/constants/theme';
+import { colors, fontFamilyFor, type } from '@/constants/theme';
 import { ConnectionBanner } from '@/components/ui/ConnectionBanner';
-import { Logo } from '@/components/ui/Logo';
+import { HeaderCloseButton } from '@/components/ui/HeaderCloseButton';
 import { NotificationPermissionGate } from '@/components/notifications/NotificationPermissionGate';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -66,17 +66,13 @@ export default function RootLayout() {
                   headerTintColor: colors.ink,
                   headerShadowVisible: false,
                   contentStyle: { backgroundColor: colors.bg },
-                  // The logo goes in the TITLE slot, left-aligned — not in
-                  // headerLeft. headerLeft is where React Navigation puts the
-                  // back button, so putting the mark there would have silently
-                  // removed back navigation from every pushed screen.
-                  //
-                  // Each screen keeps its `title` string below: on web that is
-                  // what expo-router maps to document.title, so the browser tab
-                  // still reads "Payment" or "Settings" even though the header
-                  // itself now shows the logo.
+                  // Pushed screens show their own `title` and the native back
+                  // button. The wordmark lives only on the tabs and the welcome
+                  // screen (both headerShown: false and draw their own logo).
+                  // Modal screens use headerLeft={HeaderCloseButton} instead of
+                  // the system "Cancel" text.
                   headerTitleAlign: 'left',
-                  headerTitle: () => <Logo variant="wordmark" width={64} />,
+                  headerTitleStyle: { fontFamily: fontFamilyFor('600'), fontSize: type.heading.fontSize },
                 }}
               >
                 {/* `title` is what the browser tab says on the web build —
@@ -84,15 +80,17 @@ export default function RootLayout() {
                     hides its header but still needs the title, or the web
                     MVP opens in a tab labelled "index". */}
                 <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Dibbs' }} />
-                <Stack.Screen name="listing/[id]" options={{ title: '' }} />
+                <Stack.Screen name="listing/[id]" options={{ title: 'Listing' }} />
                 <Stack.Screen
                   name="listing/new"
-                  options={{ presentation: 'modal', title: 'New listing' }}
+                  options={{ presentation: 'modal', title: 'New listing', headerLeft: () => <HeaderCloseButton /> }}
                 />
-                <Stack.Screen name="listing/[id]/edit" options={{ presentation: 'modal', title: 'Edit listing' }} />
+                <Stack.Screen
+                  name="listing/[id]/edit"
+                  options={{ presentation: 'modal', title: 'Edit listing', headerLeft: () => <HeaderCloseButton /> }} />
                 <Stack.Screen
                   name="reservation/request"
-                  options={{ presentation: 'modal', title: 'Request meetup' }}
+                  options={{ presentation: 'modal', title: 'Request meetup', headerLeft: () => <HeaderCloseButton /> }}
                 />
                 <Stack.Screen name="reservation/[id]" options={{ title: 'Meetup' }} />
                 <Stack.Screen name="inbox" options={{ title: 'Meetups & messages' }} />

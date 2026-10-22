@@ -1,5 +1,5 @@
 /**
- * Shared chrome for the auth routes: logo top-left, heading, and the flow
+ * Shared chrome for the auth routes: heading, and the flow
  * itself in a card.
  *
  * It exists so /auth/sign-in and /auth/email cannot drift apart. Both used to
@@ -15,7 +15,6 @@ import React from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
-import { Logo } from '@/components/ui/Logo';
 import { breakpoints, colors, radius, shadow, space } from '@/constants/theme';
 
 /** A sign-in form reads as a column; past this it stops looking like one. */
@@ -37,10 +36,7 @@ export function AuthScreenShell({ title, children }: AuthScreenShellProps) {
         style={styles.flex}
       >
         <View style={[styles.column, { maxWidth: FORM_MAX_WIDTH }]}>
-          {/* Top-left, at the size it reads as a mark rather than a banner. */}
-          <Logo variant="wordmark" width={84} />
-
-          <Text variant={roomToBreathe ? 'display' : 'title'} style={styles.title}>
+          <Text variant={roomToBreathe ? 'display' : 'title'} accessibilityRole="header">
             {title}
           </Text>
 
@@ -56,7 +52,6 @@ const styles = StyleSheet.create({
   // alignSelf rather than margin:auto so the column stays left-aligned with
   // the logo on a phone and simply stops growing on a wide screen.
   column: { width: '100%', gap: space.lg },
-  title: { marginTop: space.xs },
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.line,

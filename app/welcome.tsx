@@ -88,7 +88,7 @@ export default function WelcomeScreen() {
         })}
       </View>
 
-      <Text variant="title" accessibilityRole="header" style={styles.cardTitle}>
+      <Text variant="displaySm" accessibilityRole="header">
         {mode === 'signup' ? 'Make your Dibbs account' : 'Welcome back'}
       </Text>
 
@@ -105,7 +105,7 @@ export default function WelcomeScreen() {
         <AuthMethods key={mode} mode={mode} hideFirstHeading cardIntro onFinished={onFinished} />
       )}
 
-      <Text variant="caption" color="inkMuted" style={styles.switchLine}>
+      <Text variant="small" color="inkMuted" style={styles.switchLine}>
         {mode === 'signup' ? 'Already have an account? ' : 'New to Dibbs? '}
         <Text
           variant="caption"
@@ -146,7 +146,7 @@ export default function WelcomeScreen() {
             {/* Headline and lede stay large: white on brand red is 3.96:1,
                 which only passes for large text. Don't shrink them. */}
             <Text
-              variant="display"
+              variant="hero"
               color="white"
               weight="700"
               accessibilityRole="header"
@@ -154,12 +154,12 @@ export default function WelcomeScreen() {
             >
               Buy and sell on campus, one day at a time.
             </Text>
-            <Text variant="body" color="white" weight="600" style={styles.lede}>
+            <Text variant="lead" color="white" weight="600" style={styles.lede}>
               A marketplace just for UArizona students — clothes, shoes, dorm stuff, books and tech, handed off in
               person on campus.
             </Text>
             <View style={styles.pill}>
-              <Text variant="caption" color="white" weight="600" style={styles.pillText}>
+              <Text variant="small" color="white" weight="600" style={styles.pillText}>
                 University of Arizona students
               </Text>
             </View>
@@ -176,11 +176,11 @@ export default function WelcomeScreen() {
             <Text variant="title" accessibilityRole="header">Why use Dibbs?</Text>
             <Text variant="body">Less back-and-forth. More actual meetups.</Text>
             {[
-              ['Stay close to campus', 'Browse your campus community and choose a campus meetup spot. Less travel makes a handoff easier to fit between classes.', colors.successSoft],
-              ['Know when you can meet', 'Sellers share availability up front. Buyers book an exact 15-minute slot, so both people have a clear plan.', colors.warningSoft],
-              ['Find something fresh', 'Listings expire after 24 hours. Share your link with friends while it’s live, or make an offer on a find you love.', colors.demoSoft],
-            ].map(([title, body, backgroundColor]) => (
-              <View key={title} style={[styles.benefit, { backgroundColor }]}>
+              ['Stay close to campus', 'Browse your campus community and choose a campus meetup spot. Less travel makes a handoff easier to fit between classes.'],
+              ['Know when you can meet', 'Sellers share availability up front. Buyers book an exact 15-minute slot, so both people have a clear plan.'],
+              ['Find something fresh', 'Listings expire after 24 hours. Share your link with friends while it’s live, or make an offer on a find you love.'],
+            ].map(([title, body]) => (
+              <View key={title} style={styles.benefit}>
                 <Text variant="heading" accessibilityRole="header">{title}</Text>
                 <Text variant="body">{body}</Text>
               </View>
@@ -203,7 +203,7 @@ export default function WelcomeScreen() {
                     <Text variant="heading" weight="700">
                       {s.title}
                     </Text>
-                    <Text variant="body" color="inkMuted" style={styles.stepBody}>
+                    <Text variant="bodySm" color="inkMuted" style={styles.stepBody}>
                       {s.body}
                     </Text>
                   </View>
@@ -249,16 +249,16 @@ const styles = StyleSheet.create({
   navLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.md, backgroundColor: colors.white, borderRadius: radius.pill },
   about: { paddingVertical: space.xxxl, gap: space.md },
   benefits: { gap: space.md },
-  benefit: { padding: space.xl, borderRadius: radius.lg, gap: space.sm },
+  benefit: { padding: space.xl, borderRadius: radius.lg, gap: space.sm, backgroundColor: colors.tint },
   page: { flex: 1, backgroundColor: colors.bg },
   scroll: { flexGrow: 1, paddingBottom: 72 },
   inner: { width: '100%', maxWidth: 1060, alignSelf: 'center', paddingHorizontal: space.lg },
 
-  hero: { backgroundColor: colors.brand, paddingTop: 44, paddingBottom: 52 },
+  hero: { backgroundColor: colors.brand, paddingTop: space.huge + space.xs, paddingBottom: 52 },
   tagline: { marginTop: 10, letterSpacing: 2.2 },
-  h1: { marginTop: 30, maxWidth: 560, fontSize: 38, lineHeight: 42, letterSpacing: -0.8 },
+  h1: { marginTop: 30, maxWidth: 560 },
   h1Wide: { fontSize: 60, lineHeight: 63, letterSpacing: -1.3 },
-  lede: { marginTop: 18, maxWidth: 520, fontSize: 20, lineHeight: 29 },
+  lede: { marginTop: 18, maxWidth: 520 },
   pill: {
     alignSelf: 'flex-start',
     marginTop: 26,
@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.42)',
   },
-  pillText: { fontSize: 13, letterSpacing: 0.3 },
+  pillText: { letterSpacing: 0.3 },
 
   // The card laps onto the red band, as on the old page.
   panel: { gap: space.xxxl, marginTop: 28 },
@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepText: { flex: 1 },
-  stepBody: { marginTop: 4, fontSize: 15, lineHeight: 23 },
+  stepBody: { marginTop: 4 },
 
   cardCol: {
     width: 420,
@@ -298,8 +298,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
-    borderRadius: 22,
-    padding: 28,
+    borderRadius: radius.xl,
+    padding: space.xxxl - space.xs,
     gap: space.md,
     ...shadow,
   },
@@ -313,12 +313,11 @@ const styles = StyleSheet.create({
   },
   tab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 11 },
   tabActive: { backgroundColor: colors.surface, ...shadow },
-  cardTitle: { fontSize: 23 },
   loading: { gap: space.md },
-  switchLine: { textAlign: 'center', marginTop: space.xs, fontSize: 13 },
+  switchLine: { textAlign: 'center', marginTop: space.xs },
 
   plain: {
-    marginTop: 56,
+    marginTop: space.section,
     padding: space.xxl,
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,

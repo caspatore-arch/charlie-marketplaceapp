@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Divider } from '@/components/ui/Divider';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ListingDetailSkeleton } from '@/components/ui/ListingDetailSkeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PhotoGallery } from '@/components/PhotoGallery';
@@ -271,10 +272,7 @@ export default function ListingDetailScreen() {
   if (listingQuery.isPending) {
     return (
       <Screen scroll>
-        <Skeleton height={320} radius={14} />
-        <Skeleton width="50%" height={24} style={styles.loadingLine} />
-        <Skeleton width="80%" height={16} style={styles.loadingLine} />
-        <Skeleton width="60%" height={16} style={styles.loadingLine} />
+        <ListingDetailSkeleton />
       </Screen>
     );
   }
@@ -675,7 +673,6 @@ export default function ListingDetailScreen() {
 const styles = StyleSheet.create({
   screenContent: { flex: 1 },
   flex: { flex: 1 },
-  loadingLine: { marginTop: space.lg, marginHorizontal: space.lg },
   content: { paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.xxl },
   priceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   iconRow: { flexDirection: 'row', gap: space.sm },
