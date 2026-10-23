@@ -215,3 +215,30 @@ Decisions and open items for the owner:
 - Native (iPhone/Android) was not run: no Xcode on this machine. The iPhone story-image export (react-native-svg `toDataURL`, `expo-file-system`, iOS share sheet) is written and typechecks but is untested on a device; the Story section is hidden on Android because React Native's `Share` ignores `url` there (the video email still shows).
 - Lint: `npx expo lint` still reports the pre-existing errors (e.g. `Confetti.tsx`, `Skeleton.tsx`); none are in the files added or changed for this work.
 
+## October 23 daily build: confirmEmailLink test coverage
+
+Scoped to a code-level gap with no owner/DNS/device dependency: `confirmEmailLink`
+(`backend/trpc/routes/auth.ts`) has three account-merge safety branches, but
+`scripts/workstreams-check.ts` only exercised the "caller is empty, folds into
+the existing email account" branch. Added the two missing cases on branch
+`test/confirm-email-link-coverage`, built in its own git worktree (not the
+shared checkout): both-accounts-have-history must throw `CONFLICT` with
+neither account mutated, and caller-has-history/owner-empty must retire the
+owner and move the email onto the caller without disturbing the caller's
+existing listing. No production code changed; no bug found in
+`confirmEmailLink` itself.
+
+- `npm run test:workstreams`: 42/42 → 44/44.
+- `npm run test:e2e`: 17/17. `npm run test:geo`: 6/6. `npm run test:payments`: 39/39.
+- `npm run typecheck` fails with 2 pre-existing errors unrelated to this change
+  (`backend/email/bookings.ts:58`, `backend/sms/outbox.ts:331`, both
+  `Property 'unref' does not exist on type 'number'`). Reproduced on a clean
+  `origin/main` checkout with a fresh `npm install` and no other changes, so
+  this predates this PR — likely `setInterval`'s return type resolving to the
+  DOM lib's `number` instead of Node's `NodeJS.Timeout` after a fresh install.
+  Not fixed here (out of scope, no dependency bumps); needs a look at
+  `tsconfig.json`/`expo/tsconfig.base` lib resolution or a committed
+  `@types/node` pin.
+- Untested here (unchanged from before): native/device flows, anything
+  requiring Xcode or a physical phone.
+

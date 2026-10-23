@@ -601,6 +601,73 @@ async function main() {
     assert(listingsKept.length > 0, "Jordan's listings untouched");
   });
 
+  const emailLinkCode = async (email: string) => {
+    const [codeRow] = await db
+      .select()
+      .from(schema.emailCodes)
+      .where(d.eq(schema.emailCodes.email, email))
+      .orderBy(d.desc(schema.emailCodes.expiresAt))
+      .limit(1);
+    return codeRow!.code;
+  };
+
+  await check('linking: verifying a campus email whose account also has history is refused', async () => {
+    // Taylor (email) and a phone account both have posts; neither account changes.
+    const email = 'taylor@demo.campus.test';
+    const [owner] = await db
+      .insert(schema.users)
+      .values({ email, displayName: 'Taylor Email', campusId: CAMPUS, campusEmailVerifiedAt: new Date() })
+      .returning();
+    await (await as(owner!.id)).community.create({ kind: 'selling', body: 'Selling a desk lamp' });
+    const phone = '+15205550111';
+    await anon.auth.requestPhoneCode({ phone });
+    const done = await anon.auth.verifyPhoneCode({ phone, code: lastCode(phone), displayName: 'T on phone', campusId: CAMPUS });
+    assert(done.status === 'signed_in', 'signed in');
+    await db.update(schema.users).set({ campusEmailVerifiedAt: new Date() }).where(d.eq(schema.users.id, done.user.id));
+    await (await as(done.user.id)).community.create({ kind: 'buying', body: 'Looking for a desk lamp' });
+    const before = await userRow(done.user.id);
+    const tmp = await as(done.user.id);
+    await tmp.auth.requestEmailLinkCode({ email });
+    await expectCode('CONFLICT', async () => tmp.auth.confirmEmailLink({ email, code: await emailLinkCode(email) }));
+    const ownerAfter = await userRow(owner!.id);
+    const meAfter = await userRow(done.user.id);
+    eq(ownerAfter.deletedAt, null, 'email account not retired');
+    eq(meAfter.deletedAt, null, 'phone account not retired');
+    eq(ownerAfter.email, email, 'email stays with its owner');
+    eq(meAfter.email, before.email, 'caller email unchanged');
+    eq(meAfter.phone, phone, 'caller phone unchanged');
+  });
+
+  await check('linking: account with history verifying an empty campus email account retires it', async () => {
+    // Quinn's email account is empty; a phone account with a listing claims it.
+    const email = 'quinn@demo.campus.test';
+    const [owner] = await db
+      .insert(schema.users)
+      .values({ email, displayName: 'Quinn Email', campusId: CAMPUS, campusEmailVerifiedAt: new Date() })
+      .returning();
+    const phone = '+15205550112';
+    await anon.auth.requestPhoneCode({ phone });
+    const done = await anon.auth.verifyPhoneCode({ phone, code: lastCode(phone), displayName: 'Q on phone', campusId: CAMPUS });
+    assert(done.status === 'signed_in', 'signed in');
+    await db.update(schema.users).set({ campusEmailVerifiedAt: new Date() }).where(d.eq(schema.users.id, done.user.id));
+    const listing = await makeListing(done.user.id);
+    const tmp = await as(done.user.id);
+    await tmp.auth.requestEmailLinkCode({ email });
+    const out = await tmp.auth.confirmEmailLink({ email, code: await emailLinkCode(email) });
+    eq(out.switchedAccount, false, 'caller keeps their account');
+    eq(out.token, null, 'no new session');
+    eq(out.user.id, done.user.id, 'same user id');
+    eq(out.user.email, email, 'email moved onto the caller');
+    const meAfter = await userRow(done.user.id);
+    eq(meAfter.email, email, 'email stored on the caller');
+    eq(meAfter.deletedAt, null, 'caller not retired');
+    const retired = await userRow(owner!.id);
+    assert(retired.deletedAt != null, 'empty email account retired');
+    assert(retired.email !== email, 'retired account released the email');
+    const [kept] = await db.select().from(schema.listings).where(d.eq(schema.listings.id, listing.id));
+    eq(kept?.sellerId, done.user.id, "caller's listing untouched");
+  });
+
   await check('linking: attaching a phone that belongs to an account with history is refused', async () => {
     // Riley (phone account) now has activity; Sam (email) tries to take Riley's number.
     await db.update(schema.users).set({ campusEmailVerifiedAt: new Date() }).where(d.eq(schema.users.id, phoneUserId));
