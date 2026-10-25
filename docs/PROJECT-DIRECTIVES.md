@@ -134,7 +134,9 @@ Owner's explicit operating rules persist:
   seed or destructive test scripts against production without reviewing scope.
 - Real email/SMS/payment tests require explicit live configuration. Keep ordinary
   automated tests simulated. Preserve dev/demo labels and production dev-login gates.
-- Review PR #1 migrations and existing hosted migration prechecks before rollout.
+- Existing hosted migration prechecks for 0010-0016 are reviewed and documented in
+  `docs/DEPLOY.md` §6 (October 25 update below); none need a manual precheck like
+  0009's. PR #1's own migration is still unreviewed against current main.
 - Maps remain backlog with an accessible list fallback. Profile category labels
   remain exploratory; profiles/follows themselves now exist in local commits.
 - Saved-search alerts, collections, richer discovery, product previews and campus
@@ -210,8 +212,41 @@ Verified locally on a throwaway sandbox database (never the shared dev DB or pro
 Decisions and open items for the owner:
 - Community now opens on the Sellers tab (listing posts are `selling` posts); it was Buyers. One-line revert in `app/(tabs)/community.tsx`.
 - No dedicated video inbox exists. The "Email your video" section reuses `hello@trydibbs.com` (the Cloudflare-routed founder inbox recorded above); override with `EXPO_PUBLIC_VIDEO_EMAIL`. Owner to confirm or name another inbox.
-- Migration `0016_listing_engagement` is additive (no backfill): listings created before it have no Community post; new and relisted ones do. Review it with the existing hosted-migration prechecks before rollout.
+- Migration `0016_listing_engagement` is additive (no backfill): listings created before it have no Community post; new and relisted ones do. Reviewed against the existing hosted-migration prechecks — see October 25 update below; no manual precheck needed.
 - Not counted as shares: the listing page's own share button and the intent chips (WhatsApp, X, ...). On Android the OS cannot report a cancelled share sheet, so a cancelled sheet may count there.
 - Native (iPhone/Android) was not run: no Xcode on this machine. The iPhone story-image export (react-native-svg `toDataURL`, `expo-file-system`, iOS share sheet) is written and typechecks but is untested on a device; the Story section is hidden on Android because React Native's `Share` ignores `url` there (the video email still shows).
 - Lint: `npx expo lint` still reports the pre-existing errors (e.g. `Confetti.tsx`, `Skeleton.tsx`); none are in the files added or changed for this work.
+
+## October 25 migration precheck review (docs only, no app code changed)
+
+Closed the open "review hosted migration prechecks" item for migrations 0010
+through 0016 (priority 4 in the work queue above). Only `docs/DEPLOY.md` and
+this file changed; no migration, schema or route code was touched, and
+nothing ran against a real/hosted database.
+
+- Read all seven migration files (0010-0016). Each adds only a new table, a
+  new nullable column, or a non-unique index — the single new UNIQUE index in
+  that range is `community_posts_listing_uniq` on `listing_id`, a column
+  added in the same migration (0016) that it indexes. Every row that existed
+  before 0016 therefore gets `listing_id = NULL`, and Postgres treats NULLs as
+  distinct under a UNIQUE constraint — the same rule the `users.email`/
+  `users.phone` columns already depend on (`backend/db/schema.ts`).
+- Verified this empirically rather than by reading alone: applied migrations
+  0000-0015 to a throwaway PGlite database, inserted five `community_posts`
+  rows the way they'd exist pre-0016 (no `listing_id` column yet — real
+  "dirty hosted data"), then applied 0016 for real. It succeeded with no
+  conflict, and all five pre-existing rows landed as `listing_id = NULL`.
+  Script was a one-off, not committed.
+- Conclusion recorded in `docs/DEPLOY.md` §6: migrations 0010-0016 need no
+  manual precheck before a hosted rollout, unlike 0009 (which does, and is
+  unchanged by this review).
+- Checks run (unchanged by a docs-only edit, included for evidence):
+  `npm run typecheck`; `npm run test:workstreams`; `npm run test:e2e`;
+  `npm run test:engagement`; `npm run test:geo`; `npx tsx scripts/payments-check.ts`.
+  See the PR for actual output.
+- Not done here, and still open: PR #1's own migration/booking-on-accept
+  logic against current main (same priority-4 line item, separate from the
+  0010-0016 review above) — that needs a real code review, not a docs pass.
+  Also unchanged: everything owner-gated (DNS, Resend key, live payments,
+  production migrations) — none of that was touched or needed for this.
 
