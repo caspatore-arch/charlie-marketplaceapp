@@ -85,7 +85,7 @@ Namespaced routers. `P` = protected, `pub` = public. Inputs are zod; outputs are
 
 ```
 auth.requestPhoneCode / verifyPhoneCode / requestPhoneLinkCode / confirmPhoneLink / requestEmailLinkCode / confirmEmailLink — see "Phone sign-in & account linking"
-auth.requestCode      pub  { email }                → { ok: true, simulated, resendAfterSeconds: 30 }   (email domain must be in ALLOWED_EMAIL_DOMAINS or a campus's emailDomains. Delivery is real when email is configured (`EMAIL_MODE=live` + `RESEND_API_KEY` + `EMAIL_FROM`), otherwise `simulated: true` and the code is in the server log. See "Sign-in email" below.)
+auth.requestCode      pub  { email }                → { ok: true, simulated, resendAfterSeconds: 30 }   (any email address; one on ALLOWED_EMAIL_DOMAINS or a campus's emailDomains also counts as campus-verified. Delivery is real when email is configured (`EMAIL_MODE=live` + `RESEND_API_KEY` + `EMAIL_FROM`), otherwise `simulated: true` and the code is in the server log. See "Sign-in email" below.)
 auth.methods          pub  –                        → { primary: 'email' | 'phone', phone: { available, simulated }, email: { available, simulated } }   (which sign-in methods deliver codes now. `primary` is 'phone' only when SMS is live; otherwise 'email'. Clients lead with `primary` and offer the other as secondary.)
 auth.verifyCode       pub  { email, code, displayName? } → { token, user }   (user includes `campus`, same shape as auth.me)
 auth.devSignIn        pub  { userId }               → { token, user }   (only if DEV_LOGIN=1; user includes `campus`)
@@ -447,7 +447,7 @@ Email sign-in codes (`auth.requestCode`, `auth.verifyCode`, `auth.requestEmailLi
 
 ## Phone sign-in & account linking (added after the sections above)
 
-Phone + SMS code is the primary sign-in. Campus email + code (`auth.requestCode`/`verifyCode`) still works ("Use campus email instead") and is how existing email accounts sign in.
+Phone + SMS code is the primary sign-in. Email + code (`auth.requestCode`/`verifyCode`) works for any email address ("Use campus email instead"), and is how existing email accounts sign in.
 
 **Normalization** (`backend/sms/phone.ts`): stored as E.164. A bare 10-digit (or 11 digits starting with 1) number is read as +1 (US/Canada pilot); anything else must start with `+`, 8–15 digits, not leading 0; a +1 number must have exactly 11 digits. Invalid -> BAD_REQUEST with a readable message. Phone is `unique` on `users`.
 

@@ -35,7 +35,7 @@ Sign-in codes are emailed through **Resend**. Until this is done, email codes ar
    - `EMAIL_FROM=Dibbs <codes@trydibbs.com>` (the sender; its domain must be the one you verified)
    All three are needed. If any one is missing, the backend quietly stays simulated and says why. Never set these on a laptop.
 5. **Check the mode.** Redeploy, then open `/api/health` on the deployed URL. The `email` field should read `"mode": "live"` and `"simulated": false`. If it still says `simulated`, one of the three variables is missing or misspelled.
-6. **Send yourself a code.** In the app, request a sign-in code to a campus email address you own (the domain must be in `ALLOWED_EMAIL_DOMAINS`). The email should arrive from `codes@trydibbs.com` within a minute. Check the spam folder once; if it lands there, the DNS records in step 2 are the usual cause.
+6. **Send yourself a code.** In the app, request a sign-in code to an email address you own (any address works; a campus address on `ALLOWED_EMAIL_DOMAINS` also verifies campus membership). The email should arrive from `codes@trydibbs.com` within a minute. Check the spam folder once; if it lands there, the DNS records in step 2 are the usual cause.
 
 **How sign-in chooses a method.** The app asks the backend which methods deliver codes right now (`auth.methods`). Until SMS is live (see §6b, which needs carrier registration that can take weeks), email is the primary way in and phone is offered as a secondary option. Once SMS is live (`SMS_MODE=live` with the Twilio settings), phone becomes primary automatically. You do not need to change the app to switch.
 
@@ -95,7 +95,7 @@ Set these on whatever host runs the container (step 4). `.env.example` in this r
 | `DATABASE_URL` | Your Postgres connection string from step 1. Leave empty only for local disk-based testing — never in a real deploy (see below). | **Yes** — contains a password |
 | `PORT` | Which port the server listens on inside the container. Most hosts set this for you automatically; leave it alone unless yours says otherwise. | No |
 | `DEV_LOGIN` | Enables the "switch test user" shortcut used for demos. **Set to nothing (or `0`) in production** — it lets anyone become any demo user with no password. | No, but must be off in production |
-| `ALLOWED_EMAIL_DOMAINS` | Which campus email domains can sign up (e.g. `arizona.edu`). | No |
+| `ALLOWED_EMAIL_DOMAINS` | Campus email domains that count as campus-verified at sign-in (e.g. `arizona.edu`). Any email address can sign in; only a verified campus email unlocks selling, offering, booking and posting. | No |
 | `MODERATOR_USER_IDS` | Which user ID(s) can review reports. | No |
 | `PLATFORM_FEE_PERCENT` | Your cut of a sale. | No |
 | `PUBLIC_APP_URL` | The public address of this server — needed once you turn on real payments (Stripe sends sellers back here). Set it to your deployed URL, e.g. `https://api.yourdomain.com`. | No |
