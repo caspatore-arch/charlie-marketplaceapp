@@ -123,9 +123,10 @@ export function PhoneAuthFlow({
     }
   }
 
-  function afterSignedIn(campusEmailVerified: boolean, isNew = false) {
+  /** `needsCampusEmail` = the server says this account can't trade until it verifies a campus email. */
+  function afterSignedIn(needsCampusEmail: boolean, isNew = false) {
     if (isNew) setCreatedAccount(true);
-    if (campusEmailVerified) finish(isNew);
+    if (!needsCampusEmail) finish(isNew);
     else setStep('campusEmail');
   }
 
@@ -141,7 +142,7 @@ export function PhoneAuthFlow({
       const res = await verifyPhoneCode({ phone: phone.trim(), code: code.trim() });
       setNetwork(false);
       if (res.status === 'needs_profile') setStep('profile');
-      else afterSignedIn(!!res.user.campusEmailVerifiedAt);
+      else afterSignedIn(res.user.postingStatus === 'needs_campus_email');
     } catch (e) {
       fail(e, 'That code didn’t work. Try again.');
     } finally {
@@ -167,7 +168,7 @@ export function PhoneAuthFlow({
       });
       setNetwork(false);
       if (res.status === 'needs_profile') setError('Something went wrong. Please try again.');
-      else afterSignedIn(!!res.user.campusEmailVerifiedAt, true);
+      else afterSignedIn(res.user.postingStatus === 'needs_campus_email', true);
     } catch (e) {
       fail(e, 'Could not create your account. Try again.');
     } finally {

@@ -1,6 +1,7 @@
 import { TRPCError, initTRPC } from '@trpc/server';
 import superjson from 'superjson';
 
+import { BLOCKED_MESSAGE, NEEDS_CAMPUS_EMAIL_MESSAGE, postingStatus } from '../auth/posting-access';
 import { env } from '../env';
 import type { Context } from './create-context';
 
@@ -30,18 +31,21 @@ export const moderatorProcedure = protectedProcedure.use(({ ctx, next }) => {
 });
 
 /**
- * Protected + the caller has verified a campus email. Phone verification
- * proves control of a phone number only, and a non-campus sign-in email
- * (any email can sign in) proves control of that inbox only — neither is
- * campus or student verification — so buying, selling and posting stay
- * behind this gate.
+ * Protected + the caller may trade: a verified campus email, or a founder
+ * override set on /admin (backend/auth/posting-access.ts). Phone
+ * verification proves control of a phone number only, and a non-campus
+ * sign-in email (any email can sign in) proves control of that inbox only —
+ * neither is campus or student verification — so buying, selling and
+ * posting stay behind this gate. 'blocked' wins over everything; 'approved'
+ * lets a non-student seller through without being campus verified.
  */
 export const campusVerifiedProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (!ctx.user.campusEmailVerifiedAt) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: 'Verify your campus email to buy, sell, or post. A phone number or a non-campus email isn’t enough.',
-    });
+  const status = postingStatus(ctx.user);
+  if (status === 'blocked') {
+    throw new TRPCError({ code: 'FORBIDDEN', message: BLOCKED_MESSAGE });
+  }
+  if (status === 'needs_campus_email') {
+    throw new TRPCError({ code: 'FORBIDDEN', message: NEEDS_CAMPUS_EMAIL_MESSAGE });
   }
   return next({ ctx });
 });

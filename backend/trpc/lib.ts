@@ -683,6 +683,12 @@ export type PublicUser = {
   avatarUrl: string | null;
   isDemo: boolean;
   campusEmailVerified: boolean;
+  /**
+   * Founder-approved seller (postingAccess 'approved' on /admin). NOT campus,
+   * student or identity verification; the app labels it "Approved seller".
+   * 'blocked' is never exposed publicly.
+   */
+  approvedSeller: boolean;
   instagramHandle?: string;
   contactPhone?: string;
 };
@@ -694,6 +700,7 @@ export function toPublicUser(u: User): PublicUser {
     avatarUrl: u.avatarUrl,
     isDemo: u.isDemo,
     campusEmailVerified: u.campusEmailVerifiedAt != null,
+    approvedSeller: u.postingAccess === 'approved' && u.deletedAt == null,
   };
   // A closed account never shares, whatever the flags say.
   if (u.deletedAt == null) {

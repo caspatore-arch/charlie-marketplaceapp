@@ -21,6 +21,8 @@ export interface ProfileHeaderProps {
   campusName?: string;
   bio?: string | null;
   campusEmailVerified: boolean;
+  /** Founder-approved seller. Not a campus, student or ID check. */
+  approvedSeller?: boolean;
   isDemo: boolean;
   instagramHandle?: string;
   contactPhone?: string;
@@ -97,6 +99,7 @@ function CompactHeader(p: ProfileHeaderProps) {
           ) : null}
           <View style={styles.compactBadges}>
             {p.campusEmailVerified ? <Badge kind="verified" /> : null}
+            {p.approvedSeller ? <Badge kind="status" label="Approved seller" /> : null}
             {p.isDemo ? (
               p.demoAccountLabel ? (
                 <View style={styles.demoPill}>
@@ -194,6 +197,7 @@ export function ProfileHeader(p: ProfileHeaderProps) {
       ) : null}
       <View style={styles.badgeRow}>
         {p.campusEmailVerified ? <Badge kind="verified" /> : null}
+        {p.approvedSeller ? <Badge kind="status" label="Approved seller" /> : null}
         <DemoBadge visible={p.isDemo} />
       </View>
 

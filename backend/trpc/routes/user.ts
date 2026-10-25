@@ -21,6 +21,7 @@ import {
   sessions,
   users,
 } from '../../db/schema';
+import { postingStatus } from '../../auth/posting-access';
 import { cancelUserSms } from '../../sms/outbox';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
 import {
@@ -556,6 +557,8 @@ export const userRouter = router({
     phoneVerified: ctx.user.phoneVerifiedAt != null,
     email: ctx.user.email,
     campusEmailVerified: ctx.user.campusEmailVerifiedAt != null,
+    /** Same decision as campusVerifiedProcedure (backend/auth/posting-access.ts). */
+    postingStatus: postingStatus(ctx.user),
     smsOptIn: ctx.user.smsOptIn,
     smsOptInAt: ctx.user.smsOptInAt,
     smsOptOutAt: ctx.user.smsOptOutAt,

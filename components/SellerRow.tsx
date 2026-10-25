@@ -15,6 +15,8 @@ export interface SellerRowSeller {
   avatarUrl?: string | null;
   isDemo?: boolean;
   campusEmailVerified?: boolean;
+  /** Founder-approved seller. Not a campus, student or ID check. */
+  approvedSeller?: boolean;
 }
 
 export interface SellerRowProps {
@@ -37,6 +39,7 @@ export function SellerRow({ seller, onPress }: SellerRowProps) {
         </Text>
         <View style={styles.badges}>
           {seller.campusEmailVerified ? <Badge kind="verified" /> : null}
+          {seller.approvedSeller ? <Badge kind="status" label="Approved seller" /> : null}
           {seller.isDemo ? <Badge kind="demo" /> : null}
         </View>
       </View>

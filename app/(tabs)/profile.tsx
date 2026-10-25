@@ -99,6 +99,7 @@ function SignedInProfile({
         campusName={meQuery.data?.campus?.name}
         bio={meQuery.data?.bio}
         campusEmailVerified={!!meQuery.data?.campusEmailVerifiedAt}
+        approvedSeller={meQuery.data?.postingAccess === 'approved'}
         isDemo={!!meQuery.data?.isDemo}
         instagramHandle={me?.instagramHandle}
         contactPhone={me?.contactPhone}

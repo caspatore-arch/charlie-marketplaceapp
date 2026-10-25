@@ -5,9 +5,11 @@
  * whose buttons replace navigation into the listing (or the feed) so back
  * doesn't return to this form.
  *
- * Selling needs a verified campus email (campusVerifiedProcedure). An account
- * without one (any-email or phone sign-in) gets the verify step here first,
- * instead of filling in a whole listing only to be refused on Publish.
+ * Selling needs a verified campus email or a founder approval
+ * (campusVerifiedProcedure; `user.canPost` mirrors it). An account without
+ * either (any-email or phone sign-in) gets the verify step here first,
+ * instead of filling in a whole listing only to be refused on Publish. A
+ * blocked account gets a plain "can't sell" note instead.
  */
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -93,7 +95,23 @@ export default function NewListingScreen() {
     return <Screen>{null}</Screen>;
   }
 
-  if (user && !user.campusEmailVerifiedAt) {
+  if (user && user.postingStatus === 'blocked') {
+    return (
+      <Screen>
+        <Stack.Screen
+          options={{ title: 'New listing', headerLeft: () => <GuardedCloseButton onPress={() => router.back()} label="Close" /> }}
+        />
+        <View style={styles.gate}>
+          <Text variant="title">You can’t sell right now</Text>
+          <Text variant="body" color="inkMuted">
+            Your account can’t buy, sell or post right now. Contact support.
+          </Text>
+        </View>
+      </Screen>
+    );
+  }
+
+  if (user && !user.canPost) {
     return (
       <Screen>
         <Stack.Screen

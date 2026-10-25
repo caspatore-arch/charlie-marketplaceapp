@@ -68,6 +68,15 @@ export const handoffMethodEnum = pgEnum('handoff_method', ['code', 'tap']);
 export const devicePlatformEnum = pgEnum('device_platform', ['ios', 'android', 'web', 'unknown']);
 
 /**
+ * Founder override for buying, selling, offers, booking and posting, set on
+ * /admin. 'default' = the normal rule (a verified campus email is required).
+ * 'approved' = a non-student "specialized seller" may trade without a campus
+ * email; this is NOT campus, student or identity verification. 'blocked' =
+ * may not trade at all, whatever else is verified. See backend/auth/posting-access.ts.
+ */
+export const postingAccessEnum = pgEnum('posting_access', ['default', 'approved', 'blocked']);
+
+/**
  * How a listing is sold. 'fixed' is the original (and default) behaviour —
  * every pre-auction row keeps working untouched. See docs/AUCTIONS.md §1.
  */
@@ -175,6 +184,9 @@ export const users = pgTable('users', {
   contactPhone: text('contact_phone'),
   shareInstagram: boolean('share_instagram').notNull().default(false),
   sharePhone: boolean('share_phone').notNull().default(false),
+  /** Founder override (see postingAccessEnum). Never shown publicly except as "Approved seller". */
+  postingAccess: postingAccessEnum('posting_access').notNull().default('default'),
+  postingAccessChangedAt: ts('posting_access_changed_at'),
 });
 
 export const sessions = pgTable('sessions', {

@@ -27,6 +27,7 @@ import { z } from 'zod';
 import { env } from '../../env';
 import type { Db } from '../../db/client';
 import { campuses, emailCodes, phoneCodes, sessions, users, type User } from '../../db/schema';
+import { postingFields } from '../../auth/posting-access';
 import { codesMatch, hasActivity, hashPhoneCode, newPhoneCode, retireEmptyAccount } from '../../auth/accounts';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
 import { resolveSmsMode, smsProvider } from '../../sms/provider';
@@ -144,7 +145,7 @@ async function consumePhoneCode(db: Db, id: string) {
 
 async function withCampus(db: Db, user: User) {
   const [campus] = await db.select().from(campuses).where(eq(campuses.id, user.campusId)).limit(1);
-  return { ...user, campus: campus! };
+  return { ...user, campus: campus!, ...postingFields(user) };
 }
 
 function domainOf(email: string): string {
@@ -335,7 +336,7 @@ export const authRouter = router({
         .limit(1);
 
       const token = await issueSession(ctx.db, user.id);
-      return { token, user: { ...user, campus: campus! } };
+      return { token, user: { ...user, campus: campus!, ...postingFields(user) } };
     }),
 
   /* ------------------------------------------------------------ phone */
@@ -395,7 +396,7 @@ export const authRouter = router({
         })
         .returning();
       const token = await issueSession(ctx.db, user!.id);
-      return { status: 'signed_in' as const, token, isNewAccount: true, user: { ...user!, campus } };
+      return { status: 'signed_in' as const, token, isNewAccount: true, user: { ...user!, campus, ...postingFields(user!) } };
     }),
 
   /** Signed in (e.g. by email): text a code to attach a phone to THIS account. */
@@ -537,7 +538,7 @@ export const authRouter = router({
         .set({ email, campusEmailVerifiedAt: now, campusId: campus.id })
         .where(eq(users.id, me.id))
         .returning();
-      return { switchedAccount: false as const, token: null, user: { ...user!, campus } };
+      return { switchedAccount: false as const, token: null, user: { ...user!, campus, ...postingFields(user!) } };
     }),
 
   me: protectedProcedure.query(async ({ ctx }) => {
@@ -546,7 +547,8 @@ export const authRouter = router({
       .from(campuses)
       .where(eq(campuses.id, ctx.user.campusId))
       .limit(1);
-    return { ...ctx.user, campus: campus! };
+    // canPost / postingStatus: what the app's sell, offer, booking and post gates follow.
+    return { ...ctx.user, campus: campus!, ...postingFields(ctx.user) };
   }),
 
   signOut: protectedProcedure.mutation(async ({ ctx }) => {

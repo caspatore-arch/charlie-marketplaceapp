@@ -231,9 +231,20 @@ export function PhoneAccountSection({ part }: PhoneAccountSectionProps = {}) {
         </View>
       ) : (
         <>
-          <Text variant="caption" color="inkFaint">
-            Campus email verification is required to buy, sell, or post. It is not an ID check.
-          </Text>
+          {s.postingStatus === 'approved' ? (
+            <Text variant="caption" color="inkFaint">
+              Dibbs approved your account to sell without a campus email. That approval is not a campus,
+              student or ID check.
+            </Text>
+          ) : s.postingStatus === 'blocked' ? (
+            <Text variant="caption" color="inkFaint">
+              Your account can’t buy, sell or post right now. Contact support.
+            </Text>
+          ) : (
+            <Text variant="caption" color="inkFaint">
+              Campus email verification is required to buy, sell, or post. It is not an ID check.
+            </Text>
+          )}
           {s.email ? (
             <Text variant="caption" color="inkFaint">
               You sign in with {s.email}. Once you verify a campus email, you’ll sign in with that one instead.

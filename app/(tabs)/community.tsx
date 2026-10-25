@@ -126,7 +126,7 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
           setKind(posted);
           void refetchFeed();
         }}
-        campusEmailVerified={me.data ? me.data.campusEmailVerifiedAt != null : undefined}
+        postingStatus={me.data?.postingStatus}
       />
       <FeedControls kind={kind} sort={sort} onKind={setKind} onSort={setSort} />
       {notice ? (

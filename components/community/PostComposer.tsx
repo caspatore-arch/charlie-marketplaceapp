@@ -2,8 +2,9 @@
  * Composer for a community post. Collapsed it is a one-line "Post something…"
  * row; tapping expands the kind toggle, a labelled multiline input with a /280
  * counter, and a Post button. The kind is controlled by the parent so it is the
- * same control as the feed's Buyers/Sellers tab. If the viewer's campus email
- * is not verified the requirement is shown up front and Post is disabled.
+ * same control as the feed's Buyers/Sellers tab. If the viewer can't post
+ * (no campus email and no founder approval, or blocked) the reason is shown
+ * up front and Post is disabled.
  */
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -15,7 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { trpc } from '@/lib/trpc';
 import { colors, radius, space } from '@/constants/theme';
-import type { CommunityPostKind } from '@/types';
+import type { AuthUser, CommunityPostKind } from '@/types';
 
 const MAX = 280;
 const MIN = 3;
@@ -25,17 +26,18 @@ export interface PostComposerProps {
   onKind: (kind: CommunityPostKind) => void;
   /** Called after a successful post, with the kind that was posted. */
   onPosted: (kind: CommunityPostKind) => void;
-  /** false = known unverified; undefined = still loading (not blocked). */
-  campusEmailVerified?: boolean;
+  /** The viewer's server-computed posting status; undefined = still loading (not blocked). */
+  postingStatus?: AuthUser['postingStatus'];
 }
 
-export function PostComposer({ kind, onKind, onPosted, campusEmailVerified }: PostComposerProps) {
+export function PostComposer({ kind, onKind, onPosted, postingStatus }: PostComposerProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState('');
   const [posted, setPosted] = useState(false);
   const [error, setError] = useState<{ message: string; forbidden: boolean } | null>(null);
-  const blocked = campusEmailVerified === false;
+  const needsCampusEmail = postingStatus === 'needs_campus_email';
+  const blocked = needsCampusEmail || postingStatus === 'blocked';
 
   const create = trpc.community.create.useMutation({
     onSuccess: (_data, vars) => {
@@ -91,7 +93,14 @@ export function PostComposer({ kind, onKind, onPosted, campusEmailVerified }: Po
         <Chip label="Looking to buy" selected={kind === 'buying'} onPress={() => onKind('buying')} />
         <Chip label="Selling" selected={kind === 'selling'} onPress={() => onKind('selling')} />
       </View>
-      {blocked ? (
+      {postingStatus === 'blocked' ? (
+        <View style={styles.notice}>
+          <Text variant="label" color="accentInk">
+            Your account can’t buy, sell or post right now. Contact support.
+          </Text>
+        </View>
+      ) : null}
+      {needsCampusEmail ? (
         <View style={styles.notice}>
           <Text variant="label" color="accentInk">
             Verify your campus email to post. Posting in Community requires a verified campus email (a phone

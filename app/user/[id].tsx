@@ -149,6 +149,7 @@ export default function PublicProfileScreen() {
         campusName={profile.campus?.name}
         bio={profile.bio}
         campusEmailVerified={profile.campusEmailVerified}
+        approvedSeller={profile.approvedSeller}
         isDemo={profile.isDemo}
         instagramHandle={profile.instagramHandle}
         contactPhone={profile.contactPhone}

@@ -1,8 +1,9 @@
 /**
  * Founder dashboard data, served only behind the admin password
  * (backend/admin/routes.ts). Counts, not people: the only
- * personal detail returned is a display name and join date for the latest
- * sign-ups — never an email or phone number.
+ * personal detail returned is a display name, join date and posting access
+ * for the latest sign-ups — never an email or phone number. (The Posting
+ * access search in ./access.ts does return emails.)
  *
  * "Real" accounts exclude seeded demo users and closed (anonymized) accounts.
  */
@@ -100,7 +101,13 @@ export async function getAdminStats() {
         .groupBy(sql`1`)
         .orderBy(sql`1`),
       ctx.db
-        .select({ id: users.id, displayName: users.displayName, createdAt: users.createdAt, avatarUrl: users.avatarUrl })
+        .select({
+          id: users.id,
+          displayName: users.displayName,
+          createdAt: users.createdAt,
+          avatarUrl: users.avatarUrl,
+          postingAccess: users.postingAccess,
+        })
         .from(users)
         .where(real)
         .orderBy(desc(users.createdAt))

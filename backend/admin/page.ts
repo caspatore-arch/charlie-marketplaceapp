@@ -1,7 +1,8 @@
 /**
  * HTML for /admin. Self-contained (no external scripts or fonts). The
- * dashboard fills itself from /admin/stats.json and only ever writes
- * user-supplied text (display names) with textContent, never innerHTML.
+ * dashboard fills itself from /admin/stats.json and /admin/users.json and
+ * only ever writes user-supplied text (display names, emails) with
+ * textContent, never innerHTML.
  */
 
 const STYLE = `
@@ -41,6 +42,16 @@ button,input{font:inherit}
 input[type=password]{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);margin:10px 0 12px}
 .login{max-width:360px;margin:12vh auto 0}
 .err{background:var(--soft);color:var(--accent);padding:8px 12px;border-radius:8px;margin-top:10px}
+.search{display:flex;gap:8px;margin:14px 0 4px}
+input[type=search],select{padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit}
+input[type=search]{flex:1;min-width:0}
+.acct{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.acct:first-child{border-top:0}
+.acct .who{flex:1;min-width:0}
+.acct .who b,.acct .who div{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--muted-surface);color:var(--muted);flex:none}
+.pill.approved{background:var(--soft);color:var(--accent)}
+.pill.blocked{background:var(--ink);color:var(--bg)}
 `;
 
 const shell = (title: string, body: string) => `<!doctype html>
@@ -98,12 +109,23 @@ export function dashboardPage(): string {
     <div class="card"><div class="num" id="posts"></div><div class="muted small">Posts</div></div>
     <div class="card"><div class="num" id="messages"></div><div class="muted small">Messages</div></div>
   </div>
+  <div class="card">
+    <h2>Posting access</h2>
+    <div class="muted small">Who can buy, sell, make offers, book and post. Default: needs a verified campus email. Approved: can sell without one (not a campus, student or ID check; shows as "Approved seller"). Blocked: can't buy, sell or post at all.</div>
+    <form class="search" id="access-form" role="search">
+      <input type="search" id="access-q" placeholder="Email or name" maxlength="100" autocomplete="off" aria-label="Search accounts by email or name">
+      <button class="ghost" type="submit">Search</button>
+    </form>
+    <div class="muted small" id="access-note"></div>
+    <div id="access-list"></div>
+  </div>
   <div class="card"><h2>Where the data is saved</h2><div id="storage"></div></div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const fmtN = (n) => Number(n).toLocaleString();
+const ACCESS_LABEL = { default: 'Default', approved: 'Approved', blocked: 'Blocked' };
 const shortDay = (d) => { const [, m, day] = d.split('-'); return Number(m) + '/' + Number(day); };
 const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); if (m < 1) return 'just now'; if (m < 60) return m + 'm ago'; const h = Math.round(m / 60); return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago'; };
 
@@ -137,7 +159,9 @@ function render(s) {
     const row = el('div', 'person');
     const av = el('div', 'av', u.avatarUrl ? null : (u.displayName.trim()[0] || '?').toUpperCase());
     if (u.avatarUrl && /^https?:\\/\\//.test(u.avatarUrl)) { const img = el('img'); img.src = u.avatarUrl; img.alt = ''; av.append(img); }
-    row.append(av, el('span', 'name', u.displayName), el('span', 'muted small', ago(u.createdAt)));
+    row.append(av, el('span', 'name', u.displayName));
+    if (u.postingAccess && u.postingAccess !== 'default') row.append(el('span', 'pill ' + u.postingAccess, ACCESS_LABEL[u.postingAccess]));
+    row.append(el('span', 'muted small', ago(u.createdAt)));
     return row;
   }) : [el('p', 'muted', 'No sign-ups yet.')]));
 
@@ -168,6 +192,54 @@ async function load() {
   } catch (e) { $('updated').textContent = 'Could not load stats (' + e.message + '). Retrying…'; }
 }
 load(); setInterval(load, 60000);
+
+const joined = (iso) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+
+function accessRow(u) {
+  const row = el('div', 'acct');
+  const who = el('div', 'who');
+  who.append(el('b', '', u.displayName), el('div', 'muted small', u.email || 'No email (phone sign-in)'));
+  const facts = [u.campusEmailVerified ? 'Campus email verified' : 'No campus email', 'Joined ' + joined(u.createdAt)];
+  if (u.isDemo) facts.push('Demo account');
+  who.append(el('div', 'muted small', facts.join(' · ')));
+  const pick = el('select');
+  pick.setAttribute('aria-label', 'Posting access for ' + u.displayName);
+  for (const v of ['default', 'approved', 'blocked']) { const o = el('option', '', ACCESS_LABEL[v]); o.value = v; pick.append(o); }
+  pick.value = u.postingAccess;
+  const status = el('span', 'muted small');
+  pick.addEventListener('change', async () => {
+    const next = pick.value; pick.disabled = true; status.textContent = 'Saving…';
+    try {
+      const r = await fetch('/admin/users/access', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: u.id, access: next }),
+      });
+      if (r.status === 401) { location.reload(); return; }
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      u.postingAccess = data.user.postingAccess; status.textContent = 'Saved';
+    } catch (e) { pick.value = u.postingAccess; status.textContent = 'Not saved: ' + e.message; }
+    pick.disabled = false;
+  });
+  row.append(who, status, pick);
+  return row;
+}
+
+async function loadAccess(q) {
+  $('access-note').textContent = 'Loading…';
+  try {
+    const r = await fetch('/admin/users.json?q=' + encodeURIComponent(q), { credentials: 'same-origin' });
+    if (r.status === 401) { location.reload(); return; }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    $('access-list').replaceChildren(...data.users.map(accessRow));
+    $('access-note').textContent = q
+      ? (data.users.length ? 'Showing up to 20 matches.' : 'No open accounts match.')
+      : (data.users.length ? 'Accounts set to Approved or Blocked. Search to find anyone else.' : 'Everyone is on Default. Search by email or name to change someone.');
+  } catch (e) { $('access-note').textContent = 'Could not search (' + e.message + ').'; }
+}
+$('access-form').addEventListener('submit', (e) => { e.preventDefault(); loadAccess($('access-q').value.trim()); });
+loadAccess('');
 </script>
 </main>`,
   );

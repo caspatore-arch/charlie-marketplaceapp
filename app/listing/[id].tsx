@@ -339,7 +339,9 @@ export default function ListingDetailScreen() {
   const heldOffer = heldByViewer ? offers?.offers.find((o) => o.status === 'accepted') : undefined;
   const bookingPriceCents = heldOffer?.amountCents ?? listing.priceCents;
   const signedOut = authStatus === 'signedOut';
-  const campusUnverified = authStatus === 'signedIn' && !!user && !user.campusEmailVerifiedAt;
+  // Follows the server's rule (user.canPost): a campus email, or a founder approval.
+  const campusUnverified = authStatus === 'signedIn' && !!user && user.postingStatus === 'needs_campus_email';
+  const tradingBlocked = authStatus === 'signedIn' && !!user && user.postingStatus === 'blocked';
   const expiryText = listing.status === 'active' ? expiresInLabel(listing.expiresAt, now) : null;
   const expiringSoon = listing.status === 'active' && expiresSoon(listing.expiresAt, now);
   const pendingOffers = (offers?.offers ?? []).filter((o) => o.status === 'pending').length;
@@ -698,6 +700,11 @@ export default function ListingDetailScreen() {
                 </TextLink>
               </View>
             ) : null}
+            {tradingBlocked ? (
+              <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
+                Your account can’t buy, sell or post right now. Contact support.
+              </Text>
+            ) : null}
             <View style={styles.footerRow}>
               {signedOut ? null : messageIconButton}
               <Button title="Propose a time and place" onPress={onPropose} style={styles.footerBtnFlex} />
@@ -739,6 +746,11 @@ export default function ListingDetailScreen() {
                   Verify in Settings
                 </TextLink>
               </View>
+            ) : null}
+            {tradingBlocked ? (
+              <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
+                Your account can’t buy, sell or post right now. Contact support.
+              </Text>
             ) : null}
             <View style={styles.footerRow}>
               {messageIconButton}

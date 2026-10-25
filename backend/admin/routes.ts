@@ -15,6 +15,7 @@ import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 
 import { rateLimit } from '../ratelimit';
+import { searchAccessUsers, searchQuery, setAccessInput, setPostingAccess } from './access';
 import { getAdminStats } from './stats';
 import { dashboardPage, loginPage } from './page';
 
@@ -45,6 +46,24 @@ function isHttps(c: Context): boolean {
 function signedIn(c: Context, password: string): boolean {
   const cookie = getCookie(c, COOKIE);
   return !!cookie && safeEqual(cookie, sessionValue(password));
+}
+
+/**
+ * Cross-site request check for state-changing calls. The cookie is already
+ * SameSite=Strict; on top of that a POST must carry an Origin (or, failing
+ * that, a Referer) whose host is this server's host. Missing both = refused.
+ */
+function sameOrigin(c: Context): boolean {
+  const source = c.req.header('origin') || c.req.header('referer');
+  if (!source) return false;
+  let host: string;
+  try {
+    host = new URL(source).host;
+  } catch {
+    return false;
+  }
+  const own = [c.req.header('x-forwarded-host'), c.req.header('host'), new URL(c.req.url).host];
+  return own.some((h) => !!h && h.split(',')[0]!.trim() === host);
 }
 
 function setSession(c: Context, password: string) {
@@ -106,4 +125,39 @@ adminApp.get('/stats.json', async (c) => {
   const password = adminPassword()!;
   if (!signedIn(c, password)) return c.json({ error: 'Signed out' }, 401);
   return c.json(await getAdminStats());
+});
+
+// Posting access (who may buy, sell, offer, book and post). Same sign-in
+// check as stats, limited like login (per address and in total), and the
+// POST also has to pass the same-origin check.
+adminApp.get('/users.json', rateLimit('admin.users.ip', 60, 60_000));
+adminApp.get('/users.json', rateLimit('admin.users.all', 240, 60_000, () => 'all'));
+adminApp.post('/users/access', rateLimit('admin.access.ip', 30, 60_000));
+adminApp.post('/users/access', rateLimit('admin.access.all', 120, 60_000, () => 'all'));
+
+adminApp.get('/users.json', async (c) => {
+  const password = adminPassword()!;
+  if (!signedIn(c, password)) return c.json({ error: 'Signed out' }, 401);
+  const parsed = searchQuery.safeParse({ q: c.req.query('q') ?? '' });
+  if (!parsed.success) return c.json({ error: 'Search is too long.' }, 400);
+  return c.json({ users: await searchAccessUsers(parsed.data.q) });
+});
+
+adminApp.post('/users/access', async (c) => {
+  const password = adminPassword()!;
+  if (!signedIn(c, password)) return c.json({ error: 'Signed out' }, 401);
+  if (!sameOrigin(c)) return c.json({ error: 'Cross-site request refused.' }, 403);
+  // JSON only: a plain cross-site form can't send this content type.
+  if (!c.req.header('content-type')?.startsWith('application/json')) return c.json({ error: 'Send JSON.' }, 415);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Send JSON.' }, 400);
+  }
+  const parsed = setAccessInput.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Pick an account and Default, Approved or Blocked.' }, 400);
+  const user = await setPostingAccess(parsed.data);
+  if (!user) return c.json({ error: 'No open account with that id.' }, 404);
+  return c.json({ user });
 });
