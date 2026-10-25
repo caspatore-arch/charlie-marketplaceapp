@@ -75,7 +75,7 @@ Effects:
 ## Auth
 
 - `Authorization: Bearer <token>`. Server hashes token (sha256) and looks up `sessions`.
-- Context: `{ db, user: User | null }`. `protectedProcedure` throws `UNAUTHORIZED` if no user. `campusVerifiedProcedure` = `protectedProcedure` + `FORBIDDEN` unless `user.campusEmailVerifiedAt` is set (see "Phone sign-in & account linking").
+- Context: `{ db, user: User | null }`. `protectedProcedure` throws `UNAUTHORIZED` if no user. Any email can sign in. `campusVerifiedProcedure` = `protectedProcedure` + `FORBIDDEN` unless `postingStatus(user)` allows posting (see "Posting access" below and "Phone sign-in & account linking").
 - Ownership: `listing.update/remove`, photo ops → seller only. `conversation.*`, `reservation.*` → participants only. Otherwise `FORBIDDEN`.
 - Blocks: blocked users cannot message/request each other; blocked user's listings hidden from blocker's feed.
 
@@ -89,7 +89,7 @@ auth.requestCode      pub  { email }                → { ok: true, simulated, r
 auth.methods          pub  –                        → { primary: 'email' | 'phone', phone: { available, simulated }, email: { available, simulated } }   (which sign-in methods deliver codes now. `primary` is 'phone' only when SMS is live; otherwise 'email'. Clients lead with `primary` and offer the other as secondary.)
 auth.verifyCode       pub  { email, code, displayName? } → { token, user }   (user includes `campus`, same shape as auth.me)
 auth.devSignIn        pub  { userId }               → { token, user }   (only if DEV_LOGIN=1; user includes `campus`)
-auth.me               P    –                        → User (with campus)
+auth.me               P    –                        → User (with campus, canPost, postingStatus)
 auth.signOut          P    –                        → { ok }
 
 campus.list           pub  –                        → Campus[]
@@ -98,7 +98,7 @@ campus.spots          pub  { campusId }             → MeetupSpot[]
 listing.feed          pub  { campusId, q?, category?, minCents?, maxCents?, size?, pickupToday?: boolean, cursor?, limit? }
       q = free-text search (trimmed, 1–80 chars); case-insensitive match over title, brand and description
                                                     → { items: ListingCard[], nextCursor? }
-      ListingCard = listing + coverPhotoUrl + seller{ id, displayName, avatarUrl, isDemo, campusEmailVerified } + hasAvailabilityToday
+      ListingCard = listing + coverPhotoUrl + seller{ id, displayName, avatarUrl, isDemo, campusEmailVerified, approvedSeller } + hasAvailabilityToday
                     + currentPriceCents (the asking price; for a legacy auction, its top bid or start price) + bidCount (legacy; 0 on new listings)
 listing.byId          pub  { id }                   → ListingDetail = listing + photos[] + seller + spots[] + availabilityWindows[] + activeReservationId? + viewerRole ('seller'|'buyer'|'guest') + isSaved
 listing.bySeller      pub  { sellerId, includeSold? } → ListingCard[]
@@ -147,8 +147,8 @@ reservation.mine      P    { role?: 'buyer'|'seller' }       → ReservationDeta
 reservation.forListing P   { listingId }                     → Reservation[] (seller only)
 reservation.confirmHandoff P { id, code? }                   → ReservationDetail  (buyer: tap; seller: must pass code)
 
-user.byId             pub  { id }                   → PublicProfile { id, displayName, avatarUrl, campus, campusEmailVerified, isDemo, bio, activeListingCount, memberSince }
-user.contactSettings P  –                        → { phone, phoneVerified, email, campusEmailVerified, smsOptIn, smsOptInAt, smsOptOutAt }   (private to the caller)
+user.byId             pub  { id }                   → PublicProfile { id, displayName, avatarUrl, campus, campusEmailVerified, approvedSeller, isDemo, bio, activeListingCount, memberSince }   (`approvedSeller` = founder-approved; `blocked` is never public)
+user.contactSettings P  –                        → { phone, phoneVerified, email, campusEmailVerified, postingStatus, smsOptIn, smsOptInAt, smsOptOutAt }   (private to the caller)
 user.updateSmsPreferences P { smsOptIn }        → { smsOptIn }   (opt-in needs a verified phone; opt-out cancels queued texts)
 user.updateMe         P    { displayName?, avatarUrl?, bio? } → User
 user.block            P    { userId }               → { ok }
@@ -415,7 +415,7 @@ Short "interest check" posts ("Anyone selling a mini fridge?", "Anyone want shir
 - **Cap**: *superseded: at most `COMMUNITY_MAX_POSTS_PER_DAY` = 5 new posts per person in any rolling 24 hours (TOO_MANY_REQUESTS).* Body 3–280 chars.
 - **Identity**: posts show the author's normal display name; no anonymity.
 - **Blocks** hide posts in both directions (feed, `byId`, `report`).
-- Posting requires a campus-verified account; reading requires any signed-in account.
+- Posting requires `postingStatus` `campus_verified` or `approved` (see "Posting access"); reading requires any signed-in account.
 
 ```
 community.feed         P  { kind?, cursor?, limit? (1–50, default 20) } → { items: { id, kind, body, createdAt, expiresAt, author: PublicUser, isMine }[], nextCursor?, serverNow }
@@ -472,7 +472,13 @@ A new phone account is created with `email = null`, `phoneVerifiedAt = now`, `ca
 
 **Phone verified is not campus verified, and neither is identity verified.** A phone proves control of a number only. `users.campusEmailVerifiedAt` is set only by verifying a campus email (`verifyCode` or `confirmEmailLink`). Copy must never imply a phone-verified person is a student, or that either check is identity verification.
 
-**`campusVerifiedProcedure` gate** (FORBIDDEN "Verify your campus email to buy, sell, or post. Phone sign-in alone does not confirm you are a student."): `listing.create`, `listing.relist`, `offer.create`, `reservation.book`, `reservation.request`, `community.create`. Everything else (browse, search, message, save, read community, view offers/meetups already owned) stays open to a phone-only account. Note `offer.accept/decline/withdraw` and `reservation.accept/counter/cancel` are plain `protectedProcedure`.
+**`campusVerifiedProcedure` gate** (FORBIDDEN "Verify your campus email to buy, sell, or post. Phone sign-in alone does not confirm you are a student."; blocked accounts get the BLOCKED message): `listing.create`, `listing.relist`, `listing.draftFromPhotos`, `offer.create`, `reservation.book`, `reservation.request`, `community.create`, `listingComment.add`. Everything else (browse, search, message, save, read community, view offers/meetups already owned) stays open to a phone-only account. Note `offer.accept/decline/withdraw` and `reservation.accept/counter/cancel` are plain `protectedProcedure`.
+
+**Posting access** (`backend/auth/posting-access.ts`; `users.postingAccess`: `'default' | 'approved' | 'blocked'`, set by the founder on /admin). One decision, in this order: `blocked` → never; a verified campus email → yes; `approved` → yes without a campus email; otherwise `needs_campus_email`. Blocked only stops the `campusVerifiedProcedure` set above; messaging, comments, votes, likes and managing your own listings, offers and meetups stay open. `approved` is labelled "Approved seller", never "Campus email verified".
+
+**Admin: posting access** (`backend/admin/routes.ts`, `backend/admin/access.ts`). Both need the admin cookie, return 404 when `ADMIN_PASSWORD` is unset, and are rate limited.
+- `GET /admin/users.json?q=` searches email or display name (max 20 rows, open accounts only; empty `q` lists non-default accounts). Returns no phone or contact fields.
+- `POST /admin/users/access` with `{ userId, access }` where `access` is `default | approved | blocked`. Same-origin only (Origin or Referer must match the host) and JSON only (`Content-Type: application/json`).
 
 **Linking rules** (`backend/auth/accounts.ts`; never auto-merge two accounts that both have history). "Has activity" = any listing as seller, reservation, offer, conversation, or community post.
 - `confirmPhoneLink`: if the number already belongs to another (non-deleted) account **with activity** -> CONFLICT ("…Sign in with the phone to use that account, or contact support to combine them."); if that account is empty it is retired and the number moves here. `smsOptIn` omitted keeps the current consent; `true` opts in; `false` records an opt-out.
