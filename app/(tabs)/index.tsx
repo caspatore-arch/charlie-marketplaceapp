@@ -12,6 +12,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Heart, LayoutGrid, Layers, Search } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
+import { Logo } from '@/components/ui/Logo';
 import { RefetchBanner } from '@/components/ui/RefetchBanner';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -328,6 +329,7 @@ export default function BrowseScreen() {
   const headerBlock = (
     <View style={styles.header}>
       <View style={styles.brandRow}>
+        <Logo variant="wordmark" width={104} />
         {campus?.name ? <Text variant="heading">{campus.name}</Text> : null}
         {campus?.isDemo ? (
           <Text variant="caption" color="inkFaint" style={styles.demoNote}>
@@ -505,7 +507,7 @@ export default function BrowseScreen() {
 const styles = StyleSheet.create({
   bodyPad: { flex: 1 },
   padHorizontal: { paddingHorizontal: space.lg },
-  brandRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: space.sm },
+  brandRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: space.sm },
   header: { paddingTop: space.xs, paddingBottom: space.sm, paddingHorizontal: space.lg },
   demoNote: { flexShrink: 1 },
   controls: {

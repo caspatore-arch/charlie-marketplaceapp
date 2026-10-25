@@ -5,8 +5,8 @@ export default function WhyDibbs() {
   return (
     <InfoPage
       current="why"
-      title="Four reasons students use Dibbs."
-      intro="Built so a sale takes a day, not a week of messages."
+      title="A marketplace that fits between classes."
+      intro="Dibbs is built around a campus handoff: the item, the price, the place, and the time. Here’s why that can make buying and selling easier."
       sections={[
         {
           title: 'Quick, with no haggling',

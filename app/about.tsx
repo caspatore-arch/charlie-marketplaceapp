@@ -6,8 +6,8 @@ export default function About() {
     <InfoPage
       current="about"
       numbered
-      title="Dibbs is the campus marketplace for UArizona students."
-      intro="Sell what you no longer use and find secondhand things nearby. Free to use, and sellers keep 100% of their price."
+      title="Good stuff. Another semester."
+      intro="Dibbs is an independent marketplace starting with the University of Arizona campus community. Buy and sell used goods nearby, with a clear plan for meeting up."
       sections={[
         {
           title: 'List it for 24 hours',

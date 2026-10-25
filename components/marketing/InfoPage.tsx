@@ -2,6 +2,7 @@ import React from 'react';
 import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
+import { Logo } from '@/components/ui/Logo';
 import { Text } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
 import { TextLink } from '@/components/ui/TextLink';
@@ -37,7 +38,8 @@ export function InfoPage({
     <Screen scroll>
       <Stack.Screen options={{ title }} />
       <View style={{ paddingVertical: space.xxl, gap: space.xl }}>
-        <Text variant="displaySm" accessibilityRole="header">{title}</Text>
+        <Logo width={150} />
+        <Text variant="display" accessibilityRole="header">{title}</Text>
         <Text variant="lead" color="inkMuted">{intro}</Text>
         {cta}
         {sections.map((section, i) => (

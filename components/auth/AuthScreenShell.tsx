@@ -15,6 +15,7 @@ import React from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
+import { Logo } from '@/components/ui/Logo';
 import { breakpoints, colors, radius, shadow, space } from '@/constants/theme';
 
 /** A sign-in form reads as a column; past this it stops looking like one. */
@@ -36,6 +37,7 @@ export function AuthScreenShell({ title, children }: AuthScreenShellProps) {
         style={styles.flex}
       >
         <View style={[styles.column, { maxWidth: FORM_MAX_WIDTH }]}>
+          <Logo variant="wordmark" width={84} />
           <Text variant={roomToBreathe ? 'display' : 'title'} accessibilityRole="header">
             {title}
           </Text>
