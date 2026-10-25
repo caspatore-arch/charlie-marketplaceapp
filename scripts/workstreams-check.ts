@@ -852,6 +852,38 @@ async function main() {
     assert((await db.select().from(schema.bookingEmails)).every((r) => r.status === 'skipped'), 'stale queue rows marked skipped');
   });
 
+  await check('meetup email: founder-approved seller without a campus email is emailed; unapproved is not', async () => {
+    const { dispatchBookingEmails, enqueueBookingEmails } = await import('../backend/email/bookings');
+    await db.delete(schema.bookingEmails);
+    const [maya] = await db.select().from(schema.users).where(d.eq(schema.users.id, MAYA));
+    const restore = { campusEmailVerifiedAt: maya!.campusEmailVerifiedAt, postingAccess: maya!.postingAccess };
+    try {
+      const listing = await makeListing(MAYA, { startH: 22, endH: 23 });
+      // Seller signed in with a non-campus email and was approved on /admin.
+      await db.update(schema.users).set({ campusEmailVerifiedAt: null, postingAccess: 'approved' }).where(d.eq(schema.users.id, MAYA));
+      const buyer = await as(JORDAN);
+      const slot = (await buyer.reservation.slots({ listingId: listing.id })).slots.find((x) => x.available)!;
+      const booking = await buyer.reservation.book({ listingId: listing.id, spotId: SPOT_A, startsAt: slot.startsAt });
+      const [row] = await db.select().from(schema.reservations).where(d.eq(schema.reservations.id, booking.id));
+      await enqueueBookingEmails(db, row!);
+      let before = mail.sent.length;
+      await dispatchBookingEmails(db);
+      eq(mail.sent.length - before, 2, 'approved seller and buyer both emailed');
+      assert(mail.sent.slice(before).some((m) => m.to === maya!.email), 'approved seller received the confirmation');
+
+      // Same seller without approval or a campus email: only the buyer is emailed.
+      await db.delete(schema.bookingEmails);
+      await db.update(schema.users).set({ postingAccess: 'default' }).where(d.eq(schema.users.id, MAYA));
+      await enqueueBookingEmails(db, row!);
+      before = mail.sent.length;
+      await dispatchBookingEmails(db);
+      eq(mail.sent.length - before, 1, 'unapproved seller without a campus email is skipped');
+      await buyer.reservation.cancel({ id: booking.id });
+    } finally {
+      await db.update(schema.users).set(restore).where(d.eq(schema.users.id, MAYA));
+    }
+  });
+
   await check('Twilio: signed STOP cancels queue; forged callback cannot change consent', async () => {
     const { createHmac } = await import('node:crypto');
     const { handleSmsOptOut, validTwilioSignature } = await import('../backend/sms/webhook');

@@ -62,8 +62,7 @@ the market has spoken: repost it at a lower price.
   selling, offers, booking and posting (the campusVerifiedProcedure set). Messages,
   comments, votes, likes and managing their own existing listings, offers and
   meetups stay open. Approved users show "Approved seller", never "Campus email
-  verified". Open: approved sellers don't get booking confirmation emails yet
-  (`backend/email/bookings.ts` skips users without a campus email).
+  verified". Approved sellers now get booking confirmation emails too.
 
 **Conflicts with today's app, to settle before the copy changes:**
 - The offers system lets buyers propose a lower price, and the Why page says
