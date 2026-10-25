@@ -212,6 +212,13 @@ export default function ListingDetailScreen() {
     [id, requireAuth, router],
   );
 
+  const onPropose = useCallback(() => {
+    if (!id) return;
+    // Signed-out buyers sign in first and land back on the propose screen.
+    if (!requireAuth(`/reservation/propose?listingId=${id}`)) return;
+    router.push({ pathname: '/reservation/propose', params: { listingId: id } });
+  }, [id, requireAuth, router]);
+
   const onMakeOffer = useCallback(() => {
     if (!id) return;
     if (!requireAuth(`/listing/${id}`)) return;
@@ -304,6 +311,11 @@ export default function ListingDetailScreen() {
 
   const isSeller = listing.viewerRole === 'seller';
   const isAuction = listing.saleType === 'auction';
+  // Past its 24 hours and unsold (swept to 'expired', or still 'active' until the sweep runs).
+  const isArchived =
+    !isAuction &&
+    (listing.status === 'expired' ||
+      (listing.status === 'active' && !!listing.expiresAt && new Date(listing.expiresAt).getTime() <= now));
   const legacyAuctionNote = slotsQuery.data?.closedReason ?? 'This was posted as an auction and closes at its original end time.';
   const unavailableCopy = isAuction
     ? legacyAuctionNote
@@ -371,7 +383,7 @@ export default function ListingDetailScreen() {
         <PhotoGallery photos={listing.photos} />
 
         <View style={styles.content}>
-          <StatusBanner status={listing.status} />
+          <StatusBanner status={listing.status} buyerView={!isSeller} />
 
           <View style={styles.priceRow}>
             <View style={styles.flex}>
@@ -625,7 +637,7 @@ export default function ListingDetailScreen() {
 
           <ListingComments
             listingId={listing.id}
-            canComment={listing.status === 'active' || listing.status === 'reserved'}
+            canComment={listing.status === 'active' || listing.status === 'reserved' || listing.status === 'expired'}
           />
 
           {isSeller ? null : (
@@ -666,6 +678,31 @@ export default function ListingDetailScreen() {
               />
             ) : null}
           </View>
+        ) : isArchived ? (
+          <>
+            <View style={styles.archiveNote}>
+              <Text variant="label" weight="600">
+                This listing is in the Archive.
+              </Text>
+              <Text variant="caption" color="inkMuted">
+                You can still ask for a meetup: pick a time and a place, and the seller accepts or declines.
+              </Text>
+            </View>
+            {campusUnverified ? (
+              <View style={styles.unavailableNote}>
+                <Text variant="caption" color="inkMuted">
+                  Verify your campus email to ask for a meetup.
+                </Text>
+                <TextLink href="/settings" variant="small">
+                  Verify in Settings
+                </TextLink>
+              </View>
+            ) : null}
+            <View style={styles.footerRow}>
+              {signedOut ? null : messageIconButton}
+              <Button title="Propose a time and place" onPress={onPropose} style={styles.footerBtnFlex} />
+            </View>
+          </>
         ) : signedOut ? (
           <>
             <Text variant="caption" color="inkMuted" style={styles.unavailableNote}>
@@ -837,6 +874,13 @@ const styles = StyleSheet.create({
   },
   footerIconBtnPressed: { opacity: 0.6 },
   unavailableNote: { marginBottom: space.sm },
+  archiveNote: {
+    marginBottom: space.md,
+    padding: space.md,
+    gap: 2,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+  },
   noticeBox: { marginTop: space.lg },
   sectionGap: { marginTop: space.lg, marginBottom: space.sm },
   meetupList: { gap: space.sm },

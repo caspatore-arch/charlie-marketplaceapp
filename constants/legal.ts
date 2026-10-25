@@ -53,7 +53,7 @@ export const TERMS_TITLE = 'Terms of Service';
 export const TERMS_SUMMARY: string[] = [
   'Dibbs is a prototype campus marketplace. You meet other students in person; Dibbs is not part of the trade.',
   'No payments happen in the app. Phone verified and campus email verified are not ID checks.',
-  'Community posts disappear after 24 hours. Report or block anyone who makes you uncomfortable.',
+  'Community posts stay up until their author deletes them. Report or block anyone who makes you uncomfortable.',
 ];
 
 export const TERMS_SECTIONS: LegalSection[] = [
@@ -94,7 +94,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     heading: '5. Your content',
     body: [
       'You are responsible for what you post — listing text, photos, messages, Community posts, and comments. Do not post anything illegal, fraudulent, or that you do not have the right to post.',
-      'Listings and Community posts are temporary. Community posts disappear from the feed after 24 hours, and listings expire on their own schedule, so an item that does not sell can be listed again.',
+      'Listings are live in Browse for 24 hours. An unsold listing then moves to the Archive, where it stays visible and a buyer can still propose a time and place for the seller to accept or decline; the seller can relist or remove it at any time. Community posts stay up until their author or a moderator removes them.',
       'The operator can remove listings or content, and suspend or close accounts, at its discretion — including through the moderation tools described in docs/HANDOFF.md.',
     ],
   },
@@ -150,7 +150,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
       'Account information: your phone number and whether it is verified, your campus email address and whether it is verified, your display name, and an optional bio and profile photo.',
       'Optional contact sharing: if you add an Instagram handle or a contact phone number to your profile, we store it. It is shown to other students only if you turn sharing on, and you can turn it off at any time.',
       'Content you create: listings (title, description, price, photos, availability), messages you send other users, meetup requests, and reports you file.',
-      'Community activity: Community posts (which expire after 24 hours), comments and votes on them, and comments on listings.',
+      'Community activity: Community posts (which stay up until deleted), comments and votes on them, and comments on listings.',
       'Notifications: if you allow notifications, a device notification token so we can send you alerts, and your notification and text-message preferences.',
       'Automatically: basic technical data needed to run the App (e.g. request logs on the backend server).',
       `Analytics and third-party services: ${ANALYTICS_THIRD_PARTIES}`,

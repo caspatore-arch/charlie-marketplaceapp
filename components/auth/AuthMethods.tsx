@@ -8,13 +8,12 @@ import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { EmailAuthFlow } from '@/components/auth/EmailAuthFlow';
+import { EMAIL_INTRO, EmailAuthFlow } from '@/components/auth/EmailAuthFlow';
 import { PhoneAuthFlow } from '@/components/auth/PhoneAuthFlow';
 import type { AuthFinish, AuthMode } from '@/components/auth/EmailAuthFlow';
 import { trpc } from '@/lib/trpc';
 import { space } from '@/constants/theme';
 
-const EMAIL_INTRO = 'Enter your @arizona.edu email. We’ll send you a 6-digit code — no password to remember.';
 const PHONE_INTRO = 'Enter your mobile number. We’ll text you a 6-digit code — no password to remember.';
 
 export function AuthMethods({

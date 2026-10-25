@@ -88,6 +88,38 @@ export function rollingDaySlotStarts(now: Date = new Date()): Date[] {
 }
 
 /**
+ * Every 15-minute start a buyer may propose on an archived listing: from the
+ * next quarter hour that is at least `leadMinutes` away, up to `days` days
+ * ahead, and only inside 7:00 AM - 11:00 PM campus time (a meetup must end by
+ * 11 PM, so the last start is 10:45 PM). Matches the server's rule for a
+ * buyer-proposed time: on the 15-minute grid, in the future, at most 7 days out.
+ */
+export function proposalSlotStarts(
+  timeZone: string | undefined,
+  now: Date = new Date(),
+  opts: { days?: number; leadMinutes?: number; openHour?: number; closeHour?: number } = {},
+): Date[] {
+  const { days = 7, leadMinutes = 30, openHour = 7, closeHour = 23 } = opts;
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  });
+  const out: Date[] = [];
+  const end = now.getTime() + days * DAY_MS;
+  const first = nextSlotBoundary(new Date(now.getTime() + leadMinutes * 60_000)).getTime();
+  for (let t = first; t <= end; t += SLOT_MS) {
+    const parts = fmt.formatToParts(new Date(t));
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+    const minuteOfDay = hour * 60 + minute;
+    if (minuteOfDay >= openHour * 60 && minuteOfDay + SLOT_MS / 60_000 <= closeHour * 60) out.push(new Date(t));
+  }
+  return out;
+}
+
+/**
  * Whole-dollar-and-cents text -> integer cents. Returns null when the text is
  * not a plain amount (so callers can show their own message).
  */

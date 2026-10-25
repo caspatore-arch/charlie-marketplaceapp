@@ -95,6 +95,9 @@ export default function BrowseScreen() {
 
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [sort, setSort] = useState<BrowseSort>('new');
+  // The Archive: unsold listings past their 24 hours, newest first. They stay
+  // likeable and commentable, and a buyer can still propose a time and place.
+  const [archived, setArchived] = useState(false);
   const [pickupToday, setPickupToday] = useState(false);
   const [minCents, setMinCents] = useState<number | undefined>(undefined);
   const [maxCents, setMaxCents] = useState<number | undefined>(undefined);
@@ -121,6 +124,7 @@ export default function BrowseScreen() {
   const filtersActive =
     category !== 'all' ||
     sort !== 'new' ||
+    archived ||
     pickupToday ||
     minCents !== undefined ||
     maxCents !== undefined ||
@@ -129,6 +133,7 @@ export default function BrowseScreen() {
   const clearFilters = useCallback(() => {
     setCategory('all');
     setSort('new');
+    setArchived(false);
     setPickupToday(false);
     setMinCents(undefined);
     setMaxCents(undefined);
@@ -158,8 +163,9 @@ export default function BrowseScreen() {
       minCents,
       maxCents,
       size: sizeVisible ? size : undefined,
-      pickupToday: pickupToday || undefined,
+      pickupToday: pickupToday && !archived ? true : undefined,
       sort,
+      archived,
       limit: 20,
     },
     {
@@ -208,8 +214,9 @@ export default function BrowseScreen() {
         size: sizeVisible ? size : undefined,
         pickupToday,
         sort,
+        archived,
       }),
-    [campus?.id, hasSearch, debouncedSearch, category, minCents, maxCents, sizeVisible, size, pickupToday, sort],
+    [campus?.id, hasSearch, debouncedSearch, category, minCents, maxCents, sizeVisible, size, pickupToday, sort, archived],
   );
 
   // The campus name is identity, so it scrolls away with the content. Search
@@ -302,6 +309,8 @@ export default function BrowseScreen() {
           onCategoryChange={handleCategoryChange}
           sort={sort}
           onToggleHottest={() => setSort((s) => (s === 'hot' ? 'new' : 'hot'))}
+          archived={archived}
+          onToggleArchive={() => setArchived((a) => !a)}
           pickupToday={pickupToday}
           onTogglePickupToday={() => setPickupToday((v) => !v)}
           priceLabel={priceLabel}
@@ -327,7 +336,9 @@ export default function BrowseScreen() {
         ) : null}
       </View>
       <Text variant="bodySm" color="inkMuted">
-        Buy and sell the same day. Get cash for things you don&apos;t use, or buy something at a college discount.
+        {archived
+          ? "The Archive: listings past their 24 hours. They're still here: pick a time and place, and the seller accepts or declines."
+          : "Buy and sell the same day. Get cash for things you don't use, or buy something at a college discount."}
       </Text>
       {feedQuery.isError && items.length > 0 ? <RefetchBanner onRetry={() => feedQuery.refetch()} /> : null}
     </View>
@@ -432,7 +443,9 @@ export default function BrowseScreen() {
           ) : !feedQuery.hasNextPage && items.length > 0 ? (
             <View style={styles.footerNote}>
               <Text variant="label" color="inkMuted" style={styles.footerText}>
-                That&apos;s everything on {campus?.name ?? 'campus'} right now.
+                {archived
+                  ? `That's everything in the ${campus?.name ?? 'campus'} Archive.`
+                  : `That's everything on ${campus?.name ?? 'campus'} right now.`}
               </Text>
             </View>
           ) : null
@@ -444,9 +457,11 @@ export default function BrowseScreen() {
               title={
                 hasSearch
                   ? `No results for "${debouncedSearch}"`
-                  : filtersActive
-                    ? 'No matches'
-                    : 'No listings yet'
+                  : archived
+                    ? 'Nothing in the Archive'
+                    : filtersActive
+                      ? 'No matches'
+                      : 'No listings yet'
               }
               body={
                 hasSearch || filtersActive

@@ -411,8 +411,8 @@ Short "interest check" posts ("Anyone selling a mini fridge?", "Anyone want shir
 
 **Rules**
 - **Campus scope**: you only ever see, open, or report posts from your own campus.
-- **Exact 24h expiry**: `expiresAt = createdAt + 24h`, enforced **on read** (`expires_at > now() AND removed_at IS NULL` in every query), not by a sweep. An expired post is gone from the feed and from `byId`/`report` the instant it lapses (NOT_FOUND "That post has expired or was removed."). `serverNow` is returned so the client can render "Xh left".
-- **Cap**: at most `COMMUNITY_MAX_LIVE_POSTS` = 5 live posts per person (TOO_MANY_REQUESTS). Body 3–280 chars.
+- **Exact 24h expiry**: *superseded October 24, 2026, see "Archive, buyer-proposed meetups and permanent posts" below: posts no longer expire.*
+- **Cap**: *superseded: at most `COMMUNITY_MAX_POSTS_PER_DAY` = 5 new posts per person in any rolling 24 hours (TOO_MANY_REQUESTS).* Body 3–280 chars.
 - **Identity**: posts show the author's normal display name; no anonymity.
 - **Blocks** hide posts in both directions (feed, `byId`, `report`).
 - Posting requires a campus-verified account; reading requires any signed-in account.
@@ -580,4 +580,17 @@ Migration `0016_listing_engagement` (additive only: two new tables, one nullable
 - Automatic posts do not count toward `COMMUNITY_MAX_LIVE_POSTS`, and are left out of a profile's text posts (`user.posts`) and the admin "community posts" count.
 - Ordinary text posts (buying/selling) are unchanged.
 - Tested by `npm run test:engagement` (58 checks).
+
+## Archive, buyer-proposed meetups and permanent posts (October 24, 2026)
+
+Owner decision. Migration `0017_posts_no_expiry` (additive: `community_posts.expires_at` becomes nullable).
+
+**Listings.** A listing is still live in the main Browse feed for exactly 24 hours (`listings.expiresAt`, unchanged). After that, if it is unsold it is **archived**: status `expired` (or `active` past its deadline, before the sweep). Nothing is deleted. `isArchivedListing()` (`backend/trpc/lib.ts`) is the one definition.
+- `listing.feed { archived: true }` (public) returns the Archive: archived listings, newest first (same ordering, Hottest and cursors as the live feed; same category/size/price/search filters; `pickupToday` is ignored). `archived: false` (default) is the unchanged live feed. Sold, removed and held (`reserved`) listings are in neither.
+- An archived listing stays interactive: `listing.setLike`/`recordShare` work on `active` or `expired` listings; `listingComment.add` is open on `active`, `reserved` and `expired`. Offers and instant booking (`reservation.book`) stay live-listing only (CONFLICT).
+- **Buyer-proposed meetup.** `reservation.request { listingId, startsAt, spotId | customAddress }` now accepts an archived listing. The buyer sets the time and place, so the seller's original windows and spots do not apply: any **active campus meetup spot** (BAD_REQUEST otherwise) or a custom address (the existing campus-radius check), and a time on the 15-minute grid that is in the future and within `ARCHIVE_REQUEST_HORIZON_MS` = **7 days**. It creates a `requested` reservation proposed by the buyer; the seller then `reservation.accept`s (the meetup is confirmed, the listing becomes `reserved`, handoff code issued) or `reservation.decline`s; `counter` still works. Accepting an archived request is allowed (the old "no longer available" refusal now applies only to sold, removed or held listings). A request alone never holds the listing; one open request per buyer per listing; blocks, the campus-email gate and the double-booking guard apply as before. If the confirmed meetup is cancelled or lapses, `releaseListing` returns the listing to `expired`, i.e. back into the Archive. Live listings keep their old rules (seller windows and spots).
+
+**Posts stay up.** Community text posts no longer expire: `liveFilter()` is just `removed_at IS NULL`; `expiresAt` is NULL for new posts, never read, and no longer returned by `community.feed`/`byId`/`create`/`user.posts`/`user.comments`. Only the author (`community.remove`) or a moderator takes a post down. A listing's automatic Community post follows its listing: visible while the listing is `active` or `expired` (so archived listings keep their post and its likes and comments), hidden once it is sold, held by a confirmed meetup, or removed. **Posting brake**: `COMMUNITY_MAX_POSTS_PER_DAY` = 5 new text posts per person per rolling 24 hours (removed posts count, so delete-and-repost cannot dodge it; automatic listing posts never count). Retention: nothing here deletes data on a timer, which the privacy policy's retention wording must reflect (see `docs/LEGAL-TODO.md`).
+
+Tested by `npm run test:archive` (43 checks).
 

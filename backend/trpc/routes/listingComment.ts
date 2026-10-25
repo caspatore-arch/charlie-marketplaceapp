@@ -80,7 +80,8 @@ export const listingCommentRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const listing = await loadListing(ctx.db, input.listingId);
-      if (listing.status !== 'active' && listing.status !== 'reserved') {
+      // Archived (expired, unsold) listings keep their conversation going.
+      if (listing.status !== 'active' && listing.status !== 'reserved' && listing.status !== 'expired') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Comments are closed on this item.' });
       }
       const hidden = await blockedUserIds(ctx.db, ctx.user.id);

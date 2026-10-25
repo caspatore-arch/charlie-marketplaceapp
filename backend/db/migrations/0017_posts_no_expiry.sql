@@ -1,0 +1,1 @@
+ALTER TABLE "community_posts" ALTER COLUMN "expires_at" DROP NOT NULL;

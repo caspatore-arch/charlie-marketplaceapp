@@ -161,6 +161,19 @@ export const AUCTION_TTL_MS = 24 * 60 * 60 * 1000;
 /** Every listing (fixed-price or auction) expires 24 hours after it was created. */
 export const LISTING_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
+/** How far ahead a buyer may propose a meetup on an archived listing (the seller's own windows are gone). */
+export const ARCHIVE_REQUEST_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * A listing in the Archive: past its 24 hours (swept to 'expired', or still
+ * 'active' and waiting for the sweep) and neither sold, removed nor held by a
+ * confirmed meetup. It leaves the main Browse feed but stays visible, likeable,
+ * commentable, and open to a buyer-proposed meetup that the seller accepts or declines.
+ */
+export function isArchivedListing(l: Pick<Listing, 'status' | 'expiresAt'>, now: Date = new Date()): boolean {
+  return l.status === 'expired' || (l.status === 'active' && l.expiresAt !== null && l.expiresAt.getTime() <= now.getTime());
+}
+
 /** A bid inside the final 2 minutes pushes the end time out to now + 2 minutes. */
 export const ANTI_SNIPE_MS = 2 * 60 * 1000;
 

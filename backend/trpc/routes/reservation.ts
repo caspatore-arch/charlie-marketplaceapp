@@ -43,11 +43,13 @@ import { cancelBookingSms, enqueueBookingSms } from '../../sms/outbox';
 import { directionsUrlForCoords, geocodeAddress, haversineMeters, GeocodeError } from '../../geocode';
 import { notifyMeetupEvent, type MeetupEventKind } from '../../notifications/events';
 import {
+  ARCHIVE_REQUEST_HORIZON_MS,
   AVAILABILITY_HORIZON_MS,
   LEGACY_AUCTION_MESSAGE,
   MEETUP_SLOT_MINUTES,
   applyExpiry,
   applyExpiryForRead,
+  isArchivedListing,
   isBlockedBetween,
   isSlotAligned,
   isUniqueViolation,
@@ -69,8 +71,12 @@ function conflictFromUnique(err: unknown): TRPCError | null {
   return new TRPCError({ code: 'CONFLICT', message: 'This item was just reserved by someone else.' });
 }
 
-/** Rejects times that are off the 15-minute grid, in the past, or beyond the rolling 24h. */
-function assertBookableTime(startsAt: Date, now = new Date()) {
+/**
+ * Rejects times that are off the 15-minute grid, in the past, or beyond the
+ * horizon: the rolling 24h of a live listing, or the longer window a buyer may
+ * propose into on an archived one.
+ */
+function assertBookableTime(startsAt: Date, now = new Date(), horizonMs = AVAILABILITY_HORIZON_MS) {
   if (!isSlotAligned(startsAt)) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
@@ -80,8 +86,12 @@ function assertBookableTime(startsAt: Date, now = new Date()) {
   if (startsAt.getTime() <= now.getTime()) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'That time has already passed.' });
   }
-  if (startsAt.getTime() > now.getTime() + AVAILABILITY_HORIZON_MS) {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Pick a time within the next 24 hours.' });
+  if (startsAt.getTime() > now.getTime() + horizonMs) {
+    const days = Math.round(horizonMs / AVAILABILITY_HORIZON_MS);
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: days > 1 ? `Pick a time within the next ${days} days.` : 'Pick a time within the next 24 hours.',
+    });
   }
 }
 
@@ -323,7 +333,10 @@ export const reservationRouter = router({
           message: 'This item was just reserved by someone else.',
         });
       }
-      if (listing.status !== 'active') {
+      // An archived listing (past its 24 hours, unsold) is still requestable: the
+      // buyer proposes the time and place, and the seller accepts or declines.
+      const archived = isArchivedListing(listing);
+      if (listing.status !== 'active' && !archived) {
         throw new TRPCError({ code: 'CONFLICT', message: 'This item is no longer available.' });
       }
       if (await isBlockedBetween(ctx.db, ctx.user.id, listing.sellerId)) {
@@ -334,16 +347,35 @@ export const reservationRouter = router({
       }
 
       if (input.spotId) {
-        const allowedSpot = await ctx.db
-          .select({ spotId: listingSpots.spotId })
-          .from(listingSpots)
-          .where(and(eq(listingSpots.listingId, listing.id), eq(listingSpots.spotId, input.spotId)))
-          .limit(1);
-        if (allowedSpot.length === 0) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'The seller does not meet at that spot.',
-          });
+        if (archived) {
+          // The seller's own spots and windows were set for the first 24 hours:
+          // any active campus meetup spot is fair game for the buyer's proposal.
+          const campusSpot = await ctx.db
+            .select({ id: meetupSpots.id })
+            .from(meetupSpots)
+            .where(
+              and(
+                eq(meetupSpots.id, input.spotId),
+                eq(meetupSpots.campusId, listing.campusId),
+                eq(meetupSpots.isActive, true),
+              ),
+            )
+            .limit(1);
+          if (campusSpot.length === 0) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Pick a meetup spot on campus.' });
+          }
+        } else {
+          const allowedSpot = await ctx.db
+            .select({ spotId: listingSpots.spotId })
+            .from(listingSpots)
+            .where(and(eq(listingSpots.listingId, listing.id), eq(listingSpots.spotId, input.spotId)))
+            .limit(1);
+          if (allowedSpot.length === 0) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'The seller does not meet at that spot.',
+            });
+          }
         }
       }
       const location = await resolveLocation(ctx.db, listing.campusId, input);
@@ -353,21 +385,26 @@ export const reservationRouter = router({
       if (listing.saleType === 'auction') {
         throw new TRPCError({ code: 'CONFLICT', message: LEGACY_AUCTION_MESSAGE });
       }
-      assertBookableTime(input.startsAt);
-      const windows = await ctx.db
-        .select()
-        .from(availabilityWindows)
-        .where(eq(availabilityWindows.listingId, listing.id));
-      const inWindow = windows.some(
-        (w) =>
-          input.startsAt >= w.startsAt &&
-          input.startsAt.getTime() + MEETUP_SLOT_MINUTES * 60_000 <= w.endsAt.getTime(),
-      );
-      if (!inWindow) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Pick a time the seller is available.',
-        });
+      if (archived) {
+        // The buyer sets the time; the seller's accept is the check that it works for them.
+        assertBookableTime(input.startsAt, new Date(), ARCHIVE_REQUEST_HORIZON_MS);
+      } else {
+        assertBookableTime(input.startsAt);
+        const windows = await ctx.db
+          .select()
+          .from(availabilityWindows)
+          .where(eq(availabilityWindows.listingId, listing.id));
+        const inWindow = windows.some(
+          (w) =>
+            input.startsAt >= w.startsAt &&
+            input.startsAt.getTime() + MEETUP_SLOT_MINUTES * 60_000 <= w.endsAt.getTime(),
+        );
+        if (!inWindow) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Pick a time the seller is available.',
+          });
+        }
       }
 
       const alreadyOpen = await ctx.db
@@ -604,7 +641,8 @@ export const reservationRouter = router({
                 message: 'This item was just reserved by someone else.',
               });
             }
-          } else if (listing.status !== 'active') {
+          } else if (listing.status !== 'active' && listing.status !== 'expired') {
+            // 'expired' = an archived listing: a buyer's proposed meetup stays acceptable.
             throw new TRPCError({ code: 'CONFLICT', message: 'This item is no longer available.' });
           }
 

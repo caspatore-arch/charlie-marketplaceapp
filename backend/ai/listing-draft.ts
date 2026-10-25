@@ -2,10 +2,11 @@
  * "Fill in from photos": looks at a seller's uploaded photos and drafts the
  * listing (title, category, condition, brand, description, price range).
  *
- * Simulated by default, like payments and email: without LISTING_AI_MODE=live
- * AND an ANTHROPIC_API_KEY it returns a fixed demo draft and makes no network
- * call, so tests and demos never spend money. Tests (NODE_ENV=test) always
- * simulate.
+ * On whenever the server has an ANTHROPIC_API_KEY (owner decision, 2026-10-25;
+ * unlike payments and email there is no second switch). With no key, or with
+ * LISTING_AI_MODE=simulated as an off switch, it returns a fixed demo draft and
+ * makes no network call. Tests (NODE_ENV=test) always simulate, so they never
+ * spend money.
  *
  * Live mode sends the photo bytes (read back from upload storage, never a
  * client-supplied URL) to Claude and asks for JSON matching DraftSchema.

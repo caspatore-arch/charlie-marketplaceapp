@@ -132,7 +132,7 @@ export default function SavedScreen() {
         <EmptyState
           icon={<Heart size={40} color={colors.inkFaint} />}
           title="Nothing saved yet"
-          body="Tap the heart on anything you might want. Saved items expire with the listing after 24 hours."
+          body="Tap the heart on anything you might want. Saved items stay here. When a listing's 24 hours end it moves to the Archive."
           actionLabel="Browse"
           onAction={() => router.replace('/')}
         />

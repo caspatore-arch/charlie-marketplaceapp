@@ -17,7 +17,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ListingCard } from '@/components/ListingCard';
 import { trpc } from '@/lib/trpc';
-import { timeLeftLabel, useNow } from '@/components/community/useNow';
+import { useNow } from '@/components/community/useNow';
 import { Button } from '@/components/ui/Button';
 import { formatPrice, formatRelative } from '@/utils/format';
 import { colors, minTouchHeight, radius, space } from '@/constants/theme';
@@ -176,7 +176,7 @@ export function ProfileContent({
                   </Text>
                   <View style={styles.postTop}>
                     <Text variant="caption" color="inkFaint">
-                      {formatRelative(c.createdAt)} · {timeLeftLabel(c.postExpiresAt, now)}
+                      {formatRelative(c.createdAt)}
                     </Text>
                     {c.voteCount > 0 ? (
                       <Text variant="caption" color="inkMuted">
@@ -195,7 +195,7 @@ export function ProfileContent({
         ) : postsQuery.data.length === 0 ? (
           <EmptyState
             title={isSelf ? "You haven't posted lately" : `${firstName} hasn't posted lately`}
-            body="Community posts last 24 hours, so this fills up whenever someone asks around."
+            body="Posts you make in Community show up here and stay until you delete them."
           />
         ) : (
           <View style={styles.posts}>
@@ -208,7 +208,7 @@ export function ProfileContent({
                     tone={post.kind === 'buying' ? 'warning' : 'success'}
                   />
                   <Text variant="caption" color="inkFaint">
-                    {formatRelative(post.createdAt)} · {timeLeftLabel(post.expiresAt, now)}
+                    {formatRelative(post.createdAt)}
                   </Text>
                 </View>
                 <Text variant="body" style={styles.postBody}>

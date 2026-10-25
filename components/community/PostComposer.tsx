@@ -73,12 +73,12 @@ export function PostComposer({ kind, onKind, onPosted, campusEmailVerified }: Po
           <View style={styles.posted} accessibilityRole="alert">
             <CheckCircle2 size={16} color={colors.success} />
             <Text variant="small" color="success">
-              Posted. It disappears in 24 hours.
+              Posted. It stays up until you delete it.
             </Text>
           </View>
         ) : (
           <Text variant="caption" color="inkMuted" style={styles.note}>
-            Posts disappear after 24 hours.
+            Posts stay up until you delete them.
           </Text>
         )}
       </View>
@@ -134,7 +134,7 @@ export function PostComposer({ kind, onKind, onPosted, campusEmailVerified }: Po
         </View>
       </View>
       <Text variant="caption" color="inkMuted">
-        Posts disappear after 24 hours.
+        Posts stay up until you delete them.
       </Text>
       {error ? (
         <View style={styles.error}>

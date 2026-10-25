@@ -28,7 +28,7 @@ type Step = 'phone' | 'code' | 'profile' | 'campusEmail';
 export interface PhoneAuthFlowProps {
   /** Called when the flow is complete (signed in, and verified or skipped). */
   onFinished: (result: AuthFinish) => void;
-  /** Called for "Use campus email instead". */
+  /** Called for "Use email instead". */
   onUseEmail?: () => void;
   /** Heading shown on the first step. */
   phoneTitle?: string;
@@ -398,7 +398,7 @@ export function PhoneAuthFlow({
       />
       <Button title={tryAgain ? 'Try again' : submitLabel} onPress={() => sendCode(false)} loading={busy} />
       {onUseEmail ? (
-        <Button title="Use campus email instead" variant="link" onPress={onUseEmail} />
+        <Button title="Use email instead" variant="link" onPress={onUseEmail} />
       ) : null}
     </View>
   );

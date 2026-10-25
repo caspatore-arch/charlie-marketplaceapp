@@ -1,5 +1,5 @@
 /**
- * Sign-in. <AuthMethods> leads with campus email (or phone once SMS is live);
+ * Sign-in. <AuthMethods> leads with email (or phone once SMS is live);
  * this screen is the page chrome plus the `returnTo` / `method` handling.
  *
  * The chrome lives in <AuthScreenShell> so this route and /auth/email stay

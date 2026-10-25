@@ -10,9 +10,9 @@
  *
  * Rules the server owns:
  *  - Campus-scoped: you only ever see, open, or report posts from your campus.
- *  - Every post expires exactly 24h after it is created. Expiry is enforced in
- *    every query (`expires_at > now()`), not by a sweep, so an expired post is
- *    gone from the feed AND from direct retrieval the instant it lapses.
+ *  - Posts do not expire. A text post stays up until its author (or a moderator)
+ *    removes it; a listing post stays while its listing is live or archived and
+ *    goes when the listing is sold, held by a confirmed meetup, or removed.
  *  - Identity: posts show the author's normal display name (no anonymity).
  *  - Blocks hide posts both ways. Reports go into the existing moderation queue.
  *  - Posting needs a verified campus email; reading needs a signed-in account.
@@ -38,15 +38,20 @@ import { listingCaption } from '../listing-post';
 import { blockedUserIds, toListingCards, toPublicUser } from '../lib';
 import { campusVerifiedProcedure, moderatorProcedure, protectedProcedure, router } from '../trpc';
 
-export const COMMUNITY_POST_TTL_MS = 24 * 60 * 60 * 1000;
 export const COMMUNITY_POST_MAX = 280;
-/** Light spam brake: at most this many live posts per person. */
-export const COMMUNITY_MAX_LIVE_POSTS = 5;
+/**
+ * Light spam brake: at most this many new posts per person in any rolling
+ * 24 hours (posts no longer expire, so a cap on LIVE posts would become a
+ * lifetime cap). Removed posts still count, so create/delete cannot dodge it.
+ */
+export const COMMUNITY_MAX_POSTS_PER_DAY = 5;
+const POSTING_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const COMMUNITY_COMMENT_MAX = 500;
 
-export function liveFilter(now: Date) {
-  return and(gt(communityPosts.expiresAt, now), isNull(communityPosts.removedAt));
+/** A post is visible until it is removed. (Posts no longer expire; see the file header.) */
+export function liveFilter() {
+  return isNull(communityPosts.removedAt);
 }
 
 /**
@@ -114,7 +119,6 @@ async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
       kind: p.kind,
       body: listing ? listingCaption(listing) : p.body,
       createdAt: p.createdAt,
-      expiresAt: listing?.expiresAt ?? p.expiresAt,
       author: toPublicUser(byId.get(p.authorId)!),
       isMine: p.authorId === viewerId,
       /** Popularity only. Never an endorsement, and not a safety signal. For a listing post: the listing's likes. */
@@ -130,9 +134,13 @@ async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
   });
 }
 
-/** A listing post is only visible while its listing is: active and not past its deadline. */
-function listingLive(now: Date) {
-  return and(eq(listings.status, 'active'), or(isNull(listings.expiresAt), gt(listings.expiresAt, now)))!;
+/**
+ * A listing post stays up while its listing is live OR archived (unsold past
+ * its 24 hours): 'active' or 'expired'. Sold, held by a confirmed meetup
+ * ('reserved') and removed listings leave Community, as they leave Browse.
+ */
+function listingLive() {
+  return inArray(listings.status, ['active', 'expired']);
 }
 
 const LISTING_POST_NOTE = 'That post is a listing. Like, comment or report it from the listing.';
@@ -179,14 +187,14 @@ async function loadVisible(db: Db, id: string, viewer: { id: string; campusId: s
   const [post] = await db
     .select()
     .from(communityPosts)
-    .where(and(eq(communityPosts.id, id), eq(communityPosts.campusId, viewer.campusId), liveFilter(new Date())))
+    .where(and(eq(communityPosts.id, id), eq(communityPosts.campusId, viewer.campusId), liveFilter()))
     .limit(1);
   if (!post) throw new TRPCError({ code: 'NOT_FOUND', message: 'That post has expired or was removed.' });
   if (post.listingId) {
     const [live] = await db
       .select({ id: listings.id })
       .from(listings)
-      .where(and(eq(listings.id, post.listingId), listingLive(new Date())))
+      .where(and(eq(listings.id, post.listingId), listingLive()))
       .limit(1);
     if (!live) throw new TRPCError({ code: 'NOT_FOUND', message: 'That post has expired or was removed.' });
   }
@@ -281,15 +289,14 @@ export const communityRouter = router({
       }
       const now = cursor ? new Date(cursor.asOf) : new Date();
       // Expiry/removal are judged at the real current time, never the frozen one.
-      const realNow = new Date();
       const conditions = [
         eq(communityPosts.campusId, ctx.user.campusId),
         // Text posts: the post's own 24h expiry. Listing posts: the listing's
         // own status and deadline (so sold, expired or removed listings leave
         // Community exactly when they leave Browse).
         or(
-          and(isNull(communityPosts.listingId), liveFilter(realNow)),
-          and(isNotNull(communityPosts.listingId), isNull(communityPosts.removedAt), listingLive(realNow)),
+          and(isNull(communityPosts.listingId), liveFilter()),
+          and(isNotNull(communityPosts.listingId), liveFilter(), listingLive()),
         )!,
       ];
       if (input.kind) conditions.push(eq(communityPosts.kind, input.kind));
@@ -538,15 +545,22 @@ export const communityRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const now = new Date();
-      const live = await ctx.db
+      const recent = await ctx.db
         .select({ id: communityPosts.id })
         .from(communityPosts)
-        // Automatic listing posts are not "posts you wrote": they must not eat the cap.
-        .where(and(eq(communityPosts.authorId, ctx.user.id), isNull(communityPosts.listingId), liveFilter(now)));
-      if (live.length >= COMMUNITY_MAX_LIVE_POSTS) {
+        .where(
+          and(
+            eq(communityPosts.authorId, ctx.user.id),
+            // Automatic listing posts are not "posts you wrote": they must not eat the cap.
+            isNull(communityPosts.listingId),
+            // Removed posts count too, so delete-and-repost cannot dodge the brake.
+            gt(communityPosts.createdAt, new Date(now.getTime() - POSTING_WINDOW_MS)),
+          ),
+        );
+      if (recent.length >= COMMUNITY_MAX_POSTS_PER_DAY) {
         throw new TRPCError({
           code: 'TOO_MANY_REQUESTS',
-          message: `You have ${COMMUNITY_MAX_LIVE_POSTS} live posts. Delete one or wait for one to expire.`,
+          message: `You can post ${COMMUNITY_MAX_POSTS_PER_DAY} times a day. Try again later.`,
         });
       }
       const [post] = await ctx.db
@@ -557,7 +571,6 @@ export const communityRouter = router({
           kind: input.kind,
           body: input.body,
           createdAt: now,
-          expiresAt: new Date(now.getTime() + COMMUNITY_POST_TTL_MS),
         })
         .returning();
       const [shaped] = await shape(ctx.db, [post!], ctx.user.id);

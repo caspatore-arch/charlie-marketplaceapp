@@ -30,8 +30,11 @@ within the owner's current authorization; keep the remaining queue intact.
   committed direction. Do not upload the stale `/tmp/dibbs-waitlist.zip` as the
   final site. If the owner explicitly wants an interim waitlist, record that as
   a temporary launch choice and verify signup storage before using it.
-- Fixed asking prices and offers replace new auctions. Listings and Community
-  posts expire after 24 hours; confirmed meetups survive listing expiry.
+- Fixed asking prices and offers replace new auctions. A listing is live in the
+  main Browse feed for 24 hours, then moves to an Archive where it stays
+  visible, likeable, commentable and open to a buyer-proposed time and place
+  that the seller accepts or declines (owner decision, October 24, 2026).
+  Community posts stay up until removed. Confirmed meetups survive listing expiry.
 - Bookings use exact 30-minute slots and campus-local display times (owner decided 2026-10-22 to move to 15-minute slots inside seller-chosen blocks; see `docs/OVERHAUL.md` "The pitch"). Preserve
   concurrency protection, price checks, report/block behavior and account privacy.
 - Tabs: Browse, Sell, Community, Profile. Meetups/messages remain accessible
@@ -214,4 +217,20 @@ Decisions and open items for the owner:
 - Not counted as shares: the listing page's own share button and the intent chips (WhatsApp, X, ...). On Android the OS cannot report a cancelled share sheet, so a cancelled sheet may count there.
 - Native (iPhone/Android) was not run: no Xcode on this machine. The iPhone story-image export (react-native-svg `toDataURL`, `expo-file-system`, iOS share sheet) is written and typechecks but is untested on a device; the Story section is hidden on Android because React Native's `Share` ignores `url` there (the video email still shows).
 - Lint: `npx expo lint` still reports the pre-existing errors (e.g. `Confetti.tsx`, `Skeleton.tsx`); none are in the files added or changed for this work.
+
+## October 24 Archive and permanent posts (local, uncommitted, not deployed)
+
+Owner decision: a listing is live in Browse for 24 hours, then moves to an **Archive** where it stays usable (a buyer proposes the time and place; the seller accepts or declines), and Community posts stay up until removed. Behavior is specified in `docs/CONTRACT.md` ("Archive, buyer-proposed meetups and permanent posts"). Nothing is committed, pushed or deployed; no hosted database has been migrated (adds migration `0017_posts_no_expiry`; `0016` from the October 22 work is already on `main`).
+
+Verified locally on a throwaway sandbox database (never the shared dev DB or production), October 24:
+- `npm run typecheck`; new `npm run test:archive` 43/43; `test:engagement` 58/58, `test:workstreams` 42/42, `test:e2e` 17/17, `test:comments` 24/24, `test:save` 9/9, `test:payments` 39/39, `test:geo` 6/6. The e2e and workstreams checks that asserted "community posts expire after 24 hours" were rewritten to the new rule (posts stay; removal takes them down).
+- Browser (headless Chrome, 1440x900 and 390x844): an Archive chip beside Hottest shows unsold listings past their 24 hours (cards say "Archived · propose a time"; Pickup today is disabled there); archived listings stay likeable and open the listing page; the live feed no longer shows them; Community keeps a five-day-old text post and labels archived listings' posts "Archived", with no countdowns; no console errors. The buyer flow (listing page "Propose a time and place" -> pick a day/time up to 7 days out -> pick a campus spot or address -> confirm -> sent) and the seller's Accept / Propose another time / Decline screen were exercised in the browser by a helper session; screenshots are in the session scratchpad.
+
+Open items for the owner:
+- Offers stay live-listing only (and are currently hidden); instant booking stays live-listing only. Buyers on an archived listing can like, comment and request a meetup.
+- A buyer can propose any time up to 7 days out and any active campus spot or a custom address (the existing campus-radius check). Change `ARCHIVE_REQUEST_HORIZON_MS` or the spot rule if you want it tighter.
+- The posting brake changed from "5 live posts" to "5 new posts per rolling 24 hours" because posts no longer lapse.
+- The draft Terms/Privacy wording was updated to match (posts and archived listings do not expire), but retention (`DATA_RETENTION_PERIOD`) and deletion promises still need the founder's and a lawyer's review (`docs/LEGAL-TODO.md`).
+- `docs/OVERHAUL.md` was not touched: the coordinator should record this decision there.
+- Native (iPhone) not run: no Xcode on this machine.
 

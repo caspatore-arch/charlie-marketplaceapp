@@ -24,23 +24,22 @@ import { ListingComments } from '@/components/listing/ListingComments';
 import { resolveMediaUrl } from '@/lib/trpc';
 import { colors, radius, space } from '@/constants/theme';
 import { formatRelative } from '@/utils/format';
-import { timeLeftLabel } from './useNow';
 import type { CommunityPost, FeedListing } from '@/types';
 
 export interface ListingPostProps {
   post: CommunityPost;
   listing: NonNullable<CommunityPost['listing']>;
   engagement: FeedListing['engagement'];
-  now: number;
   onPressAuthor: () => void;
   onOpenActions: () => void;
 }
 
-export function ListingPost({ post, listing, engagement, now, onPressAuthor, onOpenActions }: ListingPostProps) {
+export function ListingPost({ post, listing, engagement, onPressAuthor, onOpenActions }: ListingPostProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const openListing = () => router.push(`/listing/${listing.id}`);
-  const left = timeLeftLabel(post.expiresAt, now);
+  // Past its 24 hours the listing is in the Archive; its post stays up with it.
+  const archived = listing.status === 'expired';
   const count = engagement.commentCount;
   const label = count === 0 ? 'Comment' : `${count} ${count === 1 ? 'comment' : 'comments'}`;
   const Chevron = open ? ChevronUp : ChevronDown;
@@ -51,10 +50,10 @@ export function ListingPost({ post, listing, engagement, now, onPressAuthor, onO
     <View>
       <Card style={styles.card}>
         <View style={styles.topRow}>
-          <Badge kind="status" label="New listing" tone="success" />
+          <Badge kind="status" label={archived ? 'Archived' : 'New listing'} tone={archived ? 'neutral' : 'success'} />
           <View style={styles.spacer} />
           <Text variant="caption" color="inkFaint">
-            {formatRelative(post.createdAt)} · {left}
+            {formatRelative(post.createdAt)}
           </Text>
           {post.isMine ? null : (
             <Pressable

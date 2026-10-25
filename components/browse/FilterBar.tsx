@@ -1,6 +1,6 @@
 /**
  * Browse screen filter row: a "Pickup today" toggle chip, category chips (All,
- * then Hottest right beside it, then each category), a price chip (opens
+ * then Hottest and Archive right beside it, then each category), a price chip (opens
  * PriceFilterSheet from the parent), and a size chip shown only for
  * clothing/shoes categories. When the chips overflow, an arrow button appears
  * on the side(s) with more to scroll to (the scrollbar is hidden, so without
@@ -31,6 +31,9 @@ export interface FilterBarProps {
   /** 'new' (default) is strictly newest first; 'hot' ranks by recent likes, comments and shares. */
   sort: BrowseSort;
   onToggleHottest: () => void;
+  /** Show the Archive: unsold listings past their 24 hours, still open to a buyer-proposed meetup. */
+  archived: boolean;
+  onToggleArchive: () => void;
   pickupToday: boolean;
   onTogglePickupToday: () => void;
   priceLabel: string;
@@ -50,6 +53,8 @@ export function FilterBar({
   onCategoryChange,
   sort,
   onToggleHottest,
+  archived,
+  onToggleArchive,
   pickupToday,
   onTogglePickupToday,
   priceLabel,
@@ -89,7 +94,8 @@ export function FilterBar({
         onContentSizeChange={onContentSizeChange}
         onLayout={onLayout}
       >
-        <Chip label="Pickup today" selected={pickupToday} onPress={onTogglePickupToday} />
+        {/* An archived listing's pickup windows are over, so this filter has nothing to find there. */}
+        <Chip label="Pickup today" selected={pickupToday && !archived} onPress={onTogglePickupToday} disabled={archived} />
         <View style={styles.divider} />
         <Chip label="All" selected={category === 'all'} onPress={() => onCategoryChange('all')} />
         <Chip
@@ -97,6 +103,12 @@ export function FilterBar({
           selected={sort === 'hot'}
           onPress={onToggleHottest}
           accessibilityLabel="Hottest. Most liked, shared and commented on recently, first. Tap again for newest first."
+        />
+        <Chip
+          label="Archive"
+          selected={archived}
+          onPress={onToggleArchive}
+          accessibilityLabel="Archive. Listings past their 24 hours. You can still propose a time and place. Tap again for the live feed."
         />
         {CATEGORIES.map((c) => (
           <Chip

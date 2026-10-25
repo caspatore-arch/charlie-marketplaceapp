@@ -18,7 +18,7 @@ export type ModerationReport = typeof reports.$inferSelect & {
   targetUser: PublicUser | null;
   targetListing: ListingCard | null;
   /** Community post a report names (kept visible to moderators even after expiry/removal). */
-  targetPost: { id: string; kind: 'buying' | 'selling'; body: string; createdAt: Date; expiresAt: Date; removedAt: Date | null } | null;
+  targetPost: { id: string; kind: 'buying' | 'selling'; body: string; createdAt: Date; removedAt: Date | null } | null;
 };
 
 export const moderationRouter = router({
@@ -72,7 +72,7 @@ export const moderationRouter = router({
         targetPost: (() => {
           const p = r.targetPostId ? postById.get(r.targetPostId) : undefined;
           return p
-            ? { id: p.id, kind: p.kind, body: p.body, createdAt: p.createdAt, expiresAt: p.expiresAt, removedAt: p.removedAt }
+            ? { id: p.id, kind: p.kind, body: p.body, createdAt: p.createdAt, removedAt: p.removedAt }
             : null;
         })(),
       }));

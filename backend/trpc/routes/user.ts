@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gt, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
@@ -252,7 +252,7 @@ export const userRouter = router({
             // above; the profile owner is not "hidden" from themselves.
             commentReadable([]),
             eq(communityPosts.campusId, ctx.user.campusId),
-            liveFilter(new Date()),
+            liveFilter(),
             isNull(postAuthor.deletedAt),
             hidden.length > 0 ? notInArray(communityPosts.authorId, hidden) : undefined,
           ),
@@ -271,9 +271,8 @@ export const userRouter = router({
         postId: post.id,
         body: comment.body,
         createdAt: comment.createdAt,
-        /** What it was said on, so the comment has context. Expires with the post. */
+        /** What it was said on, so the comment has context. */
         postExcerpt: post.body.length > 80 ? `${post.body.slice(0, 77)}...` : post.body,
-        postExpiresAt: post.expiresAt,
         isMine: comment.authorId === ctx.user.id,
         /** Popularity only. Never an endorsement, and not a safety signal. */
         voteCount: totalById.get(comment.id) ?? 0,
@@ -299,7 +298,6 @@ export const userRouter = router({
           and(
             eq(communityPosts.authorId, input.userId),
             eq(communityPosts.campusId, ctx.user.campusId),
-            gt(communityPosts.expiresAt, new Date()),
             isNull(communityPosts.removedAt),
             // Automatic listing posts are shown as listings, not as text posts.
             isNull(communityPosts.listingId),
@@ -321,7 +319,6 @@ export const userRouter = router({
         kind: p.kind,
         body: p.body,
         createdAt: p.createdAt,
-        expiresAt: p.expiresAt,
         author: toPublicUser(author),
         isMine: p.authorId === ctx.user.id,
         /** Popularity only. Never an endorsement, and not a safety signal. */

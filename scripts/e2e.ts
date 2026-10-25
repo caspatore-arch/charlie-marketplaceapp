@@ -1228,7 +1228,7 @@ async function main(): Promise<number> {
 
   /* ----------------------------------------------------------------- 12 */
 
-  await criterion('12. Community upvotes are unique, and every sort respects expiry and removal', async () => {
+  await criterion('12. Community upvotes are unique, every sort respects removal, and old posts stay up', async () => {
     // Sam authors (Jordan blocked Maya in criterion 9); Jordan and Maya vote.
     const mk = (kind: 'buying' | 'selling', body: string) => sam.community.create.mutate({ kind, body });
     const a = await mk('buying', 'Vote test A: anyone have a desk lamp?');
@@ -1282,7 +1282,8 @@ async function main(): Promise<number> {
       assertEqual(seen.join(','), all.items.map((i) => i.id).join(','), `${sort}: paged order equals single-page order`);
     }
 
-    // Removed and expired posts never appear in any sort, even with votes.
+    // Removed posts never appear in any sort, even with votes. Posts do NOT expire:
+    // one whose legacy 24h deadline is long past is still listed in every sort.
     await maya.community.setVote.mutate({ id: c.id, voted: true });
     await sam.community.remove.mutate({ id: b.id });
     await expectTrpcError('NOT_FOUND', () => jordan.community.setVote.mutate({ id: b.id, voted: true }));
@@ -1294,7 +1295,8 @@ async function main(): Promise<number> {
       for (const sort of ['new', 'top', 'hot'] as const) {
         for (const kind of ['buying', 'selling'] as const) {
           const f = await jordan.community.feed.query({ kind, sort, limit: 50 });
-          assert(!f.items.some((i) => i.id === a.id || i.id === b.id), `${sort}/${kind} must not show expired or removed posts`);
+          assert(!f.items.some((i) => i.id === b.id), `${sort}/${kind} must not show a removed post`);
+          if (kind === 'buying') assert(f.items.some((i) => i.id === a.id), `${sort}/${kind}: an old post stays up`);
         }
       }
       // Deleting a post cascades to its votes.
@@ -1632,16 +1634,16 @@ async function main(): Promise<number> {
     await expectTrpcError('NOT_FOUND', () => maya.community.setCommentVote.mutate({ id: cq.id, voted: true }));
     assert(!(await sam.user.comments.query({ userId: JORDAN_ID })).some((c) => c.id === cq.id), 'removed post: comment gone from profile');
 
-    // ...and so are an EXPIRED post's.
+    // Posts do not expire: a post whose legacy 24h deadline is long past keeps its thread.
     if (!external) {
       const { db } = await import('../backend/db/client');
       const { eq: eqOp } = await import('drizzle-orm');
       const schema = await import('../backend/db/schema');
       await db.update(schema.communityPosts).set({ expiresAt: new Date(Date.now() - 1000) }).where(eqOp(schema.communityPosts.id, P.id));
-      await expectTrpcError('NOT_FOUND', () => jordan.community.comments.query({ postId: P.id }));
-      await expectTrpcError('NOT_FOUND', () => jordan.community.addComment.mutate({ postId: P.id, body: 'too late' }));
-      await expectTrpcError('NOT_FOUND', () => sam.community.setCommentVote.mutate({ id: c2.id, voted: true }));
-      assertEqual((await sam.user.comments.query({ userId: MAYA_ID })).length, 0, 'expired post: comment gone from profile');
+      const still = await jordan.community.addComment.mutate({ postId: P.id, body: 'Still here days later' });
+      assert((await jordan.community.comments.query({ postId: P.id })).some((c) => c.id === still.id), 'an old post: its thread is still readable and writable');
+      assertEqual((await sam.community.setCommentVote.mutate({ id: still.id, voted: true })).viewerVoted, true, 'an old post: comments can still be upvoted');
+      assert((await sam.user.comments.query({ userId: JORDAN_ID })).some((c) => c.id === still.id), 'an old post: the comment still shows on the profile');
       // Deleting the post cascades to its comments and their votes.
       await db.delete(schema.communityPosts).where(eqOp(schema.communityPosts.id, P.id));
       const orphans = await db.select().from(schema.communityComments).where(eqOp(schema.communityComments.postId, P.id));

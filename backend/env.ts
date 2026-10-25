@@ -86,16 +86,20 @@ export const env = {
   },
   /* ------------------------------------------------- listing autofill AI */
 
-  /** Raw LISTING_AI_MODE. Decisions go through resolveListingAiMode() (backend/ai/listing-draft.ts). */
+  /**
+   * Raw LISTING_AI_MODE. Defaults to 'live', so ANTHROPIC_API_KEY alone turns
+   * autofill on; set LISTING_AI_MODE=simulated to force the demo draft (an off
+   * switch). Decisions go through resolveListingAiMode() (backend/ai/listing-draft.ts).
+   */
   get listingAiModeRaw(): string {
-    return (process.env.LISTING_AI_MODE ?? 'simulated').trim().toLowerCase();
+    return (process.env.LISTING_AI_MODE ?? 'live').trim().toLowerCase();
   },
   get anthropicApiKey(): string | undefined {
     const v = process.env.ANTHROPIC_API_KEY?.trim();
     return v ? v : undefined;
   },
   get listingAiModel(): string {
-    return process.env.LISTING_AI_MODEL?.trim() || 'claude-opus-5-5';
+    return process.env.LISTING_AI_MODEL?.trim() || 'claude-sonnet-5-5';
   },
 
   /* --------------------------------------------------------------- email */

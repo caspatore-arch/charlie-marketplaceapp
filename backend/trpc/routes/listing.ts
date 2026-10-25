@@ -203,9 +203,9 @@ async function withEngagement(db: Db, rows: Listing[], viewerId: string | null) 
 }
 
 /**
- * A listing the viewer may like or share: live (active, not past its deadline),
- * on their campus, and not owned by anyone in a block relationship with them.
- * Anything else reads as gone, like the feed.
+ * A listing the viewer may like or share: live or archived (active or expired,
+ * so an old listing stays interactive), on their campus, and not owned by anyone
+ * in a block relationship with them. Sold, held and removed ones read as gone.
  */
 async function loadReactable(db: Db, id: string, viewer: { id: string; campusId: string }): Promise<Listing> {
   const gone = () => new TRPCError({ code: 'NOT_FOUND', message: 'That item is no longer available.' });
@@ -213,8 +213,7 @@ async function loadReactable(db: Db, id: string, viewer: { id: string; campusId:
   if (
     !listing ||
     listing.campusId !== viewer.campusId ||
-    listing.status !== 'active' ||
-    (listing.expiresAt !== null && listing.expiresAt.getTime() <= Date.now())
+    (listing.status !== 'active' && listing.status !== 'expired')
   ) {
     throw gone();
   }
@@ -238,6 +237,13 @@ export const listingRouter = router({
         pickupToday: z.boolean().optional(),
         /** 'new' (default) is strictly newest first. 'hot' ranks by recent likes, comments and shares. */
         sort: z.enum(['new', 'hot']).default('new'),
+        /**
+         * false (default): the live feed, listings in their first 24 hours.
+         * true: the Archive, unsold listings past their 24 hours (newest first by
+         * the same ordering). Archived listings stay likeable, commentable and
+         * open to a buyer-proposed meetup (`reservation.request`).
+         */
+        archived: z.boolean().default(false),
         cursor: z.string().max(300).optional(),
         limit: z.number().int().min(1).max(50).default(20),
       }),
@@ -246,15 +252,25 @@ export const listingRouter = router({
       await applyExpiryForRead(ctx.db);
       const hot = input.sort === 'hot';
 
-      const conditions = [
-        eq(listings.campusId, input.campusId),
-        eq(listings.status, 'active'),
-        // Expiry is swept on a timer for reads (applyExpiryForRead), so a row
-        // can briefly still say 'active' after its deadline. Filtering here
-        // means the feed is correct regardless of when the last sweep ran —
-        // the sweep only has to catch up on the stored status.
-        or(isNull(listings.expiresAt), gt(listings.expiresAt, new Date()))!,
-      ];
+      const now = new Date();
+      const conditions = input.archived
+        ? [
+            eq(listings.campusId, input.campusId),
+            // Past its 24 hours: swept to 'expired', or still 'active' awaiting the sweep.
+            or(
+              eq(listings.status, 'expired'),
+              and(eq(listings.status, 'active'), lte(listings.expiresAt, now)),
+            )!,
+          ]
+        : [
+            eq(listings.campusId, input.campusId),
+            eq(listings.status, 'active'),
+            // Expiry is swept on a timer for reads (applyExpiryForRead), so a row
+            // can briefly still say 'active' after its deadline. Filtering here
+            // means the feed is correct regardless of when the last sweep ran —
+            // the sweep only has to catch up on the stored status.
+            or(isNull(listings.expiresAt), gt(listings.expiresAt, now))!,
+          ];
       if (input.category) conditions.push(eq(listings.category, input.category));
       if (input.minCents !== undefined) conditions.push(gte(listings.priceCents, input.minCents));
       if (input.maxCents !== undefined) conditions.push(lte(listings.priceCents, input.maxCents));
@@ -276,7 +292,7 @@ export const listingRouter = router({
       const hidden = ctx.user ? await blockedUserIds(ctx.db, ctx.user.id) : [];
       if (hidden.length > 0) conditions.push(notInArray(listings.sellerId, hidden));
 
-      if (input.pickupToday) {
+      if (input.pickupToday && !input.archived) {
         const { end } = localDayBounds('America/Phoenix');
         conditions.push(
           sql`exists (select 1 from ${availabilityWindows} w

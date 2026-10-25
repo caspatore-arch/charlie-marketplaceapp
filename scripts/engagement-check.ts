@@ -219,11 +219,12 @@ async function main() {
 
   // --- visibility rules follow the listing
   await db.update(listings).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(listings.id, chair.id));
-  check('an expired listing leaves Browse', !(await feedItems('new')).some((i) => i.id === chair.id));
-  check('an expired listing leaves Community', !(await communityItems('new')).some((p) => p.listing?.id === chair.id));
-  await rejects('cannot like an expired listing', () => buyer.listing.setLike({ id: chair.id, liked: true }), 'NOT_FOUND');
+  check('an expired listing leaves the live Browse feed', !(await feedItems('new')).some((i) => i.id === chair.id));
+  check('...but its Community post stays up (archived)', (await communityItems('new')).some((p) => p.listing?.id === chair.id));
+  const archivedLike = await buyer.listing.setLike({ id: chair.id, liked: true });
+  check('an archived listing can still be liked', archivedLike.likeCount === 1 && archivedLike.viewerLiked);
   const chairPostRow = (await postRows(chair.id))[0]!;
-  await rejects('expired listing post is gone by id', () => buyer.community.byId({ id: chairPostRow.id }), 'NOT_FOUND');
+  check('an archived listing post is still retrievable by id', (await buyer.community.byId({ id: chairPostRow.id })).id === chairPostRow.id);
   await db.update(listings).set({ status: 'expired' }).where(eq(listings.id, chair.id));
   const relisted = await seller.listing.relist({ id: chair.id, isSellToday: false, windows: [{ startsAt: new Date(Date.now() + HOUR), endsAt: new Date(Date.now() + 2 * HOUR) }] });
   check('relisting reuses the single post', (await postRows(chair.id)).length === 1 && relisted.id === chair.id);

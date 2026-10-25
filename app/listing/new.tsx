@@ -4,9 +4,17 @@
  * the feed/mine/byId caches and shows the post-publish celebration modal,
  * whose buttons replace navigation into the listing (or the feed) so back
  * doesn't return to this form.
+ *
+ * Selling needs a verified campus email (campusVerifiedProcedure). An account
+ * without one (any-email or phone sign-in) gets the verify step here first,
+ * instead of filling in a whole listing only to be refused on Publish.
  */
 import React, { useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import { Text } from '@/components/ui/Text';
+import { CampusEmailVerify } from '@/components/auth/CampusEmailVerify';
+import { space } from '@/constants/theme';
 import { Screen } from '@/components/ui/Screen';
 import { TextLink } from '@/components/ui/TextLink';
 import { GuardedCloseButton } from '@/components/sell/GuardedCloseButton';
@@ -85,6 +93,29 @@ export default function NewListingScreen() {
     return <Screen>{null}</Screen>;
   }
 
+  if (user && !user.campusEmailVerifiedAt) {
+    return (
+      <Screen>
+        <Stack.Screen
+          options={{ title: 'New listing', headerLeft: () => <GuardedCloseButton onPress={() => router.back()} label="Close" /> }}
+        />
+        <View style={styles.gate}>
+          <Text variant="title">Verify your campus email to sell</Text>
+          <Text variant="body" color="inkMuted">
+            Selling needs a verified campus email. Add yours and you can post right after.
+          </Text>
+          <CampusEmailVerify
+            showExplainer={false}
+            onDone={() => undefined}
+            onSkip={() => router.back()}
+            skipLabel="Not now"
+            doneLabel="Start my listing"
+          />
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <Screen padded={false}>
       <Stack.Screen
@@ -112,3 +143,7 @@ export default function NewListingScreen() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  gate: { gap: space.md, paddingTop: space.lg },
+});

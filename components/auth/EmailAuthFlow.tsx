@@ -1,8 +1,10 @@
 /**
- * Email-first sign-in: campus email -> 6-digit code (+ name and 18+/Terms for a
+ * Email-first sign-in: any email -> 6-digit code (+ name and 18+/Terms for a
  * first sign-in) -> signed in. Reused by /auth/sign-in, /auth/email and the
- * sign-up card on /welcome. A campus email proves you are a student there; it
- * is not an identity check.
+ * sign-up card on /welcome. A campus email is recommended: it also verifies the
+ * campus email, which buying, selling and posting need. Any other email signs
+ * in unverified and can add a campus email later (Settings, or the prompt on a
+ * gated action). Campus email verified is not an identity check.
  *
  * Like the old verify screen, the server creates the account when the code is
  * confirmed, and the client cannot know beforehand whether the email is new.
@@ -24,6 +26,10 @@ import { MINIMUM_AGE } from '@/constants/legal';
 import { colors, radius, space } from '@/constants/theme';
 
 export type AuthMode = 'signup' | 'login';
+
+export const EMAIL_INTRO = 'Use your @arizona.edu email (recommended) or any email. We’ll send you a 6-digit code.';
+/** Under the email field: the exact check a non-campus email still needs. */
+export const CAMPUS_NOTE = 'To buy, sell or post you need a verified campus email. You can add it later.';
 
 /** What the host needs to know once someone is signed in. */
 export interface AuthFinish {
@@ -76,7 +82,7 @@ export function EmailAuthFlow({
   async function sendCode(isResend: boolean) {
     const trimmed = email.trim();
     if (!trimmed || !trimmed.includes('@')) {
-      setError('Enter your campus email address.');
+      setError('Enter your email address.');
       return;
     }
     setBusy(true);
@@ -219,7 +225,7 @@ export function EmailAuthFlow({
         {error ? <Notice tone="error">{error}</Notice> : null}
         {info ? <Notice tone="success">{info}</Notice> : null}
         <Text variant="caption" color="inkFaint">
-          A campus email shows you&apos;re a student — it isn&apos;t an identity check.
+          Campus email verified means you control a school address. It isn&apos;t an identity check.
         </Text>
         <Button
           title={network ? 'Try again' : mode === 'signup' ? 'Create account' : mode === 'login' ? 'Log in' : 'Verify'}
@@ -253,12 +259,12 @@ export function EmailAuthFlow({
         <>
           <Text variant="title">Sign in or sign up</Text>
           <Text variant="body" color="inkMuted">
-            Enter your @arizona.edu email. We’ll send you a 6-digit code — no password to remember.
+            {EMAIL_INTRO}
           </Text>
         </>
       )}
       <Field
-        label="Campus email"
+        label="Email"
         placeholder="you@arizona.edu"
         value={email}
         onChangeText={(v) => {
@@ -275,6 +281,9 @@ export function EmailAuthFlow({
         returnKeyType="send"
         editable={!busy}
       />
+      <Text variant="small" color="inkMuted">
+        {CAMPUS_NOTE}
+      </Text>
       <Button title={network ? 'Try again' : submitLabel} onPress={() => sendCode(false)} loading={busy} />
       {mode !== 'login' ? (
         <Text variant="small" color="inkMuted">

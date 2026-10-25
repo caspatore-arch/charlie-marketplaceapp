@@ -2,7 +2,7 @@
  * A feed row: the existing PostCard with the upvote control in its footer row
  * (author on the left, vote on the right, never overlaid),
  * and a "N comments" toggle underneath that opens the thread inline. Inline,
- * not a detail route, because posts live 24 hours and the feed is where people
+ * not a detail route, because posts stay up and the feed is where people
  * already are: a reply should never cost a navigation and a lost scroll spot.
  */
 import React, { useState } from 'react';

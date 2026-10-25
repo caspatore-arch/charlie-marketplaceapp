@@ -734,8 +734,13 @@ export const communityPosts = pgTable(
     kind: communityPostKindEnum('kind').notNull(),
     body: text('body').notNull(),
     createdAt: ts('created_at').notNull().defaultNow(),
-    /** Exactly createdAt + 24h. Enforced on every read, not just swept. */
-    expiresAt: ts('expires_at').notNull(),
+    /**
+     * Legacy: posts used to expire exactly 24h after creation. They now stay up
+     * until their author or a moderator removes them, so this is NULL for new
+     * posts and is never read. (Browse still keeps a listing live for 24h; that
+     * lives on `listings.expiresAt`.)
+     */
+    expiresAt: ts('expires_at'),
     removedAt: ts('removed_at'),
     removedById: uuid('removed_by_id').references(() => users.id),
     /**

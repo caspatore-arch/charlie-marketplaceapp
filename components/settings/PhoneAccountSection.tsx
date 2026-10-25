@@ -208,7 +208,7 @@ export function PhoneAccountSection({ part }: PhoneAccountSectionProps = {}) {
           <Text variant="label" color="inkMuted">
             Campus email
           </Text>
-          <Text variant="body">{s.email ?? 'Not added'}</Text>
+          <Text variant="body">{s.campusEmailVerified && s.email ? s.email : 'Not added'}</Text>
         </View>
         {s.campusEmailVerified ? (
           <Badge kind="verified" />
@@ -234,6 +234,11 @@ export function PhoneAccountSection({ part }: PhoneAccountSectionProps = {}) {
           <Text variant="caption" color="inkFaint">
             Campus email verification is required to buy, sell, or post. It is not an ID check.
           </Text>
+          {s.email ? (
+            <Text variant="caption" color="inkFaint">
+              You sign in with {s.email}. Once you verify a campus email, you’ll sign in with that one instead.
+            </Text>
+          ) : null}
           <Button
             title="Verify campus email"
             variant="secondary"

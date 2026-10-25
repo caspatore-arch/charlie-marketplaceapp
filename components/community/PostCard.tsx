@@ -1,6 +1,6 @@
 /**
- * One community post: kind badge, body, author (tap -> profile), age and
- * "Xh left" countdown, and an overflow button that opens the actions sheet
+ * One community post: kind badge, body, author (tap -> profile), age (posts stay
+ * up until removed, so there is no countdown), and an overflow button that opens the actions sheet
  * (Delete for your own post; Report / Block for someone else's).
  */
 import React, { type ReactNode } from 'react';
@@ -12,28 +12,25 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { colors, space } from '@/constants/theme';
 import { formatRelative } from '@/utils/format';
-import { timeLeftLabel } from './useNow';
 import type { CommunityPost } from '@/types';
 
 export interface PostCardProps {
   post: CommunityPost;
-  now: number;
   onPressAuthor: () => void;
   onOpenActions: () => void;
   /** Rendered at the right of the footer row (the upvote pill), never overlaid. */
   footerRight?: ReactNode;
 }
 
-export function PostCard({ post, now, onPressAuthor, onOpenActions, footerRight }: PostCardProps) {
+export function PostCard({ post, onPressAuthor, onOpenActions, footerRight }: PostCardProps) {
   const buying = post.kind === 'buying';
-  const left = timeLeftLabel(post.expiresAt, now);
   return (
     <Card style={styles.card}>
       <View style={styles.topRow}>
         <Badge kind="status" label={buying ? 'Looking to buy' : 'Selling'} tone={buying ? 'warning' : 'success'} />
         <View style={styles.spacer} />
         <Text variant="caption" color="inkFaint">
-          {formatRelative(post.createdAt)} · {left}
+          {formatRelative(post.createdAt)}
         </Text>
         <Pressable
           accessibilityRole="button"

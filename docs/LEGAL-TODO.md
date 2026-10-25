@@ -96,3 +96,7 @@ Each of these belongs in front of the lawyer alongside the original draft.
 - None of this has been reviewed by a lawyer. Treat every sentence in
   `constants/legal.ts` as a first draft to hand to one, not as something
   ready to bind real students to.
+
+## Added October 24, 2026: posts and archived listings no longer expire
+Community posts and unsold listings (the Archive) now stay visible until removed. The draft Terms/Privacy wording in `constants/legal.ts` was updated to say so, but it is still an unreviewed draft: the retention answer (`DATA_RETENTION_PERIOD`) and the deletion promises must cover content that never lapses on its own.
+

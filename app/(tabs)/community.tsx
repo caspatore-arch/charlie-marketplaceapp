@@ -1,5 +1,6 @@
 /**
- * Community tab: short, 24-hour campus posts ("Does anyone have shirts?").
+ * Community tab: short campus posts ("Does anyone have shirts?") that stay up until
+ * removed, plus an automatic post for every listing (kept while it is live or archived).
  * Posts show the author's normal display name. Buyers / Sellers tabs, Top /
  * Newest / Hottest sorts (all ranked by the server), upvotes, composer,
  * pull-to-refresh, infinite scroll, per-post actions (delete / report / block).
@@ -20,7 +21,6 @@ import { ListingPost } from '@/components/community/ListingPost';
 import { FeedControls, type CommunitySort } from '@/components/community/FeedControls';
 import { PostComposer } from '@/components/community/PostComposer';
 import { PostReportSheet } from '@/components/community/PostReportSheet';
-import { useNow } from '@/components/community/useNow';
 import { useAuth, useRequireAuth } from '@/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { confirmAction } from '@/utils/confirm';
@@ -64,7 +64,6 @@ export default function CommunityScreen() {
 function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
   const router = useRouter();
   const utils = trpc.useUtils();
-  const now = useNow();
   // Every new listing is posted here automatically as a 'selling' post, so the
   // feed opens on Sellers where they are; Buyers is one tap away.
   const [kind, setKind] = useState<CommunityPostKind>('selling');
@@ -87,13 +86,13 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
     const out: CommunityPost[] = [];
     for (const page of feed.data?.pages ?? []) {
       for (const p of page.items) {
-        if (seen.has(p.id) || p.expiresAt.getTime() <= now) continue;
+        if (seen.has(p.id)) continue;
         seen.add(p.id);
         out.push(p);
       }
     }
     return out;
-  }, [feed.data, now]);
+  }, [feed.data]);
 
   const refetchFeed = useCallback(() => utils.community.feed.invalidate(), [utils]);
 
@@ -161,8 +160,8 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
         title={kind === 'buying' ? 'No buyer posts yet' : 'No seller posts yet'}
         body={
           kind === 'buying'
-            ? 'Nobody is looking for anything right now. Posts disappear after 24 hours.'
-            : "Nobody is selling anything here right now. Posts disappear after 24 hours."
+            ? 'Nobody is looking for anything right now. Posts stay up until their author deletes them.'
+            : "Nobody is selling anything here right now. Posts stay up until their author deletes them."
         }
       />
     );
@@ -207,7 +206,6 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
         renderItem={({ item }) => {
           const props = {
             post: item,
-            now,
             onPressAuthor: () => router.push(`/user/${item.author.id}`),
             onOpenActions: () => {
               setActionError(null);

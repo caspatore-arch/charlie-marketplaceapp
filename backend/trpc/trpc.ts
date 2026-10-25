@@ -31,14 +31,16 @@ export const moderatorProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 /**
  * Protected + the caller has verified a campus email. Phone verification
- * proves control of a phone number only — it is NOT campus or student
- * verification — so buying, selling and posting stay behind this gate.
+ * proves control of a phone number only, and a non-campus sign-in email
+ * (any email can sign in) proves control of that inbox only — neither is
+ * campus or student verification — so buying, selling and posting stay
+ * behind this gate.
  */
 export const campusVerifiedProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (!ctx.user.campusEmailVerifiedAt) {
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: 'Verify your campus email to buy, sell, or post. Phone sign-in alone does not confirm you are a student.',
+      message: 'Verify your campus email to buy, sell, or post. A phone number or a non-campus email isn’t enough.',
     });
   }
   return next({ ctx });

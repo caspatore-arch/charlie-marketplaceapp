@@ -10,6 +10,8 @@ import type { ListingStatus } from '@/types';
 
 export interface StatusBannerProps {
   status: ListingStatus;
+  /** A buyer (not the seller) is looking: an expired listing is in the Archive and can still be requested. */
+  buyerView?: boolean;
 }
 
 const COPY: Partial<Record<ListingStatus, { title: string; bg: string; fg: string }>> = {
@@ -18,9 +20,11 @@ const COPY: Partial<Record<ListingStatus, { title: string; bg: string; fg: strin
   expired: { title: 'Expired — seller can relist', bg: colors.surfaceMuted, fg: colors.inkMuted },
 };
 
-export function StatusBanner({ status }: StatusBannerProps) {
-  const copy = COPY[status];
-  if (!copy) return null;
+export function StatusBanner({ status, buyerView = false }: StatusBannerProps) {
+  const base = COPY[status];
+  if (!base) return null;
+  const copy =
+    status === 'expired' && buyerView ? { ...base, title: 'Archived — you can still ask for a meetup' } : base;
 
   return (
     <View style={[styles.wrap, { backgroundColor: copy.bg }]} accessibilityRole="text">

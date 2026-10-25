@@ -32,9 +32,14 @@ export interface ListingCardProps {
    * Repeating one name down a whole grid is noise, not reassurance.
    */
   showSeller?: boolean;
+  /**
+   * Set for a listing shown in the Archive: replaces the pickup line (its
+   * windows are over) with this note, e.g. "Archived · propose a time".
+   */
+  archivedNote?: string;
 }
 
-function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true }: ListingCardProps) {
+function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true, archivedNote }: ListingCardProps) {
   const price = listing.priceCents;
   const reduceMotion = useReduceMotion();
   const id = listing.id;
@@ -51,7 +56,7 @@ function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true }
   // window is the scarce, decisive part; the spot is one tap away on detail.
   const pickup = listing.nextPickup;
   const pickupLabel = pickup ? formatPickupWindow(pickup.startsAt, pickup.endsAt) : null;
-  const pickupIsToday = listing.hasAvailabilityToday;
+  const pickupIsToday = listing.hasAvailabilityToday && !archivedNote;
   const nowMs = useMinuteNow();
   const expiryLabel = listing.status === 'active' ? expiresInLabel(listing.expiresAt, nowMs) : null;
   const expiringSoon = expiresSoon(listing.expiresAt, nowMs);
@@ -60,7 +65,7 @@ function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true }
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${listing.title}, ${conditionLabel(listing.condition)}, price $${(price / 100).toFixed(0)}${
-        pickupLabel ? `, pickup ${pickupLabel}` : ', no pickup times listed'
+        archivedNote ? `, ${archivedNote.toLowerCase()}` : pickupLabel ? `, pickup ${pickupLabel}` : ', no pickup times listed'
       }${expiryLabel ? `, ${expiryLabel.toLowerCase()}` : ''}`}
       onPress={handlePress}
       // Feedback is a plain style swap on press-in (no animation to wait on),
@@ -110,7 +115,7 @@ function ListingCardImpl({ listing, onPress, onPressListing, showSeller = true }
             numberOfLines={1}
             style={styles.pickupText}
           >
-            {pickupLabel ?? 'Times on the listing'}
+            {archivedNote ?? pickupLabel ?? 'Times on the listing'}
           </Text>
         </View>
         {expiryLabel ? (

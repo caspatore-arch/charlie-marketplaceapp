@@ -5,8 +5,12 @@
  *    phone account picks its campus but is NOT campus-verified until it also
  *    verifies a campus email (`linkEmail*`) — buying, selling and posting are
  *    gated on that (campusVerifiedProcedure).
- *  - Campus email + code (original). Still works; it is also how existing
- *    email accounts sign in and then add a phone (`linkPhone*`).
+ *  - Email + code. ANY email can sign in or create an account. A campus
+ *    email (a campus's emailDomains or ALLOWED_EMAIL_DOMAINS) also marks the
+ *    account campus-verified; any other email lands on the default campus,
+ *    NOT campus-verified, and must verify a campus email (`linkEmail*`) before
+ *    buying, selling or posting. It is also how email accounts sign in and
+ *    then add a phone (`linkPhone*`).
  *
  * Delivery is SIMULATED unless configured for live sends: SMS via
  * backend/sms/provider.ts (Twilio), email via backend/email/provider.ts
@@ -17,7 +21,7 @@
  */
 import { TRPCError } from '@trpc/server';
 import crypto from 'node:crypto';
-import { and, desc, eq, gt, gte, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { env } from '../../env';
@@ -147,13 +151,24 @@ function domainOf(email: string): string {
   return email.slice(email.lastIndexOf('@') + 1).toLowerCase();
 }
 
-async function resolveCampus(db: typeof import('../../db/client').db, email: string) {
+/** The campus a campus-domain email belongs to, or null for any other email. */
+async function resolveCampus(db: Db, email: string) {
   const domain = domainOf(email);
-  const all = await db.select().from(campuses);
+  const all = await db.select().from(campuses).orderBy(asc(campuses.name));
   const match = all.find((c) => c.emailDomains.map((d) => d.toLowerCase()).includes(domain));
   if (match) return match;
   if (env.allowedEmailDomains.includes(domain) && all[0]) return all[0];
   return null;
+}
+
+/**
+ * Where a non-campus email account lives: the pilot campus (first by name, the
+ * same one the phone flow auto-picks when there is only one).
+ */
+async function defaultCampus(db: Db) {
+  const [first] = await db.select().from(campuses).orderBy(asc(campuses.name)).limit(1);
+  if (!first) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'No campus is set up yet.' });
+  return first;
 }
 
 async function issueSession(db: typeof import('../../db/client').db, userId: string) {
@@ -213,15 +228,8 @@ export const authRouter = router({
   requestCode: publicProcedure
     .input(z.object({ email: z.email() }))
     .mutation(async ({ ctx, input }) => {
+      // Any email can sign in; the cooldown and hourly cap apply to all of them.
       const email = input.email.trim().toLowerCase();
-      const campus = await resolveCampus(ctx.db, email);
-      if (!campus) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Use your campus email address to sign in.',
-        });
-      }
-
       return sendEmailCode(ctx.db, email, 'sign_in');
     }),
 
@@ -277,29 +285,26 @@ export const authRouter = router({
         .set({ consumedAt: new Date() })
         .where(eq(emailCodes.id, record.id));
 
-      const campus = await resolveCampus(ctx.db, email);
-      if (!campus) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Use your campus email address to sign in.',
-        });
-      }
+      // A campus-domain email verifies campus membership; any other email
+      // signs in but leaves the account NOT campus-verified (default campus).
+      const campusMatch = await resolveCampus(ctx.db, email);
 
       let [user] = await ctx.db.select().from(users).where(eq(users.email, email)).limit(1);
       // Lets the client send a brand-new account to profile setup and a
       // returning one straight into the app.
       const isNewAccount = !user;
       if (!user) {
+        const campus = campusMatch ?? (await defaultCampus(ctx.db));
         [user] = await ctx.db
           .insert(users)
           .values({
             email,
             displayName: input.displayName?.trim() || email.split('@')[0]!,
             campusId: campus.id,
-            campusEmailVerifiedAt: new Date(),
+            campusEmailVerifiedAt: campusMatch ? new Date() : null,
           })
           .returning();
-      } else if (!user.campusEmailVerifiedAt) {
+      } else if (campusMatch && !user.campusEmailVerifiedAt) {
         [user] = await ctx.db
           .update(users)
           .set({ campusEmailVerifiedAt: new Date() })
@@ -310,7 +315,7 @@ export const authRouter = router({
       const token = await issueSession(ctx.db, user!.id);
       // `user` carries its campus so the client can hydrate the same shape
       // `auth.me` returns without a second round trip.
-      return { token, isNewAccount, user: { ...user!, campus } };
+      return { token, isNewAccount, user: await withCampus(ctx.db, user!) };
     }),
 
   /** Dev-only identity switcher for the demo. Disabled unless DEV_LOGIN=1. */
@@ -456,7 +461,7 @@ export const authRouter = router({
       const email = input.email.trim().toLowerCase();
       const campus = await resolveCampus(ctx.db, email);
       if (!campus) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Use your campus email address.' });
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That isn’t a campus email address. Use your school email to verify.' });
       }
       return sendEmailCode(ctx.db, email, 'verify_campus');
     }),
@@ -491,7 +496,7 @@ export const authRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'That code is wrong or has expired. Request a new one.' });
       }
       const campus = await resolveCampus(ctx.db, email);
-      if (!campus) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Use your campus email address.' });
+      if (!campus) throw new TRPCError({ code: 'BAD_REQUEST', message: 'That isn’t a campus email address. Use your school email to verify.' });
 
       const me = ctx.user;
       const [owner] = await ctx.db.select().from(users).where(eq(users.email, email)).limit(1);

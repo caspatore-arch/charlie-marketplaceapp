@@ -7,7 +7,6 @@
  */
 import { communityPosts, type Listing } from '../db/schema';
 import type { Db } from '../db/client';
-import { LISTING_LIFETIME_MS } from './lib';
 
 /** The listing's own words for the compact Community post: its description, else its title. */
 export function listingCaption(listing: Pick<Listing, 'title' | 'description'>): string {
@@ -16,13 +15,12 @@ export function listingCaption(listing: Pick<Listing, 'title' | 'description'>):
 
 /**
  * Creates (or refreshes) the listing's Community post. A relist gives the same
- * listing a new createdAt/expiresAt, so the post is moved to match it and any
- * earlier takedown of the pointer is cleared (the listing's own status decides
- * whether it is visible).
+ * listing a new createdAt, so the post is moved to match it and any earlier
+ * takedown of the pointer is cleared (the listing's own status decides whether
+ * it is visible). The post never expires on its own: it follows the listing.
  */
 export async function upsertListingPost(db: Db, listing: Listing): Promise<void> {
   const body = listingCaption(listing);
-  const expiresAt = listing.expiresAt ?? new Date(listing.createdAt.getTime() + LISTING_LIFETIME_MS);
   await db
     .insert(communityPosts)
     .values({
@@ -31,12 +29,11 @@ export async function upsertListingPost(db: Db, listing: Listing): Promise<void>
       kind: 'selling',
       body,
       createdAt: listing.createdAt,
-      expiresAt,
       listingId: listing.id,
     })
     .onConflictDoUpdate({
       target: communityPosts.listingId,
-      set: { body, createdAt: listing.createdAt, expiresAt, removedAt: null, removedById: null },
+      set: { body, createdAt: listing.createdAt, removedAt: null, removedById: null },
     });
 }
 

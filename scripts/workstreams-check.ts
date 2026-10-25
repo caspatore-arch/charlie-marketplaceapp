@@ -447,14 +447,14 @@ async function main() {
     .returning();
 
   let jordanPostId = '';
-  await check('community: buyers and sellers both post; posts show time left', async () => {
+  await check('community: buyers and sellers both post; posts have no expiry', async () => {
     const jp = await (await as(JORDAN)).community.create({ kind: 'buying', body: 'Does anyone have shirts?' });
     const mp = await (await as(MAYA)).community.create({ kind: 'selling', body: 'Anyone interested in buying shirts?' });
     jordanPostId = jp.id;
     const feed = await (await as(SAM)).community.feed({ limit: 50 });
     const ids = feed.items.map((p) => p.id);
     assert(ids.includes(jp.id) && ids.includes(mp.id), 'both visible');
-    assert(Math.abs(jp.expiresAt.getTime() - jp.createdAt.getTime() - 24 * HOUR) < 1000, 'exactly 24h');
+    assert(!('expiresAt' in jp), 'a post carries no expiry');
     const selling = await (await as(SAM)).community.feed({ kind: 'selling', limit: 50 });
     assert(selling.items.every((p) => p.kind === 'selling'), 'kind filter');
     await expectCode('BAD_REQUEST', () => (async () => (await as(SAM)).community.create({ kind: 'buying', body: 'x'.repeat(281) }))());
@@ -468,12 +468,19 @@ async function main() {
     await expectCode('UNAUTHORIZED', () => anon.community.feed({ limit: 5 }));
   });
 
-  await check('community: expired posts vanish from feed and direct retrieval', async () => {
+  await check('community: posts stay up indefinitely (until removed)', async () => {
     const p = await (await as(SAM)).community.create({ kind: 'buying', body: 'Need a desk lamp tonight' });
-    await db.update(schema.communityPosts).set({ expiresAt: new Date(Date.now() - 1) }).where(d.eq(schema.communityPosts.id, p.id));
+    // Three days old, with a long-lapsed legacy deadline: still listed and retrievable.
+    await db
+      .update(schema.communityPosts)
+      .set({ createdAt: new Date(Date.now() - 72 * HOUR), expiresAt: new Date(Date.now() - 48 * HOUR) })
+      .where(d.eq(schema.communityPosts.id, p.id));
     const feed = await (await as(JORDAN)).community.feed({ limit: 50 });
-    assert(!feed.items.some((x) => x.id === p.id), 'gone from feed');
-    await expectCode('NOT_FOUND', () => (async () => (await as(JORDAN)).community.byId({ id: p.id }))());
+    assert(feed.items.some((x) => x.id === p.id), 'still in the feed');
+    eq((await (await as(JORDAN)).community.byId({ id: p.id })).id, p.id, 'still retrievable by id');
+    await (await as(SAM)).community.remove({ id: p.id });
+    const after = await (await as(JORDAN)).community.feed({ limit: 50 });
+    assert(!after.items.some((x) => x.id === p.id), 'removal is what takes a post down');
   });
 
   await check('community: blocking hides posts both ways; reporting files a report', async () => {
