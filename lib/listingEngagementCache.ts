@@ -35,8 +35,8 @@ export function patchListingEngagement(qc: QueryClient, listingId: string, patch
         ? {
             ...post,
             // A listing post's upvote IS the listing's like.
-            ...(patch.likeCount !== undefined ? { voteCount: patch.likeCount } : null),
-            ...(patch.viewerLiked !== undefined ? { viewerVoted: patch.viewerLiked } : null),
+            ...(patch.likeCount !== undefined ? { voteCount: patch.likeCount, upvotes: patch.likeCount, score: patch.likeCount } : null),
+            ...(patch.viewerLiked !== undefined ? { viewerVoted: patch.viewerLiked, viewerVote: patch.viewerLiked ? 1 : 0 } : null),
             engagement: { ...post.engagement, ...patch },
           }
         : post,

@@ -28,7 +28,7 @@ export function FeedPost(props: PostCardProps) {
     <View>
       <PostCard
         {...props}
-        footerRight={<VoteButton postId={post.id} voteCount={post.voteCount} viewerVoted={post.viewerVoted} />}
+        footerRight={<VoteButton postId={post.id} score={post.score} viewerVote={post.viewerVote} />}
       />
       <Pressable
         accessibilityRole="button"

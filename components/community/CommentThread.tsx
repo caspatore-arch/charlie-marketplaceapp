@@ -60,7 +60,7 @@ export function CommentThread({ postId }: { postId: string }) {
           renderTrailing={(c) => {
             const full = comments.data.find((x) => x.id === c.id);
             return full ? (
-              <CommentVoteButton commentId={full.id} voteCount={full.voteCount} viewerVoted={full.viewerVoted} returnTo={returnTo} />
+              <CommentVoteButton commentId={full.id} score={full.score} viewerVote={full.viewerVote} returnTo={returnTo} />
             ) : null;
           }}
           onDelete={(id) =>

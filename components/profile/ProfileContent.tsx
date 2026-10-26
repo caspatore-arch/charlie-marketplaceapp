@@ -178,9 +178,9 @@ export function ProfileContent({
                     <Text variant="caption" color="inkFaint">
                       {formatRelative(c.createdAt)}
                     </Text>
-                    {c.voteCount > 0 ? (
+                    {c.score !== 0 ? (
                       <Text variant="caption" color="inkMuted">
-                        {c.voteCount} {c.voteCount === 1 ? 'upvote' : 'upvotes'}
+                        {c.score} {Math.abs(c.score) === 1 ? 'point' : 'points'}
                       </Text>
                     ) : null}
                   </View>
@@ -214,9 +214,9 @@ export function ProfileContent({
                 <Text variant="body" style={styles.postBody}>
                   {post.body}
                 </Text>
-                {post.voteCount > 0 ? (
+                {post.score !== 0 ? (
                   <Text variant="caption" color="inkMuted">
-                    {post.voteCount} {post.voteCount === 1 ? 'upvote' : 'upvotes'}
+                    {post.score} {Math.abs(post.score) === 1 ? 'point' : 'points'}
                   </Text>
                 ) : null}
               </Card>

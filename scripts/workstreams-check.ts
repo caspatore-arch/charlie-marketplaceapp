@@ -823,6 +823,77 @@ async function main() {
     await expectCode('NOT_FOUND', () => voter.community.setVote({ id: post.id, voted: true }));
   });
 
+  await check('votes: downvote, switch, clear, score math, old {voted} shape, one vote per person, Top uses score', async () => {
+    const eqv = (got: unknown[], want: unknown[], m: string) => eq(got.join(','), want.join(','), m);
+    const maya = await as(MAYA);
+    const sam = await as(SAM);
+    const jordan = await as(JORDAN);
+    const mk = async (body: string) => {
+      const [row] = await db.insert(schema.communityPosts).values({ campusId: (await db.select().from(schema.users).where(d.eq(schema.users.id, MAYA)))[0]!.campusId, authorId: MAYA, kind: 'buying', body }).returning();
+      return row!;
+    };
+    const post = await mk('Score math item');
+    // Down, then switch up, then switch down, then clear (tap the active arrow).
+    const down = await sam.community.setVote({ id: post.id, value: -1 });
+    eqv([down.score, down.upvotes, down.downvotes, down.viewerVote], [-1, 0, 1, -1], 'downvote');
+    eqv([down.voteCount, down.viewerVoted], [0, false], 'old fields: upvote count, not upvoted');
+    const up = await sam.community.setVote({ id: post.id, value: 1 });
+    eqv([up.score, up.upvotes, up.downvotes, up.viewerVote], [1, 1, 0, 1], 'switch down to up');
+    eqv([up.voteCount, up.viewerVoted], [1, true], 'old fields after upvote');
+    const sw = await sam.community.setVote({ id: post.id, value: -1 });
+    eqv([sw.score, sw.upvotes, sw.downvotes, sw.viewerVote], [-1, 0, 1, -1], 'switch up to down');
+    // Mixed voters: Jordan up, Sam down -> score 0, 1 up, 1 down.
+    const mixed = await jordan.community.setVote({ id: post.id, value: 1 });
+    eqv([mixed.score, mixed.upvotes, mixed.downvotes], [0, 1, 1], 'two people, opposite votes');
+    const seen = await sam.community.byId({ id: post.id });
+    eqv([seen.score, seen.viewerVote, seen.upvotes, seen.downvotes], [0, -1, 1, 1], 'byId shows score and own vote');
+    eq((await jordan.community.byId({ id: post.id })).viewerVote, 1, 'each viewer sees their own vote');
+    const clr = await sam.community.setVote({ id: post.id, value: 0 });
+    eqv([clr.score, clr.viewerVote], [1, 0], 'clear removes only my vote');
+    eq((await sam.community.setVote({ id: post.id, value: 0 })).score, 1, 'repeat clear is a no-op');
+    // Old app shape still works: true = upvote, false = clear.
+    const oldUp = await sam.community.setVote({ id: post.id, voted: true });
+    eqv([oldUp.score, oldUp.viewerVote, oldUp.viewerVoted], [2, 1, true], 'old {voted:true} upvotes');
+    const oldOff = await sam.community.setVote({ id: post.id, voted: false });
+    eqv([oldOff.score, oldOff.viewerVote], [1, 0], 'old {voted:false} clears');
+    await expectCode('BAD_REQUEST', () => (sam.community.setVote as any)({ id: post.id }));
+    await expectCode('BAD_REQUEST', () => (sam.community.setVote as any)({ id: post.id, value: 2 }));
+    // Concurrent double tap (and a down+up race) leaves exactly one row for the person.
+    await Promise.all([sam.community.setVote({ id: post.id, value: -1 }), sam.community.setVote({ id: post.id, value: -1 }), sam.community.setVote({ id: post.id, value: 1 })]);
+    const rows = await db.select().from(schema.communityPostVotes).where(d.and(d.eq(schema.communityPostVotes.postId, post.id), d.eq(schema.communityPostVotes.userId, SAM)));
+    eq(rows.length, 1, 'one vote row per person under concurrent taps');
+    // The same on comments.
+    const comment = await maya.community.addComment({ postId: post.id, body: 'A comment to score' });
+    eq((await sam.community.setCommentVote({ id: comment.id, value: -1 })).score, -1, 'comment downvote');
+    const cs = await jordan.community.setCommentVote({ id: comment.id, value: 1 });
+    eqv([cs.score, cs.upvotes, cs.downvotes, cs.viewerVote], [0, 1, 1, 1], 'comment score is up minus down');
+    eq((await sam.community.setCommentVote({ id: comment.id, voted: true })).viewerVote, 1, 'comment old shape upvotes');
+    eq((await sam.community.setCommentVote({ id: comment.id, voted: false })).viewerVote, 0, 'comment old shape clears');
+    const listed = (await sam.community.comments({ postId: post.id })).find((c) => c.id === comment.id)!;
+    eqv([listed.score, listed.viewerVote, listed.voteCount], [1, 0, 1], 'thread lists score and own vote');
+    await expectCode('UNAUTHORIZED', () => anon.community.setCommentVote({ id: comment.id, value: -1 }));
+    // Top orders by score (up minus down), not by upvote count.
+    const a = await mk('Score order A');
+    const b = await mk('Score order B');
+    const c = await mk('Score order C');
+    for (const [who, id, value] of [
+      [sam, a.id, 1], [jordan, a.id, 1],
+      [sam, b.id, 1], [jordan, b.id, 1], [maya, b.id, 1],
+      [sam, c.id, 1], [jordan, c.id, 1], [maya, c.id, -1],
+    ] as const) await who.community.setVote({ id, value });
+    for (const sort of ['top', 'hot'] as const) {
+      const order = (await sam.community.feed({ sort, kind: 'buying', limit: 50 })).items
+        .map((i) => i.id)
+        .filter((id) => [a.id, b.id, c.id].includes(id));
+      eqv(order, [b.id, a.id, c.id], `${sort}: score 3 > 2 > 1 (C has 2 upvotes but a downvote)`);
+    }
+    const topItem = (await sam.community.feed({ sort: 'top', kind: 'buying', limit: 50 })).items.find((i) => i.id === c.id)!;
+    eqv([topItem.score, topItem.upvotes, topItem.downvotes], [1, 2, 1], 'feed items carry score and counts');
+    const profile = (await sam.user.posts({ userId: MAYA })).find((p) => p.id === c.id)!;
+    eqv([profile.score, profile.viewerVote], [1, 1], 'profile posts carry score and own vote');
+    for (const id of [post.id, a.id, b.id, c.id]) await maya.community.remove({ id });
+  });
+
   await check('meetup email: both participants, retry, dedupe, and stale cancellation', async () => {
     const { dispatchBookingEmails, enqueueBookingEmails } = await import('../backend/email/bookings');
     // Only this test's messages are dispatched; the database is a temporary fixture.

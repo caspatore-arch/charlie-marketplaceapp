@@ -18,9 +18,9 @@ const CATEGORIES: { kind: CommunityPostKind; label: string; hint: string }[] = [
 ];
 
 const SORTS: { sort: CommunitySort; label: string; hint: string }[] = [
-  { sort: 'top', label: 'Top', hint: 'Most upvotes first' },
+  { sort: 'top', label: 'Top', hint: 'Highest score first (upvotes minus downvotes)' },
   { sort: 'new', label: 'Newest', hint: 'Most recent first' },
-  { sort: 'hot', label: 'Hottest', hint: 'Most upvotes in the last hour or so' },
+  { sort: 'hot', label: 'Hottest', hint: 'Highest score in the last hour or so' },
 ];
 
 export interface FeedControlsProps {

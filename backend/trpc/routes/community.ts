@@ -68,6 +68,82 @@ export function commentReadable(hidden: string[]) {
   )!;
 }
 
+/* ------------------------------------------------------------- votes */
+
+/** A vote is +1 (up), -1 (down) or 0 (no vote / clear). Popularity only, never a safety signal. */
+export type VoteValue = 1 | -1 | 0;
+
+/**
+ * Input for setVote / setCommentVote. New clients send `value`; older builds
+ * send `voted` (true = upvote, false = clear), which still works. `value` wins
+ * if both are present.
+ */
+export const voteInput = z
+  .object({
+    id: z.uuid(),
+    value: z.union([z.literal(1), z.literal(-1), z.literal(0)]).optional(),
+    voted: z.boolean().optional(),
+  })
+  .refine((v) => v.value !== undefined || v.voted !== undefined, { message: 'Send a vote value.' })
+  .transform((v) => ({ id: v.id, value: (v.value ?? (v.voted ? 1 : 0)) as VoteValue }));
+
+export interface VoteTally {
+  upvotes: number;
+  downvotes: number;
+  viewerVote: VoteValue;
+}
+
+export const NO_VOTES: VoteTally = { upvotes: 0, downvotes: 0, viewerVote: 0 };
+
+/** Wire fields for a tally. `voteCount`/`viewerVoted` are the old upvote-only fields, kept for older app builds. */
+export function voteFields(t: VoteTally) {
+  return {
+    /** Net popularity: upvotes minus downvotes. Can be negative. */
+    score: t.upvotes - t.downvotes,
+    upvotes: t.upvotes,
+    downvotes: t.downvotes,
+    /** The viewer's own vote: 1, -1 or 0. */
+    viewerVote: t.viewerVote,
+    /** Deprecated alias: the upvote count. */
+    voteCount: t.upvotes,
+    /** Deprecated alias: whether the viewer upvoted. */
+    viewerVoted: t.viewerVote === 1,
+  };
+}
+
+/** Up/down counts and the viewer's own vote for many posts or comments, in two grouped queries. */
+export async function voteTallies(
+  db: Db,
+  kind: 'post' | 'comment',
+  ids: string[],
+  viewerId: string,
+): Promise<Map<string, VoteTally>> {
+  const out = new Map<string, VoteTally>();
+  if (ids.length === 0) return out;
+  const table = (kind === 'post' ? communityPostVotes : communityCommentVotes) as typeof communityPostVotes;
+  const idCol = (kind === 'post' ? communityPostVotes.postId : communityCommentVotes.commentId) as typeof communityPostVotes.postId;
+  const grouped = await db
+    .select({
+      id: idCol,
+      up: sql<number>`(count(*) filter (where ${table.value} = 1))::int`,
+      down: sql<number>`(count(*) filter (where ${table.value} = -1))::int`,
+    })
+    .from(table)
+    .where(inArray(idCol, ids))
+    .groupBy(idCol);
+  for (const g of grouped) out.set(String(g.id), { upvotes: Number(g.up), downvotes: Number(g.down), viewerVote: 0 });
+  const mine = await db
+    .select({ id: idCol, value: table.value })
+    .from(table)
+    .where(and(eq(table.userId, viewerId), inArray(idCol, ids)));
+  for (const m of mine) {
+    const t = out.get(String(m.id)) ?? { ...NO_VOTES };
+    t.viewerVote = m.value === -1 ? -1 : 1;
+    out.set(String(m.id), t);
+  }
+  return out;
+}
+
 async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
   if (rows.length === 0) return [];
   const postIds = rows.map((r) => r.id);
@@ -76,17 +152,7 @@ async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
     .from(users)
     .where(inArray(users.id, [...new Set(rows.map((r) => r.authorId))]));
   const byId = new Map(authors.map((u) => [u.id, u]));
-  const totals = await db
-    .select({ postId: communityPostVotes.postId, total: count() })
-    .from(communityPostVotes)
-    .where(inArray(communityPostVotes.postId, postIds))
-    .groupBy(communityPostVotes.postId);
-  const totalById = new Map(totals.map((t) => [t.postId, Number(t.total)]));
-  const mine = await db
-    .select({ postId: communityPostVotes.postId })
-    .from(communityPostVotes)
-    .where(and(eq(communityPostVotes.userId, viewerId), inArray(communityPostVotes.postId, postIds)));
-  const votedIds = new Set(mine.map((m) => m.postId));
+  const tallies = await voteTallies(db, 'post', postIds, viewerId);
   // One grouped query for every post's comment count (no N+1). Counts only
   // what this viewer can actually read: not removed, author not closed, author
   // not blocked either way.
@@ -121,9 +187,15 @@ async function shape(db: Db, rows: CommunityPost[], viewerId: string) {
       createdAt: p.createdAt,
       author: toPublicUser(byId.get(p.authorId)!),
       isMine: p.authorId === viewerId,
-      /** Popularity only. Never an endorsement, and not a safety signal. For a listing post: the listing's likes. */
-      voteCount: eng ? eng.likeCount : (totalById.get(p.id) ?? 0),
-      viewerVoted: eng ? eng.viewerLiked : votedIds.has(p.id),
+      /**
+       * Popularity only. Never an endorsement, and not a safety signal. For a
+       * listing post: the listing's likes (up only, no downvotes).
+       */
+      ...voteFields(
+        eng
+          ? { upvotes: eng.likeCount, downvotes: 0, viewerVote: eng.viewerLiked ? 1 : 0 }
+          : (tallies.get(p.id) ?? NO_VOTES),
+      ),
       /** Popularity only, like votes. Counts comments this viewer can read. For a listing post: the listing's comments. */
       commentCount: eng ? eng.commentCount : (commentsById.get(p.id) ?? 0),
       /** Null for an ordinary text post. Otherwise the live listing card this post links to. */
@@ -240,17 +312,7 @@ async function shapeComments(
 ) {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.comment.id);
-  const totals = await db
-    .select({ id: communityCommentVotes.commentId, total: count() })
-    .from(communityCommentVotes)
-    .where(inArray(communityCommentVotes.commentId, ids))
-    .groupBy(communityCommentVotes.commentId);
-  const totalById = new Map(totals.map((t) => [t.id, Number(t.total)]));
-  const mine = await db
-    .select({ id: communityCommentVotes.commentId })
-    .from(communityCommentVotes)
-    .where(and(eq(communityCommentVotes.userId, viewerId), inArray(communityCommentVotes.commentId, ids)));
-  const votedIds = new Set(mine.map((m) => m.id));
+  const tallies = await voteTallies(db, 'comment', ids, viewerId);
   return rows.map(({ comment, author }) => ({
     id: comment.id,
     postId: comment.postId,
@@ -261,8 +323,7 @@ async function shapeComments(
     author: toPublicUser(author),
     isMine: comment.authorId === viewerId,
     /** Popularity only. Never an endorsement, and not a safety signal. */
-    voteCount: totalById.get(comment.id) ?? 0,
-    viewerVoted: votedIds.has(comment.id),
+    ...voteFields(tallies.get(comment.id) ?? NO_VOTES),
   }));
 }
 
@@ -308,8 +369,8 @@ export const communityRouter = router({
       const v = ctx.db
         .select({
           postId: communityPostVotes.postId,
-          total: count().as('total'),
-          hot: decayedSum(asOfIso, communityPostVotes.createdAt).as('v_hot'),
+          net: sql<number>`coalesce(sum(${communityPostVotes.value}), 0)::float8`.as('net'),
+          hot: decayedSum(asOfIso, communityPostVotes.createdAt, communityPostVotes.value).as('v_hot'),
         })
         .from(communityPostVotes)
         .groupBy(communityPostVotes.postId)
@@ -326,7 +387,7 @@ export const communityRouter = router({
         .groupBy(communityComments.postId)
         .as('cm');
       const cv = ctx.db
-        .select({ postId: communityComments.postId, hot: decayed(communityCommentVotes.createdAt).as('cv_hot') })
+        .select({ postId: communityComments.postId, hot: decayedSum(asOfIso, communityCommentVotes.createdAt, communityCommentVotes.value).as('cv_hot') })
         .from(communityCommentVotes)
         .innerJoin(communityComments, eq(communityComments.id, communityCommentVotes.commentId))
         .innerJoin(users, eq(users.id, communityComments.authorId))
@@ -337,7 +398,7 @@ export const communityRouter = router({
       // A listing post is ranked by its listing's own likes, comments and
       // shares (the same formula Browse's Hottest uses); text posts have none.
       const lp = listingHotParts(ctx.db, now, hidden);
-      const totalExpr = sql<number>`(coalesce(${v.total}, 0) + coalesce(${lp.likes.total}, 0))::float8`;
+      const totalExpr = sql<number>`(coalesce(${v.net}, 0) + coalesce(${lp.likes.total}, 0))::float8`;
       const hotExpr = sql<number>`(coalesce(${v.hot}, 0) + ${HOT_COMMENT_WEIGHT}::float8 * coalesce(${cm.hot}, 0) + ${HOT_COMMENT_VOTE_WEIGHT}::float8 * coalesce(${cv.hot}, 0) + ${listingHotExpr(lp)})::float8`;
       const scoreExpr = input.sort === 'top' ? totalExpr : input.sort === 'hot' ? hotExpr : sql<number>`0::float8`;
 
@@ -393,32 +454,33 @@ export const communityRouter = router({
     }),
 
   /**
-   * Set (not toggle) the viewer's upvote. Idempotent by design: a double-tap
-   * or a retry sends the same target state and cannot flip it back. The
-   * (post_id, user_id) primary key makes a duplicate insert a no-op even under
-   * concurrency. Only live posts on the viewer's campus can be voted on.
+   * Set (not toggle) the viewer's vote: 1 = up, -1 = down, 0 = clear. The old
+   * `{ voted: boolean }` shape still works (true = 1, false = 0). Idempotent
+   * by design: a double-tap or a retry sends the same target value and cannot
+   * flip it. The (post_id, user_id) primary key plus upsert means a person has
+   * at most one vote per post, even under concurrency. Only live posts on the
+   * viewer's campus can be voted on. Votes are popularity only.
    */
-  setVote: protectedProcedure
-    .input(z.object({ id: z.uuid(), voted: z.boolean() }))
-    .mutation(async ({ ctx, input }) => {
-      const post = await loadVisible(ctx.db, input.id, ctx.user);
-      assertNotListingPost(post);
-      if (input.voted) {
-        await ctx.db
-          .insert(communityPostVotes)
-          .values({ postId: post.id, userId: ctx.user.id })
-          .onConflictDoNothing();
-      } else {
-        await ctx.db
-          .delete(communityPostVotes)
-          .where(and(eq(communityPostVotes.postId, post.id), eq(communityPostVotes.userId, ctx.user.id)));
-      }
-      const [row] = await ctx.db
-        .select({ total: count() })
-        .from(communityPostVotes)
-        .where(eq(communityPostVotes.postId, post.id));
-      return { id: post.id, voteCount: Number(row?.total ?? 0), viewerVoted: input.voted };
-    }),
+  setVote: protectedProcedure.input(voteInput).mutation(async ({ ctx, input }) => {
+    const post = await loadVisible(ctx.db, input.id, ctx.user);
+    assertNotListingPost(post);
+    if (input.value === 0) {
+      await ctx.db
+        .delete(communityPostVotes)
+        .where(and(eq(communityPostVotes.postId, post.id), eq(communityPostVotes.userId, ctx.user.id)));
+    } else {
+      await ctx.db
+        .insert(communityPostVotes)
+        .values({ postId: post.id, userId: ctx.user.id, value: input.value })
+        .onConflictDoUpdate({
+          target: [communityPostVotes.postId, communityPostVotes.userId],
+          set: { value: input.value, createdAt: new Date() },
+          setWhere: sql`${communityPostVotes.value} <> ${input.value}`,
+        });
+    }
+    const t = (await voteTallies(ctx.db, 'post', [post.id], ctx.user.id)).get(post.id) ?? NO_VOTES;
+    return { id: post.id, ...voteFields(t) };
+  }),
 
   /**
    * Comments on one post, oldest first. The post is loaded through
@@ -475,27 +537,26 @@ export const communityRouter = router({
       return shaped!;
     }),
 
-  /** Set (not toggle) the viewer's upvote on a comment. Same idempotent contract as `setVote`. */
-  setCommentVote: protectedProcedure
-    .input(z.object({ id: z.uuid(), voted: z.boolean() }))
-    .mutation(async ({ ctx, input }) => {
-      const comment = await loadVisibleComment(ctx.db, input.id, ctx.user);
-      if (input.voted) {
-        await ctx.db
-          .insert(communityCommentVotes)
-          .values({ commentId: comment.id, userId: ctx.user.id })
-          .onConflictDoNothing();
-      } else {
-        await ctx.db
-          .delete(communityCommentVotes)
-          .where(and(eq(communityCommentVotes.commentId, comment.id), eq(communityCommentVotes.userId, ctx.user.id)));
-      }
-      const [row] = await ctx.db
-        .select({ total: count() })
-        .from(communityCommentVotes)
-        .where(eq(communityCommentVotes.commentId, comment.id));
-      return { id: comment.id, voteCount: Number(row?.total ?? 0), viewerVoted: input.voted };
-    }),
+  /** Set (not toggle) the viewer's vote on a comment. Same idempotent contract and old-shape support as `setVote`. */
+  setCommentVote: protectedProcedure.input(voteInput).mutation(async ({ ctx, input }) => {
+    const comment = await loadVisibleComment(ctx.db, input.id, ctx.user);
+    if (input.value === 0) {
+      await ctx.db
+        .delete(communityCommentVotes)
+        .where(and(eq(communityCommentVotes.commentId, comment.id), eq(communityCommentVotes.userId, ctx.user.id)));
+    } else {
+      await ctx.db
+        .insert(communityCommentVotes)
+        .values({ commentId: comment.id, userId: ctx.user.id, value: input.value })
+        .onConflictDoUpdate({
+          target: [communityCommentVotes.commentId, communityCommentVotes.userId],
+          set: { value: input.value, createdAt: new Date() },
+          setWhere: sql`${communityCommentVotes.value} <> ${input.value}`,
+        });
+    }
+    const t = (await voteTallies(ctx.db, 'comment', [comment.id], ctx.user.id)).get(comment.id) ?? NO_VOTES;
+    return { id: comment.id, ...voteFields(t) };
+  }),
 
   /** Author deletes their own comment (soft removal, like posts). */
   removeComment: protectedProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {

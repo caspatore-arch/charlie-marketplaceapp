@@ -1,14 +1,12 @@
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
 import {
   blocks,
   campuses,
-  communityCommentVotes,
   communityComments,
-  communityPostVotes,
   emailCodes,
   communityPosts,
   follows,
@@ -35,7 +33,7 @@ import {
   type PublicUser,
 } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
-import { commentReadable, liveFilter } from './community';
+import { NO_VOTES, commentReadable, liveFilter, voteFields, voteTallies } from './community';
 
 export type PublicProfile = PublicUser & {
   campus: typeof campuses.$inferSelect;
@@ -261,12 +259,7 @@ export const userRouter = router({
         .orderBy(desc(communityComments.createdAt))
         .limit(50);
       if (rows.length === 0) return [];
-      const totals = await ctx.db
-        .select({ id: communityCommentVotes.commentId, total: count() })
-        .from(communityCommentVotes)
-        .where(inArray(communityCommentVotes.commentId, rows.map((r) => r.comment.id)))
-        .groupBy(communityCommentVotes.commentId);
-      const totalById = new Map(totals.map((t) => [t.id, Number(t.total)]));
+      const tallies = await voteTallies(ctx.db, 'comment', rows.map((r) => r.comment.id), ctx.user.id);
       return rows.map(({ comment, post }) => ({
         id: comment.id,
         postId: post.id,
@@ -276,7 +269,7 @@ export const userRouter = router({
         postExcerpt: post.body.length > 80 ? `${post.body.slice(0, 77)}...` : post.body,
         isMine: comment.authorId === ctx.user.id,
         /** Popularity only. Never an endorsement, and not a safety signal. */
-        voteCount: totalById.get(comment.id) ?? 0,
+        ...voteFields(tallies.get(comment.id) ?? NO_VOTES),
       }));
     }),
 
@@ -309,12 +302,7 @@ export const userRouter = router({
       if (rows.length === 0) return [];
       const [author] = await ctx.db.select().from(users).where(eq(users.id, input.userId)).limit(1);
       if (!author || author.deletedAt != null) return [];
-      const totals = await ctx.db
-        .select({ postId: communityPostVotes.postId, total: count() })
-        .from(communityPostVotes)
-        .where(inArray(communityPostVotes.postId, rows.map((r) => r.id)))
-        .groupBy(communityPostVotes.postId);
-      const totalById = new Map(totals.map((t) => [t.postId, Number(t.total)]));
+      const tallies = await voteTallies(ctx.db, 'post', rows.map((r) => r.id), ctx.user.id);
       return rows.map((p) => ({
         id: p.id,
         kind: p.kind,
@@ -323,7 +311,7 @@ export const userRouter = router({
         author: toPublicUser(author),
         isMine: p.authorId === ctx.user.id,
         /** Popularity only. Never an endorsement, and not a safety signal. */
-        voteCount: totalById.get(p.id) ?? 0,
+        ...voteFields(tallies.get(p.id) ?? NO_VOTES),
       }));
     }),
 

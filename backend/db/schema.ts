@@ -11,6 +11,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -827,11 +828,11 @@ export const listingShares = pgTable(
 );
 
 /**
- * Upvotes on community posts (popularity only; never an endorsement or a
- * safety signal). The composite primary key is the UNIQUE constraint: one
+ * Votes on community posts: up (+1) or down (-1), popularity only; never an
+ * endorsement or a safety signal. The composite primary key is the UNIQUE constraint: one
  * vote per user per post, enforced by the database, so concurrent double-taps
- * cannot create two rows (the second insert hits ON CONFLICT DO NOTHING).
- * Counts are always derived with COUNT(*), so they can never go negative.
+ * cannot create two rows (the second write hits ON CONFLICT DO UPDATE and just sets the same value).
+ * Up/down counts are always derived from the rows (never stored).
  */
 export const communityPostVotes = pgTable(
   'community_post_votes',
@@ -842,10 +843,13 @@ export const communityPostVotes = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** 1 = upvote, -1 = downvote. No row = no vote. Existing rows are upvotes. */
+    value: smallint('value').notNull().default(1),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.postId, t.userId] }),
+    check('community_post_votes_value_check', sql`${t.value} in (1, -1)`),
     // Recent-vote scans for the "hot" ranking.
     index('community_post_votes_recent_idx').on(t.createdAt),
   ],
@@ -917,9 +921,9 @@ export const listingComments = pgTable(
 );
 
 /**
- * Upvotes on comments: same shape and guarantees as `communityPostVotes`
- * (composite primary key = one vote per person per comment, ON CONFLICT DO
- * NOTHING, counts via COUNT(*), no downvotes). Popularity only.
+ * Votes on comments: same shape and guarantees as `communityPostVotes`
+ * (composite primary key = one vote per person per comment, upsert on
+ * conflict, value 1 or -1). Popularity only.
  */
 export const communityCommentVotes = pgTable(
   'community_comment_votes',
@@ -930,10 +934,13 @@ export const communityCommentVotes = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** 1 = upvote, -1 = downvote. No row = no vote. Existing rows are upvotes. */
+    value: smallint('value').notNull().default(1),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.commentId, t.userId] }),
+    check('community_comment_votes_value_check', sql`${t.value} in (1, -1)`),
     // Recent-vote scans for the "hot" ranking.
     index('community_comment_votes_recent_idx').on(t.createdAt),
   ],

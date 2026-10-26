@@ -587,6 +587,16 @@ Migration `0016_listing_engagement` (additive only: two new tables, one nullable
 - Ordinary text posts (buying/selling) are unchanged.
 - Tested by `npm run test:engagement` (58 checks).
 
+## Community upvotes and downvotes (October 26, 2026)
+
+- `community.setVote` and `community.setCommentVote` take `{ id, value: 1 | -1 | 0 }` (1 up, -1 down, 0 clear). Idempotent: they set the target, never toggle. The old `{ id, voted: boolean }` shape is still accepted (true = 1, false = 0); `value` wins if both are sent. Same auth (signed in), block, campus and post-lifecycle rules as before; a listing post still rejects votes.
+- Both return `{ id, score, upvotes, downvotes, viewerVote }` plus the old fields for older app builds: `voteCount` = upvote count, `viewerVoted` = `viewerVote === 1`. `score = upvotes - downvotes` and can be negative.
+- Storage: `community_post_votes` / `community_comment_votes` gain `value smallint NOT NULL DEFAULT 1 CHECK (value IN (1, -1))` (migration 0019; existing rows are upvotes). The composite primary key keeps it to one vote per person per item; writes are an upsert (`ON CONFLICT DO UPDATE SET value`), so a concurrent double tap leaves one row.
+- Every list of posts or comments (`community.feed`, `byId`, `comments`, `user.posts`, `user.comments`) carries `score`, `upvotes`, `downvotes` and `viewerVote` (and the old fields). `user.posts`/`user.comments` carry the viewer's own vote too. A listing post reports its likes as `upvotes` with 0 downvotes.
+- Ranking: Top sorts by `score` (net, plus a listing post's likes). Hottest uses the net recent votes (sum of `value`, each weighted by the same 30-minute half-life decay as before); comment votes feed it the same way. Newest is unchanged.
+- Votes are popularity only, never an endorsement or a safety signal.
+- Tested by `npm run test:workstreams` ("votes: ...") and `test:e2e`.
+
 ## Archive, buyer-proposed meetups and permanent posts (October 24, 2026)
 
 Owner decision. Migration `0017_posts_no_expiry` (additive: `community_posts.expires_at` becomes nullable).
