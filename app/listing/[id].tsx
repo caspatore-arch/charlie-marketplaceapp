@@ -41,6 +41,7 @@ import { ServerErrorNote, type ServerErrorLike } from '@/components/offers/Serve
 import { ReservationStatusPill } from '@/components/ReservationStatusPill';
 import { exactMeetupTime } from '@/components/booking/time';
 import { ListingComments } from '@/components/listing/ListingComments';
+import { StoryShareModal } from '@/components/share/StoryShareModal';
 import { ReportSheet } from '@/components/browse/ReportSheet';
 import { expiresInLabel, expiresSoon } from '@/components/browse/expiry';
 import { OFFERS_ENABLED } from '@/constants/features';
@@ -67,6 +68,7 @@ export default function ListingDetailScreen() {
   const utils = trpc.useUtils();
 
   const [reportOpen, setReportOpen] = useState(false);
+  const [storyOpen, setStoryOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
   const [offerError, setOfferError] = useState<ServerErrorLike | null>(null);
   const [offersActionError, setOffersActionError] = useState<ServerErrorLike | null>(null);
@@ -663,6 +665,16 @@ export default function ListingDetailScreen() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + space.md }]}>
         {isSeller ? (
+          <>
+          {listing.status === 'active' || listing.status === 'reserved' ? (
+            <Button
+              title="Share to your story"
+              variant="ghost"
+              onPress={() => setStoryOpen(true)}
+              accessibilityLabel="Share this listing to your story"
+              style={styles.storyBtn}
+            />
+          ) : null}
           <View style={styles.footerRow}>
             <Button
               title="Edit listing"
@@ -680,6 +692,7 @@ export default function ListingDetailScreen() {
               />
             ) : null}
           </View>
+          </>
         ) : isArchived ? (
           <>
             <View style={styles.archiveNote}>
@@ -808,6 +821,14 @@ export default function ListingDetailScreen() {
       />
       ) : null}
 
+      <StoryShareModal
+        listing={
+          storyOpen
+            ? { title: listing.title, priceCents: listing.priceCents, coverPhotoUrl: listing.coverPhotoUrl ?? null }
+            : null
+        }
+        onClose={() => setStoryOpen(false)}
+      />
       <ReportSheet
         visible={reportOpen}
         onClose={() => setReportOpen(false)}
@@ -869,6 +890,7 @@ const styles = StyleSheet.create({
   },
   footerRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   footerBtnFlex: { flex: 1 },
+  storyBtn: { marginBottom: space.sm },
   // "Offer" is short; give "Book meetup" the room so neither label truncates at 375pt.
   footerBtnOffer: { flex: 2 },
   footerBtnBook: { flex: 3 },

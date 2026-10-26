@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ListingForm, type ListingFormInitialValues, type ListingFormSubmitValues } from '@/components/sell/ListingForm';
+import { PostPublishModal, type PublishedListing } from '@/components/share/PostPublishModal';
 import { RelistPanel } from '@/components/sell/RelistPanel';
 import { GuardedCloseButton } from '@/components/sell/GuardedCloseButton';
 import { useAuth } from '@/hooks/useAuth';
@@ -34,6 +35,7 @@ export default function EditListingScreen() {
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [reposted, setReposted] = useState<PublishedListing | null>(null);
 
   const isSellerView = listingQuery.data?.viewerRole === 'seller';
   const meetupsQuery = trpc.reservation.forListing.useQuery({ listingId: id! }, { enabled: !!id && isSellerView });
@@ -56,7 +58,20 @@ export default function EditListingScreen() {
   });
 
   const relistMutation = trpc.listing.relist.useMutation({
-    onSuccess: (listing) => invalidateAndGo(listing),
+    onSuccess: async (listing) => {
+      await Promise.all([
+        utils.listing.feed.invalidate(),
+        utils.listing.mine.invalidate(),
+        utils.listing.byId.invalidate({ id: listing.id }),
+      ]);
+      // Same prompt a new listing gets; its buttons navigate.
+      setReposted({
+        id: listing.id,
+        title: listing.title,
+        priceCents: listing.priceCents,
+        coverPhotoUrl: listing.coverPhotoUrl ?? null,
+      });
+    },
     onError: (err) => Alert.alert('Could not relist', err.message),
   });
 
@@ -187,8 +202,25 @@ export default function EditListingScreen() {
       </Pressable>
     );
 
+  // Rendered beside both screens so it survives the refetch flipping the listing to active.
+  const repostModal = (
+    <PostPublishModal
+      listing={reposted}
+      onViewListing={() => {
+        const rid = reposted?.id;
+        setReposted(null);
+        if (rid) router.replace(`/listing/${rid}`);
+      }}
+      onBackToFeed={() => {
+        setReposted(null);
+        router.replace('/');
+      }}
+    />
+  );
+
   if (canRelist) {
     return (
+      <>
       <Screen scroll contentContainerStyle={styles.relistContent}>
         <Stack.Screen options={{ title: 'Edit listing', headerLeft: () => <GuardedCloseButton onPress={handleClose} /> }} />
         <RelistPanel
@@ -202,10 +234,13 @@ export default function EditListingScreen() {
         />
         <View style={styles.removeWrap}>{removeAction}</View>
       </Screen>
+      {repostModal}
+      </>
     );
   }
 
   return (
+    <>
     <Screen padded={false}>
       <Stack.Screen options={{ title: 'Edit listing', headerLeft: () => <GuardedCloseButton onPress={handleClose} /> }} />
       <ListingForm
@@ -228,6 +263,8 @@ export default function EditListingScreen() {
         }
       />
     </Screen>
+    {repostModal}
+    </>
   );
 }
 
