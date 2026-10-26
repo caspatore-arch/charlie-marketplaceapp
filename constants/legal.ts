@@ -76,8 +76,8 @@ export const TERMS_SECTIONS: LegalSection[] = [
     body: [
       'This section must always match docs/HANDOFF.md §3 exactly, in plain language:',
       'No payments happen in the App. Payments are switched off: no payment processor is active, the App charges no fees, and it does not hold, transmit, or protect funds. A listing price is what the buyer and seller agree to settle between themselves in person.',
-      'Sign-in codes are not emailed to you in this prototype. They are simulated delivery — printed to the operator\'s server log — and this will change before any real launch.',
-      'The App does not verify your identity, run background checks, or vet other users beyond confirming a phone number and a campus email address. Phone verification is not identity verification.',
+      'Sign-in codes are emailed to you. Text-message (SMS) sign-in is not active yet, so codes are never texted.',
+      'The App does not verify your identity, run background checks, or vet other users beyond confirming an email address and, to buy, sell or post, a campus email address. Email verification is not identity verification.',
       'The App does not resolve disputes between users. If a trade goes wrong, the operator can review reports but cannot guarantee a refund, replacement, or any particular outcome, because no money or goods pass through the operator at all.',
       'Meetup spots and listings marked "Demo" are sample data for testing and have not been verified for accuracy, hours, or permission to use as a meetup location.',
     ],
@@ -169,7 +169,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     body: [
       'To operate the App: showing your listings to other users, delivering messages, and coordinating meetups you agree to.',
       'To keep the App safe: reviewing reports, and moderating listings and accounts.',
-      'Sign-in codes are logged to the operator\'s server console in this prototype (simulated email delivery) rather than sent to your inbox — see docs/HANDOFF.md §3.',
+      'To email you sign-in codes and meetup confirmations: these are sent through our email provider, Resend, which receives your email address and the message only to deliver it.',
     ],
   },
   {

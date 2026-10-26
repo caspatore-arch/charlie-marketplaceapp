@@ -1,190 +1,105 @@
-# Deploying the website (for the founder, not an engineer)
+# Website operations guide (trydibbs.com on Netlify)
 
-This guide gets the **Dibbs website** — the student-facing pages that run in any browser, including iPhone Safari — onto the internet. It covers the web front-end only: the HTML, JavaScript, and image files that your visitors download.
+How the Dibbs website is hosted, how it gets redeployed, and how to check it.
+The API, database, photos and email are in `docs/DEPLOY.md`.
 
-The **backend API** (the server your app talks to) is a separate thing covered in `docs/DEPLOY.md`. Read that document first and follow it completely before starting here. The website needs a running API to actually work, and you need to know the API's public URL before you can build the site.
-
-Budget **an afternoon** the first time.
+Status below was checked in the dashboards on Oct 25-26, 2026.
 
 ---
 
-## One site on trydibbs.com
+## 1. What is live
 
-There is **one website**, at **https://trydibbs.com**. There is no separate waitlist page any more, and the app no longer lives on `app.trydibbs.com`.
+There is **one website**, at **https://trydibbs.com**. The old waitlist site is gone
+from the domain, and the app no longer lives on its own subdomain.
+
+| Piece | Setting |
+|---|---|
+| Host | **Netlify**, project `dibbs-app-web` |
+| Source | Auto-builds from GitHub `main` (`caspatore-arch/charlie-marketplaceapp`). Pull requests get **deploy previews**. |
+| Build | `npm run web:build` (`expo export --platform web`) into `dist/`, set in `netlify.toml` |
+| Domains | `trydibbs.com` is primary. `www.trydibbs.com` and `app.trydibbs.com` redirect to the same path on the root (301, from `public/_redirects`). |
+| DNS | Cloudflare (registrar and DNS). Netlify web records are **DNS only** (not proxied). |
+| API it talks to | `https://api.trydibbs.com` (Render, see `docs/DEPLOY.md`) |
 
 What a visitor sees:
 
-- **First visit, signed out:** the front door (`app/welcome.tsx`) — the red Dibbs page that used to be the waitlist, same look, but the card now has **Create account** and **Log in** tabs instead of a waitlist form.
-- **Create account:** campus email → 6-digit code + name + age/Terms → **Make your profile** (`app/create-profile.tsx`: photo, name, bio; "Skip for now" is allowed) → the listing feed.
-- **Log in:** campus email → code → straight to the listing feed.
-- **Coming back later:** if they are still signed in, `trydibbs.com` opens the feed directly. If not, they land on the front door and use **Log in**.
-- **Shared listing links** (`trydibbs.com/listing/…`) still open for anyone, signed in or not.
-
-The native app (Expo Go / App Store) is unchanged: signed-out people can still browse there.
-
-### Moving the domain (one-time, in the Netlify dashboard)
-
-Today `trydibbs.com` points at the old waitlist site and `app.trydibbs.com` at the app site. Do these in order, so there is never a moment when `trydibbs.com` shows nothing:
-
-1. **Backend first.** On the backend host (Railway), set
-   `ALLOWED_ORIGINS=https://trydibbs.com,https://www.trydibbs.com,https://app.trydibbs.com`
-   and `EXPO_PUBLIC_WEB_BASE_URL=https://trydibbs.com` (used for links in texts). Wait for it to restart.
-2. **Waitlist site:** Netlify → the waitlist site → *Domain management* → remove `trydibbs.com` and `www.trydibbs.com`. Download any waitlist signups you want to keep first (*Forms* → `waitlist` → export CSV); they go away with the site.
-3. **App site:** Netlify → the app site → *Domain management* → *Add a domain* → `trydibbs.com`. Make it the **primary domain**. Keep `app.trydibbs.com` attached as a second domain, and add `www.trydibbs.com` too — `public/_redirects` forwards both to `trydibbs.com`, so old links keep working.
-4. **Redeploy** the app site (*Deploys* → *Trigger deploy* → *Clear cache and deploy*). `netlify.toml` already sets `EXPO_PUBLIC_WEB_BASE_URL=https://trydibbs.com` for the build.
-5. **Check:** open `https://trydibbs.com` in a private window — you should see the red page with Create account / Log in. Open `https://app.trydibbs.com/listing/anything` — the address bar should change to `trydibbs.com/listing/anything`.
-6. Once that works, delete the old waitlist site in Netlify. Its code has been removed from this repo (`waitlist/`); it is still in git history if you ever need it.
+- **First visit, signed out:** the front door (`app/welcome.tsx`) with **Create
+  account** and **Log in** tabs.
+- **Create account:** email, 6-digit code, name and age/Terms, then **Make your
+  profile** (`app/create-profile.tsx`, "Skip for now" allowed), then the feed.
+- **Log in:** email, code, straight to the feed. Any email can sign in; a campus
+  email unlocks selling, offers, booking and posting.
+- **Signed in:** `trydibbs.com` opens the feed directly.
+- **Shared listing links** (`trydibbs.com/listing/...`) open for anyone.
 
 ---
 
-## 0. Why the order matters
+## 2. Build-time variables (the one thing that trips people up)
 
-The website is a static package — a folder of files that a hosting service delivers to browsers. Unlike a traditional web app, there is no server running on the host. That means:
+The website is a static folder of files. There is no server on the host, so
+**`EXPO_PUBLIC_*` variables are baked in at build time**. Changing one in the
+dashboard changes nothing until you trigger a new build.
 
-**Environment variables are baked in at build time, not read at runtime.**
+Set in the **Netlify build environment** (Site configuration, Environment variables):
 
-This is the single thing that trips people up most often. When you run `npm run web:build` on your Mac, Metro (the JavaScript bundler) finds every variable that starts with `EXPO_PUBLIC_` in your `.env` file and hard-codes the values into the JavaScript files. After the build, those values are frozen. If you change an environment variable on the hosting dashboard after uploading the files, **nothing changes** — the files already have the old value baked in and you must rebuild and re-upload.
+| Variable | Value |
+|---|---|
+| `EXPO_PUBLIC_RORK_API_BASE_URL` | `https://api.trydibbs.com` (no trailing slash) |
+| `EXPO_PUBLIC_WEB_BASE_URL` | `https://trydibbs.com` (used for share links; `netlify.toml` also sets it) |
 
-The practical consequence: **set your environment variables correctly before you build**, not after.
+Only `EXPO_PUBLIC_*` values reach the app, so never put a secret in one.
 
----
+## 3. Redeploy and roll back
 
-## 1. Make sure the backend is deployed first
+- **Normal path:** push or merge to `main`; Netlify builds and publishes. Open a PR
+  to get a deploy preview URL to check first.
+- **Manual / after changing a build variable:** Netlify, `dibbs-app-web`, Deploys,
+  Trigger deploy, "Clear cache and deploy".
+- **Roll back:** Netlify, Deploys, open an earlier good deploy, "Publish deploy".
+  Instant, and it does not touch the API or database.
+- **Local build (debugging only):** `npm run web:build` writes `dist/`. It is not
+  committed and is not how production is deployed.
 
-Follow `docs/DEPLOY.md` completely. When you are done, you will have:
+## 4. Backend must allow the site (CORS)
 
-- A public backend URL (e.g. `https://dibbs-api.onrender.com`). You need this in step 2.
-- A running API that returns `{"ok":true}` at `https://dibbs-api.onrender.com/api/health`.
+If the website loads but nothing works (no listings, sign-in fails, uploads fail),
+the browser console will show a CORS error like
+`Access to fetch at 'https://api.trydibbs.com/...' ... has been blocked by CORS policy`.
 
-Do not continue until that health check passes.
+Fix it on **Render** (`dibbs-api`): `ALLOWED_ORIGINS` must include every origin the
+site is served from, comma-separated, for example
+`https://trydibbs.com,https://www.trydibbs.com`. It is only enforced when
+`NODE_ENV=production`. Deploy previews use other origins (`*.netlify.app`); add one
+only if you need to test against production from a preview. Check
+`/api/health` afterwards.
 
----
+## 5. Hosting config files in the repo
 
-## 2. Set your build-time environment variables
+- `netlify.toml`: build command, publish directory, `EXPO_PUBLIC_WEB_BASE_URL`, and
+  the SPA rewrites.
+- `public/_redirects`: host redirects (`app` and `www` to the root) and the SPA
+  fallback. Netlify runs it before `netlify.toml`, so the host redirects must stay
+  above the catch-all.
 
-In the root of this repo, open (or create) a file called `.env`. This file is already listed in `.gitignore` — it will not be committed to GitHub, which is correct because some of its values are secrets.
+The single-page-app fallback matters: a shared link such as `/listing/abc` must
+return the app, not a 404.
 
-Add or update these three lines (the rest of `.env` can stay as-is from your local dev setup):
+## 6. Verify
 
-```
-EXPO_PUBLIC_RORK_API_BASE_URL=https://dibbs-api.onrender.com
-EXPO_PUBLIC_WEB_BASE_URL=https://dibbs.yourdomain.com
-```
+- [ ] `https://trydibbs.com` in a private window on an iPhone: the front door with
+  **Create account** and **Log in**. Sign in with a real inbox and confirm the code
+  arrives, then you land on the feed.
+- [ ] **Open a listing URL directly** in a new tab (and hard-refresh it). It must show
+  the listing, not a 404. This proves the SPA rewrite is working.
+- [ ] `https://app.trydibbs.com/listing/anything` and `https://www.trydibbs.com/...`
+  change the address bar to `trydibbs.com/...`.
+- [ ] Tap Share on a listing: the native share sheet appears on iPhone Safari, and
+  the copied link opens the listing.
+- [ ] Photo upload: only trust it if `docs/DEPLOY.md` section 4 (R2) is done;
+  otherwise photos can disappear on the next API redeploy.
 
-Replace both placeholder URLs with your real ones:
+## 7. Not covered here
 
-- **`EXPO_PUBLIC_RORK_API_BASE_URL`** — the public backend URL from step 1. No trailing slash.
-- **`EXPO_PUBLIC_WEB_BASE_URL`** — the URL the website will have once you deploy it (step 4). You need to choose your host and know its URL before you build. See step 3 to pick a host and find out what URL it gives you.
-
-You can leave `EXPO_PUBLIC_WEB_BASE_URL` unset for now and the site will still work — share links will just use whatever URL the browser shows. Set it before your final launch so share links look like `https://dibbs.yourdomain.com/listing/…` instead of your host's default subdomain.
-
----
-
-## 3. Choose a hosting provider
-
-Pick one. All three are free to start and accept the same build output. The repo ships a ready-made configuration file for each one.
-
-| Provider | Config file in this repo | Free plan | Notes |
-|---|---|---|---|
-| [Vercel](https://vercel.com) | `vercel.json` | Yes, generous | Connects to GitHub, redeploys on every push — recommended if the repo is on GitHub |
-| [Netlify](https://netlify.com) | `netlify.toml` | Yes | Same GitHub-connect model; also supports drag-and-drop if you prefer |
-| [Cloudflare Pages](https://pages.cloudflare.com) | `public/_redirects` | Yes, very generous | Good choice if you already use Cloudflare for DNS |
-
-All three serve static files from a CDN automatically — no server configuration, no monthly instance fee for the web part. (You still pay for the backend API from `docs/DEPLOY.md`.)
-
----
-
-## 4. Build the static site
-
-On your Mac, in the repo folder, run:
-
-```
-npm run web:build
-```
-
-This runs `expo export --platform web` and produces a folder called `dist/`. That folder is your entire website — every `.html`, `.js`, image, and font file that browsers need. You only need to do this when you want to ship a new version; the `dist/` folder is not committed to GitHub.
-
-The build takes a minute or two. When it finishes, you should see a `dist/` folder in the repo with an `index.html` inside it.
-
----
-
-## 5. Deploy to your chosen host
-
-### Option A — Vercel (recommended if the repo is on GitHub)
-
-1. Push this repo to GitHub if it isn't already (`docs/HANDOFF.md` §4 covers the Rork → GitHub connection).
-2. Sign up / log into [vercel.com](https://vercel.com) and click **Add New → Project**.
-3. Connect your GitHub account and pick this repo.
-4. Vercel will auto-detect the `vercel.json` and set the build command (`npm run web:build`) and output directory (`dist`) for you. Confirm and click **Deploy**.
-5. Vercel gives you a URL like `https://your-project-name.vercel.app` as soon as the deploy finishes. That's your site.
-
-### Option B — Netlify (also GitHub, or drag-and-drop)
-
-**Via GitHub:**
-1. Sign up / log into [netlify.com](https://netlify.com) and click **Add new site → Import an existing project**.
-2. Connect GitHub and pick this repo. Netlify reads `netlify.toml` and pre-fills everything.
-3. Click **Deploy site**.
-
-**Drag-and-drop (no GitHub required):**
-1. Run `npm run web:build` on your Mac (step 4).
-2. Go to [app.netlify.com](https://app.netlify.com), log in, drag the whole `dist/` folder onto the drop zone on the dashboard.
-3. Done — Netlify gives you a URL immediately.
-
-### Option C — Cloudflare Pages
-
-1. Log into the Cloudflare dashboard, go to **Workers & Pages → Create application → Pages**.
-2. Connect your GitHub repo, or use the **Direct Upload** option to upload the `dist/` folder from step 4.
-3. If connecting GitHub, set the build command to `npm run web:build` and the output directory to `dist`.
-4. Deploy.
-
----
-
-## 6. Tell the backend about the website (CORS)
-
-This step is easy to miss and produces a confusing error.
-
-**What happens if you skip it:** every API call from the website fails silently. The site loads, but nothing works — no listings appear, sign-in fails, uploads fail. In the browser's developer tools (open with right-click → Inspect → Console), you will see errors that say something like:
-
-> `Access to fetch at 'https://dibbs-api.onrender.com/…' from origin 'https://dibbs.yourdomain.com' has been blocked by CORS policy`
-
-**The fix:** go to your backend host's dashboard (Render, Railway, etc.) and add an environment variable:
-
-```
-ALLOWED_ORIGINS=https://dibbs.yourdomain.com
-```
-
-Replace the placeholder with the exact URL your site has. If you have multiple URLs (e.g. the host's default subdomain and a custom domain), separate them with commas:
-
-```
-ALLOWED_ORIGINS=https://dibbs.yourdomain.com,https://your-project.vercel.app
-```
-
-After saving, the backend will restart automatically on most hosts. Check the health endpoint again (`/api/health`) to confirm it is still up.
-
----
-
-## 7. Set the share-link URL (optional but recommended before launch)
-
-Share links (the button on a listing page) use `EXPO_PUBLIC_WEB_BASE_URL` to produce a correct `https://` URL. If you left it unset in step 2, go back, add it to `.env`, and rebuild (`npm run web:build`) and redeploy.
-
-You only need to do this once. After that, every share link a student sends will look like `https://dibbs.yourdomain.com/listing/…` and open the listing page directly.
-
----
-
-## 8. Check that it actually worked
-
-Go through this list after deploying. None of it requires a terminal.
-
-- [ ] Open https://trydibbs.com on an iPhone in Safari, signed out. You should see the red front door with **Create account** and **Log in**. Create an account and check you land on **Make your profile**, then the feed.
-- [ ] **Hard-refresh a listing URL directly.** This is the most important test. Copy a listing URL (e.g. `https://dibbs.yourdomain.com/listing/some-id`), paste it into a new browser tab, and open it. It should show the listing — not a 404 page. If you get a 404, the SPA rewrite rule isn't working and shared links will be broken for everyone. (The `vercel.json`, `netlify.toml`, and `public/_redirects` files in this repo are the fix — make sure your host is actually reading the right one.)
-- [ ] Sign in with a `@arizona.edu` email address. You should receive a sign-in code (note: email delivery is still simulated — the code is printed to the backend server's logs, viewable in your host's dashboard; see `docs/DEPLOY.md` §8 for the full list of what's still simulated).
-- [ ] Tap the share button on a listing. On iPhone Safari you should see the native share sheet. Copy the link and paste it into a new tab — it should open the listing, not a 404.
-- [ ] Upload a photo on a new listing. Confirm the photo appears in the listing. If it doesn't, the backend's object storage config needs attention (`docs/DEPLOY.md` §2).
-
----
-
-## 9. What this guide did *not* cover
-
-- **Custom domain** — all three hosts let you connect your own domain name for free, but the steps differ per host. Their own documentation covers it; once the site is working on the host's default URL, adding a domain is straightforward.
-- **Real email delivery** — sign-in codes are still printed to the backend logs, not emailed. This is fine for testing but needs a mail-sending provider before real users can sign up independently. Covered in `docs/HANDOFF.md`.
-- **App Store / TestFlight** — the iPhone app (native build) is a completely separate path through Expo / Rork / App Store Connect. This guide is the website-first launch only.
+- **Real SMS and payments:** still simulated (`docs/DEPLOY.md` section 8,
+  `docs/HANDOFF.md` section 3a).
+- **App Store / TestFlight:** the native app is a separate path (`docs/APP-STORE.md`).

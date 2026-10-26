@@ -56,8 +56,8 @@ change*, not because it is right.
 | **Custom meetup addresses** | On, limited to 2 miles from campus | Curated campus spots are safer by design: public, lit, other people present. A custom address removes that guardrail, and there is **no verification that an address is a sane place to meet, no way to flag a bad one afterwards, and no support-side record** if something goes wrong there. Either accept that knowingly for the pilot or turn the option off until someone is answering reports. |
 | **Bid enforcement** | A bid is described as a commitment; nothing enforces it | No deposit, no payment held. A winner who ghosts costs the seller 24 hours and the only backstop is report/block. This is a policy call, not a code one. |
 | **Geocoding provider** | OpenStreetMap Nominatim (free) | Its usage policy forbids production/commercial volume. Fine for a pilot, must be swapped before real traffic. One file: `backend/geocode.ts`. |
-| **Object storage provider** | Local disk (not shippable) | Photos must move to S3-compatible storage before the app can be installed from TestFlight. See `docs/DEPLOY.md`. |
-| **Database and container host** | PGlite on your Mac | Roughly $5-10/month once hosted. See `docs/DEPLOY.md`. |
+| **Object storage provider** | Cloudflare R2 bucket `dibbs-photos` exists; the API was not yet pointed at it as of 2026-10-25 (uploads on container disk) | Photos must be on S3-compatible storage before real users or TestFlight. See `docs/DEPLOY.md` section 4. |
+| **Database and container host** | Hosted: Neon (Free plan) and Render `dibbs-api` (Free plan, sleeps when idle) | Paid tiers are the owner's billing call. See `docs/DEPLOY.md`. |
 | **Brand name** | **Dibbs** — decided | Settled. Use it as-is for the App Store listing; nothing further is needed from you here. |
 | **Bundle identifier** | Still the `com.placeholder.*` value in `app.config.ts` | **Cannot be changed after first submission to Apple.** Pick deliberately. Still open — deciding the brand name did not decide this. |
 | **Commission rate** | 10% (`PLATFORM_FEE_PERCENT`) | On a $30 item that is $3.00 to you under direct charges. A single chargeback costs the item value plus Stripe's $15 dispute fee. |
@@ -90,9 +90,10 @@ Each of these belongs in front of the lawyer alongside the original draft.
   and the dev "Switch test user" shortcut are unaffected.
 - The Terms/Privacy content must stay in sync with `docs/HANDOFF.md` §3
   ("Simulated or unfinished") — if what the app actually does changes (real
-  payments added, real email sending added, etc.), section 3 of the Terms
+  payments added, any further real-integration change such as SMS, etc.), section 3 of the Terms
   and the matching parts of the Privacy Policy need to be updated in the
   same change, not left stale.
+- Real email sign-in codes went live on 2026-10-26 (Resend). The draft Terms/Privacy in `constants/legal.ts` still describe sign-in codes as logged to the server console (simulated delivery), so that wording is now stale and needs updating before real users rely on it.
 - None of this has been reviewed by a lawyer. Treat every sentence in
   `constants/legal.ts` as a first draft to hand to one, not as something
   ready to bind real students to.

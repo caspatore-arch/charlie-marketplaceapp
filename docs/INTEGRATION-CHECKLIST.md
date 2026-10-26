@@ -22,9 +22,10 @@ Commands: `npm run test:workstreams`, `npm run test:e2e`, `npm run typecheck`, `
 - [ ] Hold expiry releases the item.
 
 ## 3. Expiry at 24 hours (server-enforced)
-- [ ] Community posts expire exactly 24h after creation, enforced server-side (not just hidden in UI).
-- [ ] Listings expire 24h after creation for every poster.
-- [ ] Expired items cannot be booked or offered on.
+(Updated October 24, 2026: community posts no longer expire; see `docs/CONTRACT.md` "Archive, buyer-proposed meetups and permanent posts". `npm run test:archive` covers this.)
+- [ ] Listings leave the Browse feed 24h after creation for every poster and move to the Archive, enforced server-side (not just hidden in UI).
+- [ ] Community posts stay up until removed; removal takes them down.
+- [ ] Archived items cannot be offered on or instantly booked; a buyer can propose a time and place that the seller accepts or declines.
 
 ## 4. Confirmed meetups outlive listing expiry
 - [ ] `reservation.byId` works after the listing expires.

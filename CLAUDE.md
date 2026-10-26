@@ -35,9 +35,13 @@ Reading:
   under "Your call". Read only the group being worked on. Refresh screenshots with
   `node scripts/screenshots.mjs` (backend + web running).
 - Read other docs only when the task touches them: `DEPLOY.md` / `DEPLOY-WEB.md`
-  (hosting), `DESIGN.md` + `constants/theme.ts` (UI), `APP-STORE.md`, `LEGAL-TODO.md`.
-- Skip as historical: `HANDOFF.md`, `AUCTIONS.md`, `API-WORKSTREAMS.md`,
-  `CLAUDE-WORKSTREAM-PROMPTS.md`, `RORK-PUBLISH-PROMPT.md`.
+  (how production is hosted and operated: Render, Neon, Netlify, R2, Resend),
+  `DESIGN.md` + `constants/theme.ts` (UI), `APP-STORE.md`, `LEGAL-TODO.md`.
+- `HANDOFF.md` (sections 3, 3a, 7: what is simulated, turning payments on) and
+  `AUCTIONS.md` (sections 2 and 3: custom meetup addresses and payments; section 1
+  auctions is retired) are still cited by code and legal docs. Read only those
+  sections, and only when touching payments, addresses or the legal copy.
+  The old workstream and publish prompts were deleted.
 - Never browse `dist/`, `output/`, `.codex-deck-build/`, `backend/data/`, `.claude/worktrees/`.
 - Run `npm run typecheck` and the relevant `test:*` script rather than reading
   code to confirm something works.

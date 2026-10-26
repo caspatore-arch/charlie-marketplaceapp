@@ -1,10 +1,16 @@
 # Messaging activation handoff
 
-Code is ready for review; live account setup and delivery are not verified.
+Email is live (Resend); Twilio SMS is not set up and remains simulated. No end-to-end booking-email check is recorded in the docs; do step 4 below.
 Existing owner rules require approval before purchasing a number, changing
 billing, creating credentials or changing DNS. Never paste secrets into chat or git.
 
 ## Email
+
+**Status 2026-10-26:** Resend is set up for `trydibbs.com` with `EMAIL_MODE=live`
+on the Render API, and `/api/health` reports email live (free plan, 100/day and
+3,000/month). Steps 1-2 below are done; step 3 is how to confirm it; step 4
+(a real booking email test with two approved accounts) is the part still worth
+doing. Hosting details are in `docs/DEPLOY.md`.
 
 1. Deploy backend with migration `0014_booking_emails`; back up persistent data
    and review the additive migration before the production rollout.

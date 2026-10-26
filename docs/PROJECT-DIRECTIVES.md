@@ -1,7 +1,34 @@
 # Dibbs — project directives and work queue
 
-Consolidated October 21, 2026. Start here before choosing work. This is a dated
-snapshot, not proof that a service is deployed. Update statuses with evidence.
+Consolidated October 21, 2026; production section added October 26. Start here
+before choosing work. Statuses are dated snapshots: update them with evidence.
+
+## Production as of 2026-10-26
+
+Verified in the provider dashboards on Oct 25-26, 2026. These override older docs.
+
+- **Website:** https://trydibbs.com on Netlify, project `dibbs-app-web`, auto-builds
+  from GitHub `main` (`caspatore-arch/charlie-marketplaceapp`) with deploy previews
+  for PRs. `www` and `app` subdomains redirect to the root. The Netlify build env has
+  `EXPO_PUBLIC_RORK_API_BASE_URL` and `EXPO_PUBLIC_WEB_BASE_URL`. The old waitlist
+  site is gone from the domain.
+- **API:** Render web service `dibbs-api` (Docker, Oregon, 1 instance), custom domain
+  https://api.trydibbs.com (also `dibbs-api-v3cg.onrender.com`), auto-deploys from
+  `main`, health check `/api/health`, **Free plan (sleeps when idle)**. Not Railway.
+- **Database:** Neon, project "Dibbs Campus Marketplace", branch `production`, Free
+  plan, 6-hour restore window, Postgres 18.
+- **Email:** Resend, domain `trydibbs.com`, `EMAIL_MODE=live`, free plan (100/day,
+  3,000/month). Health reports email live.
+- **Photos:** Cloudflare R2 bucket `dibbs-photos` exists, but `S3_BUCKET` was not yet
+  set on Render as of Oct 25 (being fixed). Do not claim photos are persistent until
+  verified.
+- **SMS and payments:** simulated. `/admin` is enabled (`ADMIN_PASSWORD` set).
+- **Sign-in:** any email can sign in; a campus email unlocks trading (commits
+  `76b8fcd`, `88f09cf`). Listings are in Browse for 24h, then the Archive; community
+  posts do not expire.
+
+Operations guides: `docs/DEPLOY.md` (API, database, photos, email) and
+`docs/DEPLOY-WEB.md` (website).
 
 ## Read order and decision rules
 
@@ -24,12 +51,8 @@ within the owner's current authorization; keep the remaining queue intact.
   waitlist design becomes the Create account / Log in front door. New accounts
   continue to profile setup and the feed; returning signed-in users see the feed.
   Public listing links remain accessible. Native browsing remains available.
-- `www.trydibbs.com` and, if retained, `app.trydibbs.com` redirect to the same path
-  on the root domain. Do not create a second app experience on a subdomain.
-- The older standalone waitlist deployment request conflicts with this newer
-  committed direction. Do not upload the stale `/tmp/dibbs-waitlist.zip` as the
-  final site. If the owner explicitly wants an interim waitlist, record that as
-  a temporary launch choice and verify signup storage before using it.
+- `www.trydibbs.com` and `app.trydibbs.com` redirect to the same path
+  on the root domain (live). Do not create a second app experience on a subdomain.
 - Fixed asking prices and offers replace new auctions. A listing is live in the
   main Browse feed for 24 hours, then moves to an Archive where it stays
   visible, likeable, commentable and open to a buyer-proposed time and place
@@ -39,9 +62,9 @@ within the owner's current authorization; keep the remaining queue intact.
   concurrency protection, price checks, report/block behavior and account privacy.
 - Tabs: Browse, Sell, Community, Profile. Meetups/messages remain accessible
   through the inbox route and relevant item/meetup screens.
-- Email leads sign-in while SMS is simulated; `auth.methods` controls the lead
+- Any email can sign in. Email leads sign-in while SMS is simulated; `auth.methods` controls the lead
   method and can choose phone when SMS is live. Do not restore unconditional
-  phone-first copy from older docs. Campus email verification gates trading/posting;
+  phone-first copy from older docs. Campus email verification (or the founder's Approved setting) gates trading/posting;
   phone or email verification is never identity verification.
 - Payments remain simulated unless separately approved and configured. No claims
   of guaranteed safety, escrow, protection, fabricated activity or fake reputation.
@@ -69,19 +92,19 @@ within the owner's current authorization; keep the remaining queue intact.
   meetup fields and booking on acceptance, with a hold fallback if stale. Review
   against current main; do not describe it as merged. No open issues were returned.
 - Use focused branches/commits, no force pushes. Do not send instructions to other
-  chats without the owner's authorization. Old multi-agent workstream prompts are
-  reference material, not standing permission to launch agents.
+  chats without the owner's authorization. Multi-agent workstream prompts are not
+  standing permission to launch agents.
 
 ## Ordered work queue
 
 | Priority | Directive | Completion evidence |
 |---|---|---|
 | 1 | Reconcile local commits, open PR and dashboard work before publishing the full app. | Reviewed diffs, appropriate checks, recorded commit/branch and deployment source. |
-| 2 | Recheck current Cloudflare DNS and Netlify deployments; select the one-domain app target. | Actual project URL and current records documented; no assumptions from old guides. |
-| 3 | Finish Resend domain verification and owner-approved sending key. | Domain Verified; key stored directly by owner, never in chat or git. |
-| 4 | Verify/deploy backend, persistent Postgres and persistent photo storage. | Public health endpoint, migration checks, restart persistence, real upload/read test. Host/account choices and costs require owner input where not already authorized. |
-| 5 | Configure backend email and browser origins, then build/deploy the web app to Netlify. | `EMAIL_MODE=live`, secret `RESEND_API_KEY`, `EMAIL_FROM=Dibbs <codes@trydibbs.com>` on backend; health reports live and a real code arrives. Correct public API URL baked into build; CORS permits intended domains. |
-| 6 | Connect root/www DNS to the selected site and provision HTTPS. | Owner approves exact DNS records first; Netlify verifies domains/certificate; browser loads intended front door and direct listing routes. |
+| 2 | ~~Recheck current Cloudflare DNS and Netlify deployments; select the one-domain app target.~~ **Done 2026-10-26**: `trydibbs.com` on Netlify `dibbs-app-web`. | Documented in "Production as of 2026-10-26". |
+| 3 | ~~Finish Resend domain verification and owner-approved sending key.~~ **Done 2026-10-26**: domain verified, `EMAIL_MODE=live`. | Domain Verified; key stored directly by owner, never in chat or git. |
+| 4 | **Partly done.** Backend (Render) and Postgres (Neon) are live. Remaining: set the R2 `S3_*` variables on Render and prove a photo survives a redeploy. | Real upload/read test across a redeploy. Plan upgrades (Render/Neon/Resend) need owner input. |
+| 5 | ~~Configure backend email and browser origins, then build/deploy the web app to Netlify.~~ **Done 2026-10-26.** | `EMAIL_MODE=live`, secret `RESEND_API_KEY`, `EMAIL_FROM=Dibbs <codes@trydibbs.com>` on backend; health reports live and a real code arrives. Correct public API URL baked into build; CORS permits intended domains. |
+| 6 | ~~Connect root/www DNS to the selected site and provision HTTPS.~~ **Done 2026-10-26.** | Owner approves exact DNS records first; Netlify verifies domains/certificate; browser loads intended front door and direct listing routes. |
 | 7 | Verify pilot flows on phone and desktop. | Signup/login, profile, listing/photos, offers, booking race, messaging, cancel/reschedule, handoff, expiry, blocking/reporting, deep links and restart persistence. |
 | 8 | Resolve founder/pilot operations decisions. | Confirmed meetup locations/hours, moderation owner, support/privacy contact, eligibility, retention/deletion and reviewed legal copy. |
 | 9 | Native/TestFlight/App Store preparation when web pilot is ready. | Device QA, stable bundle ID, Apple/Expo account details, public privacy/support pages and reviewed store disclosures. |
@@ -102,15 +125,9 @@ Verified in this chat earlier on October 21:
 - An existing pending destination for `hello@trydibbs.com` was left untouched.
 - Registrar status initially said Email Verification Required. Recheck whether
   the owner completed the registration email; this is separate from Gmail routing.
-- Initial Netlify inspection showed four unrelated projects and no Dibbs project.
-  Cloudflare Workers & Pages showed no deployments at that time.
-- Folder upload failed, then browser file-access permission was enabled. Retried
-  folder upload was rejected by Netlify; a ZIP was prepared but NOT uploaded.
-  Form detection, custom domains and HTTPS were not configured by this chat.
-- A later research chat reported seeing a live waitlist at trydibbs.com. This
-  contradicts assuming there is still no deployment: inspect current dashboards
-  before creating anything. Production state may have changed in another chat.
-- Resend setup and API-key creation have not been performed by this chat.
+- Superseded: an earlier Netlify inspection (no Dibbs project) and a failed folder
+  upload are obsolete. The site, Resend and the domain are now live (see
+  "Production as of 2026-10-26"); inspect current dashboards before changing anything.
 
 Owner's explicit operating rules persist:
 
@@ -154,12 +171,12 @@ Owner's explicit operating rules persist:
 | Source | Use |
 |---|---|
 | `docs/CONTRACT.md`, actual backend routes/schema | API and data behavior; resolve stale phone-first statements with current `auth.methods`. |
-| `docs/DEPLOY.md`, `.env.example` | Backend/email/storage deployment details; provider prices and production status need fresh verification. |
-| `docs/DEPLOY-WEB.md`, `netlify.toml`, `public/_redirects` | One-domain web deployment; the guide's claims that sites already exist are not verified dashboard facts. |
+| `docs/DEPLOY.md`, `.env.example` | Operations guide for the live backend (Render, Neon, R2, Resend); re-verify plan/price details in dashboards. |
+| `docs/DEPLOY-WEB.md`, `netlify.toml`, `public/_redirects` | Operations guide for the live one-domain website on Netlify. |
 | `docs/INTEGRATION-CHECKLIST.md`, `docs/BRIEF.md` | Acceptance references; older phone-first/profiles-only-backlog items need current-scope interpretation. |
 | `docs/LEGAL-TODO.md`, `docs/APP-STORE.md` | Founder and native-release decisions; auction sections are historical. |
 | `docs/DESIGN.md`, `constants/theme.ts` | Visual/accessibility rules; current tokens and implemented flow supersede old screen descriptions. |
-| `docs/HANDOFF.md`, `docs/API-WORKSTREAMS.md`, `docs/CLAUDE-WORKSTREAM-PROMPTS.md` | Historical implementation and work allocation; do not rerun as fresh tasks. |
+| `docs/HANDOFF.md`, `docs/AUCTIONS.md` | Trimmed. Keep for what is simulated, turning payments on (HANDOFF sections 3, 3a, 7) and custom meetup addresses/payments spec (AUCTIONS sections 2, 3; section 1 auctions is retired). The old workstream/prompt docs were deleted 2026-10-26. |
 | `docs/backlog/`, `docs/concepts/BUYOUT.md` | Deferred ideas; buyout concept stays gated, not a live auction feature. |
 | `competitor-profiles/`, `output/` | Local research and presentation artifacts; not all are committed. |
 

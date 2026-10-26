@@ -48,7 +48,7 @@ backend/
   auth/                   accounts.ts (phone/email account linking, code hashing)
   notifications/          Expo push (messages, meetups, offers)
   data/                   gitignored: pg/ and uploads/
-docs/                     brief, contract, design, handoff
+docs/                     brief, contract, design, deploy guides, directives
 scripts/                  e2e/acceptance scripts run with tsx (see "Run")
 ```
 

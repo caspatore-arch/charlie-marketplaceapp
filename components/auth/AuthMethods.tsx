@@ -50,6 +50,9 @@ export function AuthMethods({
 
   const primary = methods.data?.primary ?? 'email';
   const method = override ?? primary;
+  // A simulated text never reaches a real phone, so outside local dev the phone
+  // option only appears once the server reports real SMS delivery.
+  const phoneUsable = __DEV__ || methods.data?.phone.simulated === false;
 
   return (
     <View style={styles.wrap}>
@@ -64,7 +67,7 @@ export function AuthMethods({
           hideFirstHeading={hideFirstHeading}
           submitLabel={cardIntro ? 'Email me a code' : undefined}
           mode={mode}
-          onUsePhone={() => setOverride('phone')}
+          onUsePhone={phoneUsable ? () => setOverride('phone') : undefined}
         />
       ) : (
         <PhoneAuthFlow

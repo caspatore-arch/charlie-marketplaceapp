@@ -1,7 +1,7 @@
 # Shipping to TestFlight and the App Store (for the founder, not an engineer)
 
-This is the sequel to `docs/DEPLOY.md` (which gets the **backend** running
-somewhere real). This document is about the **iPhone app itself** — how it
+This is the sequel to `docs/DEPLOY.md` (how the **backend** is hosted and operated; it
+is already live on Render). This document is about the **iPhone app itself** — how it
 gets onto your phone and a tester's phone through TestFlight, and eventually
 onto the public App Store.
 
@@ -264,7 +264,7 @@ feed). There's also a dedicated moderation screen
 by a `MODERATOR_USER_IDS` account) that can dismiss a report, add a note, or
 remove a listing outright. Make sure at least one real person is checking
 that queue before you have real users — nothing technical enforces that,
-per `docs/HANDOFF.md` §6's pre-launch checklist.
+(`docs/PROJECT-DIRECTIVES.md` lists moderation ownership as a pilot-operations decision).
 
 ### No in-app purchase required
 
