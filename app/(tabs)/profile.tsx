@@ -2,7 +2,8 @@
  * Profile tab. Signed-out: sign-in CTA. Signed-in: a compact header (picture
  * with name and badges beside it, bio, follower counts, one "Edit profile &
  * settings" entry point), the trust block, a "Saved (N)" row, your Listings /
- * Posts (ProfileContent), the private Meetups & messages link, a moderator
+ * Posts (ProfileContent), the private Meetups & messages link, a "Send us
+ * recommendations" email row, a moderator
  * link when applicable, and (dev builds only) a "Switch test user" panel for
  * the three seeded identities in CONTRACT.md. Sign out and Close account live
  * in Settings.
@@ -18,6 +19,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { RefetchBanner } from '@/components/ui/RefetchBanner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { SavedLinkRow } from '@/components/profile/SavedLinkRow';
+import { RecommendationsRow } from '@/components/profile/RecommendationsRow';
 import { InboxLinkRow } from '@/components/inbox/InboxLinkRow';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
 import { ProfileContent } from '@/components/profile/ProfileContent';
@@ -152,6 +154,8 @@ function SignedInProfile({
           Your chats and meetups are private. Only you and the other person can see them.
         </Text>
       </View>
+
+      <RecommendationsRow />
 
       {isModeratorQuery.data ? (
         <Button
