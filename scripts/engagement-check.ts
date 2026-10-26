@@ -138,6 +138,14 @@ async function main() {
   // text-post cap must not count automatic listing posts
   for (let i = 0; i < 5; i += 1) await seller.community.create({ kind: 'selling', body: `Text post number ${i + 1}` });
   // Five text posts succeeded although the seller has several live listing posts: they are not counted.
+  const withListings = (await buyer.community.feed({ kind: 'selling', sort: 'new', limit: 50 })).items;
+  const withoutListings = (await buyer.community.feed({ kind: 'selling', sort: 'new', includeListings: false, limit: 50 })).items;
+  check('omitting includeListings includes listing posts', withListings.some((p) => p.listing) && withListings.some((p) => !p.listing));
+  check('includeListings:true matches the default', (await buyer.community.feed({ kind: 'selling', sort: 'new', includeListings: true, limit: 50 })).items.length === withListings.length);
+  check('includeListings:false excludes listing posts and keeps regular posts', withoutListings.length > 0 && withoutListings.every((p) => !p.listing) && withoutListings.length === withListings.filter((p) => !p.listing).length);
+  const page1 = await buyer.community.feed({ kind: 'selling', sort: 'new', includeListings: false, limit: 2 });
+  const page2 = await buyer.community.feed({ kind: 'selling', sort: 'new', includeListings: false, limit: 2, cursor: page1.nextCursor });
+  check('includeListings:false paginates without listing posts or empty pages', page1.items.length === 2 && page2.items.length === 2 && [...page1.items, ...page2.items].every((p) => !p.listing));
   await rejects('the 6th text post is still capped', () => seller.community.create({ kind: 'selling', body: 'One too many' }), 'TOO_MANY_REQUESTS');
 
   // --- default Browse order is strictly newest first

@@ -5,9 +5,10 @@
  * Newest / Hottest sorts (all ranked by the server), upvotes, composer,
  * pull-to-refresh, infinite scroll, per-post actions (delete / report / block).
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MessagesSquare, Users } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Text } from '@/components/ui/Text';
@@ -26,6 +27,8 @@ import { trpc } from '@/lib/trpc';
 import { confirmAction } from '@/utils/confirm';
 import { colors, space } from '@/constants/theme';
 import type { CommunityPost, CommunityPostKind } from '@/types';
+
+const SHOW_LISTINGS_KEY = 'dibbs.community.showListings';
 
 export default function CommunityScreen() {
   const { status } = useAuth();
@@ -68,6 +71,21 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
   // feed opens on Sellers where they are; Buyers is one tap away.
   const [kind, setKind] = useState<CommunityPostKind>('selling');
   const [sort, setSort] = useState<CommunitySort>('new');
+  // Per-device preference: listing posts are shown unless the viewer turned them off.
+  const [showListings, setShowListingsState] = useState(true);
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(SHOW_LISTINGS_KEY)
+      .then((v) => { if (active && v === 'off') setShowListingsState(false); })
+      .catch(() => { /* default on */ });
+    return () => { active = false; };
+  }, []);
+  const setShowListings = useCallback((show: boolean) => {
+    setShowListingsState(show);
+    try {
+      AsyncStorage.setItem(SHOW_LISTINGS_KEY, show ? 'on' : 'off').catch(() => { /* preference just won't persist */ });
+    } catch { /* ignore */ }
+  }, []);
   const [actionPost, setActionPost] = useState<CommunityPost | null>(null);
   const [reportPost, setReportPost] = useState<CommunityPost | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -77,7 +95,7 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
   const unread = trpc.conversation.unreadTotal.useQuery(undefined, { refetchInterval: 15_000 });
   const inboxBadge = (unread.data?.conversations ?? 0) + (unread.data?.actionableReservations ?? 0);
   const feed = trpc.community.feed.useInfiniteQuery(
-    { kind, sort, limit: 20 },
+    { kind, sort, includeListings: showListings, limit: 20 },
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
 
@@ -128,7 +146,7 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
         }}
         postingStatus={me.data?.postingStatus}
       />
-      <FeedControls kind={kind} sort={sort} onKind={setKind} onSort={setSort} />
+      <FeedControls kind={kind} sort={sort} onKind={setKind} onSort={setSort} showListings={showListings} onShowListings={setShowListings} />
       {notice ? (
         <Text variant="label" color="success" accessibilityRole="alert">
           {notice}
@@ -153,6 +171,14 @@ function SignedInCommunity({ onOpenInbox }: { onOpenInbox: () => void }) {
     );
   } else if (feed.isError) {
     empty = <ErrorState message={feed.error.message} onRetry={() => feed.refetch()} />;
+  } else if (!showListings) {
+    empty = (
+      <EmptyState
+        icon={<Users size={40} color={colors.inkFaint} />}
+        title="No posts yet"
+        body="Turn listings back on to see items for sale."
+      />
+    );
   } else {
     empty = (
       <EmptyState

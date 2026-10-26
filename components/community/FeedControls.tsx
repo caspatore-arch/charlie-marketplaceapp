@@ -28,9 +28,12 @@ export interface FeedControlsProps {
   sort: CommunitySort;
   onKind: (k: CommunityPostKind) => void;
   onSort: (s: CommunitySort) => void;
+  /** Whether listing posts are shown in the feed. */
+  showListings: boolean;
+  onShowListings: (show: boolean) => void;
 }
 
-export function FeedControls({ kind, sort, onKind, onSort }: FeedControlsProps) {
+export function FeedControls({ kind, sort, onKind, onSort, showListings, onShowListings }: FeedControlsProps) {
   return (
     <View style={styles.wrap}>
       <View style={styles.tabs} accessibilityRole="tablist">
@@ -71,6 +74,19 @@ export function FeedControls({ kind, sort, onKind, onSort }: FeedControlsProps) 
             </Pressable>
           );
         })}
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: showListings }}
+          accessibilityLabel={`Show listings, ${showListings ? 'on' : 'off'}`}
+          accessibilityHint="Show or hide items for sale in this feed"
+          onPress={() => onShowListings(!showListings)}
+          style={({ pressed }) => [styles.pill, showListings && styles.pillSelected, pressed && styles.pressed]}
+        >
+          {showListings ? <Check size={16} color={colors.accentInk} strokeWidth={3} /> : null}
+          <Text variant="label" weight={showListings ? '700' : '500'} color={showListings ? 'accentInk' : 'ink'}>
+            {showListings ? 'Listings: on' : 'Listings: off'}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );

@@ -334,10 +334,12 @@ export const communityRouter = router({
         .object({
           kind: z.enum(['buying', 'selling']).optional(),
           sort: z.enum(communitySorts).default('new'),
+          /** false hides listing posts (regular posts only). Omitted = true, today's behaviour. */
+          includeListings: z.boolean().default(true),
           cursor: z.string().max(300).optional(),
           limit: z.number().int().min(1).max(50).default(20),
         })
-        .default({ limit: 20, sort: 'new' }),
+        .default({ limit: 20, sort: 'new', includeListings: true }),
     )
     .query(async ({ ctx, input }) => {
       let cursor: z.infer<typeof cursorSchema> | null = null;
@@ -361,6 +363,7 @@ export const communityRouter = router({
         )!,
       ];
       if (input.kind) conditions.push(eq(communityPosts.kind, input.kind));
+      if (!input.includeListings) conditions.push(isNull(communityPosts.listingId));
       const hidden = await blockedUserIds(ctx.db, ctx.user.id);
       if (hidden.length > 0) conditions.push(notInArray(communityPosts.authorId, hidden));
 
