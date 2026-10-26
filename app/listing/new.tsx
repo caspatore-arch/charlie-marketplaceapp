@@ -5,9 +5,9 @@
  * whose buttons replace navigation into the listing (or the feed) so back
  * doesn't return to this form.
  *
- * Selling needs a verified campus email or a founder approval
- * (campusVerifiedProcedure; `user.canPost` mirrors it). An account without
- * either (any-email or phone sign-in) gets the verify step here first,
+ * Selling needs a verified email (campus or any other) or a founder approval
+ * (campusVerifiedProcedure; `user.canPost` mirrors it). A phone-only account
+ * without either gets the campus-email verify step here first,
  * instead of filling in a whole listing only to be refused on Publish. A
  * blocked account gets a plain "can't sell" note instead.
  */

@@ -30,9 +30,8 @@ export async function dispatchBookingEmails(db: Db, now = new Date()) {
         .innerJoin(campuses, eq(campuses.id, listings.campusId))
         .innerJoin(users, eq(users.id, message.userId)).where(eq(reservations.id, message.reservationId));
       if (!row || row.reservation.status !== 'accepted' || row.reservation.startsAt.getTime() !== message.meetupStartsAt.getTime()
-        || row.reservation.startsAt <= now || row.user.deletedAt || !row.user.email
-        // Only addresses proven by a code: a campus email, or the sign-in email of a founder-approved seller.
-        || !(row.user.campusEmailVerifiedAt || row.user.postingAccess === 'approved')) {
+        // users.email is only stored after a code proves the inbox, so any stored address is safe to mail.
+        || row.reservation.startsAt <= now || row.user.deletedAt || !row.user.email) {
         await db.update(bookingEmails).set({ status: 'skipped', updatedAt: now }).where(eq(bookingEmails.id, message.id));
         continue;
       }

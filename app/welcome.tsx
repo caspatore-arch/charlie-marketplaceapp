@@ -129,7 +129,7 @@ export default function WelcomeScreen() {
         {mode === 'signup' ? 'Make your Dibbs account' : 'Welcome back'}
       </Text>
 
-      <Text variant="body" color="inkMuted">Use your campus email to buy, sell and book a meetup. It is free, and sellers keep 100%.</Text>
+      <Text variant="body" color="inkMuted">Sign in with your email to buy, sell and book a meetup. It is free, and sellers keep 100%.</Text>
 
       {status === 'loading' || finishing ? (
         <View style={styles.loading}>

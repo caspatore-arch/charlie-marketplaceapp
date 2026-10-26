@@ -28,8 +28,8 @@ import { colors, radius, space } from '@/constants/theme';
 export type AuthMode = 'signup' | 'login';
 
 export const EMAIL_INTRO = 'Use your @arizona.edu email (recommended) or any email. We’ll send you a 6-digit code.';
-/** Under the email field: the exact check a non-campus email still needs. */
-export const CAMPUS_NOTE = 'To buy, sell or post you need a verified campus email. You can add it later.';
+/** Under the email field: what a campus email adds over any other email. */
+export const CAMPUS_NOTE = 'Any email works. A campus email also adds a “Campus email verified” badge.';
 
 /** What the host needs to know once someone is signed in. */
 export interface AuthFinish {

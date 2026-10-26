@@ -75,7 +75,7 @@ Effects:
 ## Auth
 
 - `Authorization: Bearer <token>`. Server hashes token (sha256) and looks up `sessions`.
-- Context: `{ db, user: User | null }`. `protectedProcedure` throws `UNAUTHORIZED` if no user. Any email can sign in. `campusVerifiedProcedure` = `protectedProcedure` + `FORBIDDEN` unless `postingStatus(user)` allows posting (see "Posting access" below and "Phone sign-in & account linking").
+- Context: `{ db, user: User | null }`. `protectedProcedure` throws `UNAUTHORIZED` if no user. Any email can sign in. `campusVerifiedProcedure` (name kept; it no longer means campus only) = `protectedProcedure` + `FORBIDDEN` unless `postingStatus(user)` allows posting (see "Posting access" below and "Phone sign-in & account linking").
 - Ownership: `listing.update/remove`, photo ops → seller only. `conversation.*`, `reservation.*` → participants only. Otherwise `FORBIDDEN`.
 - Blocks: blocked users cannot message/request each other; blocked user's listings hidden from blocker's feed.
 
@@ -85,7 +85,7 @@ Namespaced routers. `P` = protected, `pub` = public. Inputs are zod; outputs are
 
 ```
 auth.requestPhoneCode / verifyPhoneCode / requestPhoneLinkCode / confirmPhoneLink / requestEmailLinkCode / confirmEmailLink — see "Phone sign-in & account linking"
-auth.requestCode      pub  { email }                → { ok: true, simulated, resendAfterSeconds: 30 }   (any email address; one on ALLOWED_EMAIL_DOMAINS or a campus's emailDomains also counts as campus-verified. Delivery is real when email is configured (`EMAIL_MODE=live` + `RESEND_API_KEY` + `EMAIL_FROM`), otherwise `simulated: true` and the code is in the server log. See "Sign-in email" below.)
+auth.requestCode      pub  { email }                → { ok: true, simulated, resendAfterSeconds: 30 }   (any email address, and a verified one of any domain may trade; one on ALLOWED_EMAIL_DOMAINS or a campus's emailDomains also counts as campus-verified. Delivery is real when email is configured (`EMAIL_MODE=live` + `RESEND_API_KEY` + `EMAIL_FROM`), otherwise `simulated: true` and the code is in the server log. See "Sign-in email" below.)
 auth.methods          pub  –                        → { primary: 'email' | 'phone', phone: { available, simulated }, email: { available, simulated } }   (which sign-in methods deliver codes now. `primary` is 'phone' only when SMS is live; otherwise 'email'. Clients lead with `primary` and offer the other as secondary.)
 auth.verifyCode       pub  { email, code, displayName? } → { token, user }   (user includes `campus`, same shape as auth.me)
 auth.devSignIn        pub  { userId }               → { token, user }   (only if DEV_LOGIN=1; user includes `campus`)
@@ -415,7 +415,7 @@ Short "interest check" posts ("Anyone selling a mini fridge?", "Anyone want shir
 - **Cap**: *superseded: at most `COMMUNITY_MAX_POSTS_PER_DAY` = 5 new posts per person in any rolling 24 hours (TOO_MANY_REQUESTS).* Body 3–280 chars.
 - **Identity**: posts show the author's normal display name; no anonymity.
 - **Blocks** hide posts in both directions (feed, `byId`, `report`).
-- Posting requires `postingStatus` `campus_verified` or `approved` (see "Posting access"); reading requires any signed-in account.
+- Posting requires `postingStatus` `campus_verified`, `email_verified` or `approved` (i.e. `canPost`) (see "Posting access"); reading requires any signed-in account.
 
 ```
 community.feed         P  { kind?, cursor?, limit? (1–50, default 20) } → { items: { id, kind, body, createdAt, expiresAt, author: PublicUser, isMine }[], nextCursor?, serverNow }
@@ -472,9 +472,9 @@ A new phone account is created with `email = null`, `phoneVerifiedAt = now`, `ca
 
 **Phone verified is not campus verified, and neither is identity verified.** A phone proves control of a number only. `users.campusEmailVerifiedAt` is set only by verifying a campus email (`verifyCode` or `confirmEmailLink`). Copy must never imply a phone-verified person is a student, or that either check is identity verification.
 
-**`campusVerifiedProcedure` gate** (FORBIDDEN "Verify your campus email to buy, sell, or post. Phone sign-in alone does not confirm you are a student."; blocked accounts get the BLOCKED message): `listing.create`, `listing.relist`, `listing.draftFromPhotos`, `offer.create`, `reservation.book`, `reservation.request`, `community.create`, `listingComment.add`. Everything else (browse, search, message, save, read community, view offers/meetups already owned) stays open to a phone-only account. Note `offer.accept/decline/withdraw` and `reservation.accept/counter/cancel` are plain `protectedProcedure`.
+**`campusVerifiedProcedure` gate** (FORBIDDEN "Verify your campus email to buy, sell, or post. A phone number alone isn’t enough." for phone-only accounts; blocked accounts get the BLOCKED message): `listing.create`, `listing.relist`, `listing.draftFromPhotos`, `offer.create`, `reservation.book`, `reservation.request`, `community.create`, `listingComment.add`. Everything else (browse, search, message, save, read community, view offers/meetups already owned) stays open to a phone-only account. Any account with a verified email (any domain) passes the gate. Note `offer.accept/decline/withdraw` and `reservation.accept/counter/cancel` are plain `protectedProcedure`.
 
-**Posting access** (`backend/auth/posting-access.ts`; `users.postingAccess`: `'default' | 'approved' | 'blocked'`, set by the founder on /admin). One decision, in this order: `blocked` → never; a verified campus email → yes; `approved` → yes without a campus email; otherwise `needs_campus_email`. Blocked only stops the `campusVerifiedProcedure` set above; messaging, comments, votes, likes and managing your own listings, offers and meetups stay open. `approved` is labelled "Approved seller", never "Campus email verified".
+**Posting access** (`backend/auth/posting-access.ts`; `users.postingAccess`: `'default' | 'approved' | 'blocked'`, set by the founder on /admin). One decision, in this order: `blocked` → never; a verified campus email → `campus_verified`; `approved` → yes; any other verified email (`users.email` is only stored after a code proves the inbox) → `email_verified` (owner decision 2026-10-26); otherwise (phone-only) `needs_campus_email`. Blocked only stops the `campusVerifiedProcedure` set above; messaging, comments, votes, likes and managing your own listings, offers and meetups stay open. `approved` is labelled "Approved seller", never "Campus email verified". `email_verified` gets no public badge and is never called campus verified.
 
 **Admin: posting access** (`backend/admin/routes.ts`, `backend/admin/access.ts`). Both need the admin cookie, return 404 when `ADMIN_PASSWORD` is unset, and are rate limited.
 - `GET /admin/users.json?q=` searches email or display name (max 20 rows, open accounts only; empty `q` lists non-default accounts). Returns no phone or contact fields.

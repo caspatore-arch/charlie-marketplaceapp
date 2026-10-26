@@ -31,13 +31,12 @@ export const moderatorProcedure = protectedProcedure.use(({ ctx, next }) => {
 });
 
 /**
- * Protected + the caller may trade: a verified campus email, or a founder
- * override set on /admin (backend/auth/posting-access.ts). Phone
- * verification proves control of a phone number only, and a non-campus
- * sign-in email (any email can sign in) proves control of that inbox only —
- * neither is campus or student verification — so buying, selling and
- * posting stay behind this gate. 'blocked' wins over everything; 'approved'
- * lets a non-student seller through without being campus verified.
+ * Protected + the caller may trade: a verified email (campus or any other
+ * address), or a founder override set on /admin
+ * (backend/auth/posting-access.ts). Phone verification proves control of a
+ * phone number only, so a phone-only account stays behind this gate until it
+ * verifies a campus email or is approved. None of these checks is student or
+ * identity verification. 'blocked' wins over everything.
  */
 export const campusVerifiedProcedure = protectedProcedure.use(({ ctx, next }) => {
   const status = postingStatus(ctx.user);

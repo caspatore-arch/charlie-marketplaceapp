@@ -64,7 +64,10 @@ async function main() {
   ] as const) {
     await db.insert(users).values({
       id,
-      email: `cm-${name.toLowerCase()}@demo.campus.test`,
+      // The unverified account is phone-only: any stored email now counts as verified for posting.
+      email: verified ? `cm-${name.toLowerCase()}@demo.campus.test` : null,
+      phone: verified ? null : '+15205550199',
+      phoneVerifiedAt: verified ? null : new Date(),
       displayName: `${name} Test`,
       campusId: CAMPUS_ID,
       campusEmailVerifiedAt: verified ? new Date() : null,

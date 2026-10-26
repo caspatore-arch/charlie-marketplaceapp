@@ -852,7 +852,7 @@ async function main() {
     assert((await db.select().from(schema.bookingEmails)).every((r) => r.status === 'skipped'), 'stale queue rows marked skipped');
   });
 
-  await check('meetup email: founder-approved seller without a campus email is emailed; unapproved is not', async () => {
+  await check('meetup email: approved seller and default seller with a non-campus email are both emailed', async () => {
     const { dispatchBookingEmails, enqueueBookingEmails } = await import('../backend/email/bookings');
     await db.delete(schema.bookingEmails);
     const [maya] = await db.select().from(schema.users).where(d.eq(schema.users.id, MAYA));
@@ -871,13 +871,13 @@ async function main() {
       eq(mail.sent.length - before, 2, 'approved seller and buyer both emailed');
       assert(mail.sent.slice(before).some((m) => m.to === maya!.email), 'approved seller received the confirmation');
 
-      // Same seller without approval or a campus email: only the buyer is emailed.
+      // Same seller on default with only a non-campus email: still emailed (any verified email may trade).
       await db.delete(schema.bookingEmails);
       await db.update(schema.users).set({ postingAccess: 'default' }).where(d.eq(schema.users.id, MAYA));
       await enqueueBookingEmails(db, row!);
       before = mail.sent.length;
       await dispatchBookingEmails(db);
-      eq(mail.sent.length - before, 1, 'unapproved seller without a campus email is skipped');
+      eq(mail.sent.length - before, 2, 'default seller with a verified non-campus email is emailed too');
       await buyer.reservation.cancel({ id: booking.id });
     } finally {
       await db.update(schema.users).set(restore).where(d.eq(schema.users.id, MAYA));

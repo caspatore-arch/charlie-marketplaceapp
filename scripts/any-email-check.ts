@@ -5,9 +5,9 @@
  *   npx tsx scripts/any-email-check.ts
  *
  * Covers: a gmail address requests a code, signs in, lands on the default
- * campus with campusEmailVerifiedAt null, can browse/save, and is refused
- * listing.create with the campus-email FORBIDDEN error; it can then verify a
- * campus email and sell. An arizona.edu address signs in verified and can
+ * campus with campusEmailVerifiedAt null, can browse/save, and can create a
+ * listing (any verified email may post); it can then verify a campus email
+ * too. An arizona.edu address signs in verified and can
  * create a listing. Code cooldown applies to non-campus emails too, and a
  * non-campus address can't be used to verify a campus.
  * Modules load with `await import(...)` after the env block (see save-check).
@@ -102,12 +102,9 @@ async function main() {
   check('auth.me agrees: signed in, no campus email verified', me.email === gmail && me.campusEmailVerifiedAt == null);
   const feed = await g.listing.feed({ campusId: defaultCampus!.id, limit: 5 });
   check('gmail account can browse the feed', feed.items.length > 0);
-  await rejects(
-    'gmail account is refused listing.create with the campus-email error',
-    () => g.listing.create(listingInput()),
-    'FORBIDDEN',
-    /campus email/i,
-  );
+  check('auth.me: gmail can post, status email_verified', me.canPost === true && me.postingStatus === 'email_verified');
+  const gmailListing = await g.listing.create(listingInput());
+  check('gmail account can create a listing without a campus email', !!gmailListing.id);
 
   // Signing in again keeps it unverified (a non-campus email never verifies).
   await db.update(schema.emailCodes).set({ expiresAt: new Date(Date.now() + 10 * 60_000 - 31_000) }).where(eq(schema.emailCodes.email, gmail));
@@ -118,14 +115,14 @@ async function main() {
   // A non-campus address can't verify a campus.
   await rejects('a gmail address cannot be used to verify a campus', () => g.auth.requestEmailLinkCode({ email: 'other@gmail.com' }), 'BAD_REQUEST');
 
-  // The gated path: verify a campus email, then selling works.
+  // Adding a campus email still works and marks the account campus verified.
   const campusAddr = 'any.email.tester@arizona.edu';
   await g.auth.requestEmailLinkCode({ email: campusAddr });
   const linked = await g.auth.confirmEmailLink({ email: campusAddr, code: await latestCode(campusAddr) });
   check('gmail account verifies a campus email in place', linked.switchedAccount === false && linked.user.campusEmailVerifiedAt != null);
   const gVerified = await callerFor(again.token);
   const sold = await gVerified.listing.create(listingInput());
-  check('after verifying, the same account can create a listing', !!sold.id);
+  check('after verifying a campus email, the same account can still create a listing', !!sold.id);
 
   // --- an arizona.edu address
   const az = 'wildcat.tester@arizona.edu';

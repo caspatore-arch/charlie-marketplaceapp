@@ -111,7 +111,7 @@ export function dashboardPage(): string {
   </div>
   <div class="card">
     <h2>Posting access</h2>
-    <div class="muted small">Who can buy, sell, make offers, book and post. Default: needs a verified campus email. Approved: can sell without one (not a campus, student or ID check; shows as "Approved seller"). Blocked: can't buy, sell or post at all.</div>
+    <div class="muted small">Who can buy, sell, make offers, book and post. Default: any verified email can trade (campus or not); a phone-only account needs a campus email. Approved: a phone-only account can trade without one (not a campus, student or ID check; shows as "Approved seller"). Blocked: can't buy, sell or post at all.</div>
     <form class="search" id="access-form" role="search">
       <input type="search" id="access-q" placeholder="Email or name" maxlength="100" autocomplete="off" aria-label="Search accounts by email or name">
       <button class="ghost" type="submit">Search</button>

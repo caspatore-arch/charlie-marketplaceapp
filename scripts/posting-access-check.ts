@@ -5,7 +5,8 @@
  *
  *   npx tsx scripts/posting-access-check.ts
  *
- * Covers: a gmail account on 'default' is refused listing.create; 'approved'
+ * Covers: a gmail account on 'default' can create a listing (any verified
+ * email may post) but is NOT campus verified or an approved seller; 'approved'
  * can create a listing, auth.me says canPost and is NOT campus verified, and
  * the public shape says "approvedSeller", not campusEmailVerified; 'blocked'
  * refuses even an arizona.edu account with the blocked message (and offers,
@@ -96,8 +97,11 @@ async function main() {
   // --- gmail, default
   const gIn = await signIn('specialized.seller@gmail.com', 'Vintage Vendor');
   const gId = gIn.user.id;
-  check('new gmail account starts on default', gIn.user.postingAccess === 'default' && gIn.user.canPost === false && gIn.user.postingStatus === 'needs_campus_email');
-  await rejects('default gmail: listing.create FORBIDDEN (campus email)', async () => (await callerFor(gIn.token)).listing.create(listingInput()), 'FORBIDDEN', /campus email/i);
+  check('new gmail account starts on default, email verified, can post', gIn.user.postingAccess === 'default' && gIn.user.canPost === true && gIn.user.postingStatus === 'email_verified');
+  const gDefaultListing = await (await callerFor(gIn.token)).listing.create(listingInput());
+  check('default gmail can create a listing', !!gDefaultListing.id);
+  const gDefaultPub = await anon.user.byId({ id: gIn.user.id });
+  check('default gmail: public shape is neither campus verified nor approvedSeller', gDefaultPub.campusEmailVerified === false && gDefaultPub.approvedSeller === false);
 
   // --- approved
   await setAccess(gId, 'approved');
@@ -142,7 +146,8 @@ async function main() {
   const azBack = await (await callerFor(azIn.token)).listing.create(listingInput());
   check('back to default: arizona.edu can create a listing again', !!azBack.id);
   await setAccess(gId, 'default');
-  await rejects('back to default: gmail refused again', async () => (await callerFor(gIn.token)).listing.create(listingInput()), 'FORBIDDEN', /campus email/i);
+  const gBack = await (await callerFor(gIn.token)).listing.create(listingInput());
+  check('back to default: gmail can still post with its verified email', !!gBack.id);
 
   // --- admin endpoints
   const host = 'admin.test';

@@ -19,7 +19,7 @@ import { describeError, secondsFromMessage } from '@/components/auth/helpers';
 import { space } from '@/constants/theme';
 
 export const CAMPUS_EXPLAINER =
-  "Your phone proves it's you. Your campus email proves you're a student — it's required to buy, sell, or post.";
+  "Your phone proves it's you. A campus email shows you can get mail at your school — a phone-only account needs one to buy, sell, or post.";
 export const SWITCHED_COPY =
   'We found your existing Dibbs account for that email and moved your phone number to it — your listings and meetups are all there.';
 

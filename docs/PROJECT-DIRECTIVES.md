@@ -23,8 +23,10 @@ Verified in the provider dashboards on Oct 25-26, 2026. These override older doc
   set on Render as of Oct 25 (being fixed). Do not claim photos are persistent until
   verified.
 - **SMS and payments:** simulated. `/admin` is enabled (`ADMIN_PASSWORD` set).
-- **Sign-in:** any email can sign in; a campus email unlocks trading (commits
-  `76b8fcd`, `88f09cf`). Listings are in Browse for 24h, then the Archive; community
+- **Sign-in:** any email can sign in, and since 2026-10-26 (owner decision) any
+  verified email can trade too; a campus email adds the "Campus email verified"
+  badge. Phone-only accounts still need a campus email or the founder's Approved
+  setting. Not yet deployed. Listings are in Browse for 24h, then the Archive; community
   posts do not expire.
 
 Operations guides: `docs/DEPLOY.md` (API, database, photos, email) and
@@ -64,7 +66,7 @@ within the owner's current authorization; keep the remaining queue intact.
   through the inbox route and relevant item/meetup screens.
 - Any email can sign in. Email leads sign-in while SMS is simulated; `auth.methods` controls the lead
   method and can choose phone when SMS is live. Do not restore unconditional
-  phone-first copy from older docs. Campus email verification (or the founder's Approved setting) gates trading/posting;
+  phone-first copy from older docs. A verified email of any domain, a campus email, or the founder's Approved setting allows trading/posting (owner decision 2026-10-26);
   phone or email verification is never identity verification.
 - Payments remain simulated unless separately approved and configured. No claims
   of guaranteed safety, escrow, protection, fabricated activity or fake reputation.

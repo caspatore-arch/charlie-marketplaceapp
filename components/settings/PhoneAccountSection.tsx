@@ -236,6 +236,11 @@ export function PhoneAccountSection({ part }: PhoneAccountSectionProps = {}) {
               Dibbs approved your account to sell without a campus email. That approval is not a campus,
               student or ID check.
             </Text>
+          ) : s.postingStatus === 'email_verified' ? (
+            <Text variant="caption" color="inkFaint">
+              Your verified email lets you buy, sell and post. Verifying a campus email adds a “Campus email
+              verified” badge. Neither is an ID check.
+            </Text>
           ) : s.postingStatus === 'blocked' ? (
             <Text variant="caption" color="inkFaint">
               Your account can’t buy, sell or post right now. Contact support.

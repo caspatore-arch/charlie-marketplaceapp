@@ -66,7 +66,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     heading: '2. Eligibility',
     body: [
       `You must be at least ${MINIMUM_AGE} years old to create an account. Age is self-declared at sign-up — the App does not verify your age or identity.`,
-      'You sign in with an email address, and you must verify a campus email address to buy, sell, or post. Campus email verified means you can receive mail at that address. It is not an identity check, and it does not confirm you are a student, faculty, or staff member.',
+      'You sign in with an email address that you confirm with a code, and that confirmed email lets you buy, sell, or post. A "Campus email verified" badge means you also confirmed a campus email address. Either one only means you can receive mail at that address. It is not an identity check, and it does not confirm you are a student, faculty, or staff member.',
     ],
   },
   {
@@ -74,7 +74,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     body: [
       'No payments happen in the App. Payments are switched off: no payment processor is active, the App charges no fees, and it does not hold, transmit, or protect funds. A listing price is what the buyer and seller agree to settle between themselves in person.',
       'Sign-in codes are emailed to you. Text-message (SMS) sign-in is not active yet, so codes are never texted.',
-      'The App does not verify your identity, run background checks, or vet other users beyond confirming an email address and, to buy, sell or post, a campus email address. Email verification is not identity verification.',
+      'The App does not verify your identity, run background checks, or vet other users beyond confirming an email address (optionally a campus email address). Email verification is not identity verification.',
       'The App does not resolve disputes between users. If a trade goes wrong, the operator can review reports but cannot guarantee a refund, replacement, or any particular outcome, because no money or goods pass through the operator at all.',
       'Meetup spots and listings marked "Demo" are sample data for testing and have not been verified for accuracy, hours, or permission to use as a meetup location.',
     ],
