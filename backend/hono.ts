@@ -142,7 +142,7 @@ app.post('/api/stripe/simulated-test-event', async (c) => {
 // than IP so campus NAT does not put a whole building in one bucket.
 app.use(
   '/api/trpc/*',
-  rateLimit('api', env.rateLimitApiPerMinute, 60_000, callerKey),
+  rateLimit('api', env.rateLimitApiPerMinute, 60_000, callerKey, env.rateLimitApiAnonPerMinute),
 );
 
 app.use(
@@ -173,8 +173,10 @@ app.use(
   '/api/trpc/reservation.checkAddress',
   rateLimit('reservation.checkAddress', env.rateLimitCheckAddressPerMinute, 60_000),
 );
-app.use('/api/uploads', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000));
-app.use('/api/uploads/*', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000));
+// Uploads need a sign-in, so each person gets their own bucket (a shared
+// per-IP bucket would cap a whole campus wifi at a few listings a minute).
+app.use('/api/uploads', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
+app.use('/api/uploads/*', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
 
 /** Multipart upload, field name `file`. Same bearer auth as tRPC. */
 app.post('/api/uploads', async (c) => {

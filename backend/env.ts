@@ -266,10 +266,10 @@ export const env = {
   /* --------------------------------------------------------- rate limits */
 
   get rateLimitAuthRequestCodePerMinute(): number {
-    return Number(process.env.RATE_LIMIT_AUTH_REQUEST_CODE_PER_MIN ?? 5);
+    return Number(process.env.RATE_LIMIT_AUTH_REQUEST_CODE_PER_MIN ?? 30);
   },
   get rateLimitAuthVerifyCodePerMinute(): number {
-    return Number(process.env.RATE_LIMIT_AUTH_VERIFY_CODE_PER_MIN ?? 10);
+    return Number(process.env.RATE_LIMIT_AUTH_VERIFY_CODE_PER_MIN ?? 60);
   },
   get rateLimitPhoneRequestPerMinute(): number {
     return Number(process.env.RATE_LIMIT_PHONE_REQUEST_PER_MIN ?? 5);
@@ -281,11 +281,16 @@ export const env = {
     return Number(process.env.RATE_LIMIT_CHECK_ADDRESS_PER_MIN ?? 12);
   },
   get rateLimitUploadsPerMinute(): number {
-    return Number(process.env.RATE_LIMIT_UPLOADS_PER_MIN ?? 20);
+    return Number(process.env.RATE_LIMIT_UPLOADS_PER_MIN ?? 30);
   },
-  /** Per-IP cap on tRPC calls, the API surface that carries all real traffic. */
+  /** Per-session cap on tRPC calls, the API surface that carries all real traffic. */
   get rateLimitApiPerMinute(): number {
     return Number(process.env.RATE_LIMIT_API_PER_MIN ?? 300);
+  },
+  /** Same cap for signed-out callers, who are keyed by IP and so share one
+   *  bucket per campus wifi. */
+  get rateLimitApiAnonPerMinute(): number {
+    return Number(process.env.RATE_LIMIT_API_ANON_PER_MIN ?? 1500);
   },
 
   /* ------------------------------------------------ postgres connections */

@@ -29,10 +29,15 @@ function sweep(now: number): void {
   }
 }
 
-function clientIp(c: Context): string {
-  // Trust standard proxy headers (set by most hosts fronting the container:
-  // Fly, Render, Railway, a load balancer). Falls back to a constant so local
-  // dev (no proxy) still gets a single shared bucket rather than throwing.
+export function clientIp(c: Context): string {
+  // Render serves through Cloudflare, which overwrites CF-Connecting-IP (and
+  // True-Client-IP) with the real visitor address, so a client cannot fake it.
+  // X-Forwarded-For is only a fallback: Render passes a client-sent value
+  // through, so anyone could pick a new "IP" per request and dodge every
+  // per-IP limit (seen in the 2026-10-26 production load test). Falls back to
+  // a constant so local dev (no proxy) still gets one shared bucket.
+  const cf = c.req.header('cf-connecting-ip') ?? c.req.header('true-client-ip');
+  if (cf?.trim()) return cf.trim();
   const forwarded = c.req.header('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0]!.trim();
   return c.req.header('x-real-ip') ?? 'unknown';
@@ -70,16 +75,21 @@ export function callerKey(c: Context): string {
  */
 export function rateLimit(
   name: string,
-  limit: number,
+  sessionLimit: number,
   windowMs: number,
   keyOf: (c: Context) => string = (c) => `ip:${clientIp(c)}`,
+  /** Cap for callers keyed by IP; defaults to the same limit. Signed-out
+   *  visitors on one campus wifi share an IP, so their bucket needs room. */
+  ipLimit: number = sessionLimit,
 ) {
   return async (c: Context, next: Next) => {
+    const who = keyOf(c);
+    const limit = who.startsWith('ip:') ? ipLimit : sessionLimit;
     if (!(limit > 0)) return next(); // limit <= 0 disables this limiter
     const now = Date.now();
     sweep(now);
 
-    const key = `${name}:${keyOf(c)}`;
+    const key = `${name}:${who}`;
     let bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       bucket = { count: 0, resetAt: now + windowMs };
