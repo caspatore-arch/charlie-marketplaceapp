@@ -6,6 +6,16 @@ assistance) for a local prototype. Before onboarding real students, a lawyer
 needs to review the final Terms of Service and Privacy Policy, and confirm the
 age-gating and data-handling approach.
 
+## Status (2026-10-26)
+
+The founder answered every marker below and `constants/legal.ts` no longer has
+any: operator Charles Aspatore, contact hello@trydibbs.com, Arizona law,
+minimum age 18, no analytics, 30-day deletion after account closure (enforced
+by `backend/retention.ts`, tested by `npm run test:retention`). Section 7 of the
+Terms ("as is", liability capped at $50) is plain founder wording. **A lawyer
+has still not reviewed any of it.** The table below is kept as the record of
+what each item means.
+
 ## Every `[FOUNDER TO CONFIRM]` marker, in one place
 
 These live in `constants/legal.ts` and are rendered verbatim inside the

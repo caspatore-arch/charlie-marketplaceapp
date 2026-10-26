@@ -75,6 +75,7 @@
     "test:geo": "tsx scripts/geo-check.ts",
     "test:payments": "tsx scripts/payments-check.ts",
     "test:save": "tsx scripts/save-check.ts",
+    "test:retention": "tsx scripts/retention-check.ts",
     "test:price-guide": "tsx scripts/price-guide-check.ts",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",

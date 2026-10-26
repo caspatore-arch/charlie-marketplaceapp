@@ -3,22 +3,18 @@
  * in app/legal/terms.tsx and app/legal/privacy.tsx, plus the age-eligibility
  * constant used by the sign-up gate in app/auth/verify.tsx.
  *
- * IMPORTANT — read this before editing:
- * This is placeholder legal scaffolding written by a non-lawyer founder for
- * a local prototype. It is honest about what the app currently does (see
- * docs/HANDOFF.md §3, "Simulated or unfinished") and it is NOT reviewed by
- * a lawyer. Every `[FOUNDER TO CONFIRM: ...]` marker below is a fact the
- * founder must supply or a decision only the founder can make. Do not ship
- * this to real students without: (1) filling in every marker, and (2) a
- * lawyer reviewing the result. See docs/LEGAL-TODO.md for the checklist.
+ * The founder supplied every fact below on 2026-10-26. The text is written by
+ * a non-lawyer and has NOT been reviewed by a lawyer yet (docs/LEGAL-TODO.md).
+ * Keep it honest about what the app does (docs/HANDOFF.md §3). The 30-day
+ * retention promise is enforced by backend/retention.ts; change both together.
  */
 
 /**
  * Minimum age to create an account, as a self-declared checkbox (not age
  * verification — see the sign-up screen copy).
  *
- * [FOUNDER TO CONFIRM] — this number has real legal consequences and is the
- * founder's decision, not an engineering one:
+ * This number has real legal consequences and is the founder's decision,
+ * not an engineering one:
  *  - Under 13 in the US triggers COPPA (strict parental-consent rules).
  *  - Under 16 triggers "GDPR-K" style rules in parts of the EU/EEA even for
  *    a US-only prototype if any user could be in scope.
@@ -28,19 +24,22 @@
  * 18 is used as a conservative placeholder because this app arranges
  * in-person meetups between strangers. Do not lower it without legal advice.
  */
-export const MINIMUM_AGE = 18; // [FOUNDER TO CONFIRM]
+export const MINIMUM_AGE = 18;
 
-export const LEGAL_ENTITY_NAME = '[FOUNDER TO CONFIRM: legal entity name, e.g. "Dibbs, Inc." or the founder\'s own name if unincorporated]';
-export const OPERATOR_CONTACT_EMAIL = '[FOUNDER TO CONFIRM: operator contact email, e.g. support@example.com]';
-export const GOVERNING_JURISDICTION = '[FOUNDER TO CONFIRM: governing law / jurisdiction, e.g. "the State of Arizona, USA"]';
-export const DATA_RETENTION_PERIOD = '[FOUNDER TO CONFIRM: how long account, message, and transaction data is kept after account closure]';
-export const ANALYTICS_THIRD_PARTIES = '[FOUNDER TO CONFIRM: any analytics, crash-reporting, or other third-party services used — none are wired up in this prototype yet]';
-export const DATA_DELETION_CONTACT = '[FOUNDER TO CONFIRM: how a user requests full data deletion — an email address or form, and who handles it]';
+export const LEGAL_ENTITY_NAME = 'Charles Aspatore';
+export const OPERATOR_CONTACT_EMAIL = 'hello@trydibbs.com';
+export const GOVERNING_JURISDICTION = 'the State of Arizona, USA';
+export const DATA_RETENTION_PERIOD =
+  'Your profile is anonymized as soon as you close your account. 30 days later we delete the messages you sent, your listings and their photos from the App, your offers and meetup and sale records, and your Community posts. We keep the anonymized "Deleted user" placeholder, safety reports and anything that was reported, so moderators can still act on them.';
+export const ANALYTICS_THIRD_PARTIES =
+  'None. The App uses no analytics, advertising or tracking services. It runs on service providers that store or process data only to operate it: Render (app server), Neon (database), Netlify (website), Cloudflare (photo storage and web domain) and Resend (sign-in and meetup emails).';
+export const DATA_DELETION_CONTACT =
+  'email hello@trydibbs.com from the email address on your account. The operator, Charles Aspatore, handles these requests within 30 days.';
 
-export const LAST_UPDATED = '[FOUNDER TO CONFIRM: date this document was last actually reviewed]';
+export const LAST_UPDATED = 'October 26, 2026';
 
 export const DRAFT_BANNER =
-  'DRAFT — placeholder legal text. This has not been reviewed by a lawyer and must not be used for a real launch with real students until every [FOUNDER TO CONFIRM] item below is resolved and a lawyer has reviewed the final text.';
+  'Written in plain language by the founder. These terms have not yet been reviewed by a lawyer.';
 
 export interface LegalSection {
   heading: string;
@@ -52,7 +51,7 @@ export const TERMS_TITLE = 'Terms of Service';
 /** Short plain-English summary shown above the full text. Not a substitute for it. */
 export const TERMS_SUMMARY: string[] = [
   'Dibbs is a prototype campus marketplace. You meet other students in person; Dibbs is not part of the trade.',
-  'No payments happen in the app. Phone verified and campus email verified are not ID checks.',
+  'No payments happen in the app. A verified campus email is not an ID check.',
   'Community posts stay up until their author deletes them. Report or block anyone who makes you uncomfortable.',
 ];
 
@@ -61,20 +60,18 @@ export const TERMS_SECTIONS: LegalSection[] = [
     heading: '1. What this is',
     body: [
       `These Terms of Service ("Terms") govern use of this campus marketplace app (the "App"), operated by ${LEGAL_ENTITY_NAME}. This is a working prototype, not a finished commercial product. By creating an account you agree to these Terms.`,
-      'This document is a placeholder draft written for a prototype. It is not legal advice and has not been reviewed by a lawyer.',
     ],
   },
   {
     heading: '2. Eligibility',
     body: [
       `You must be at least ${MINIMUM_AGE} years old to create an account. Age is self-declared at sign-up — the App does not verify your age or identity.`,
-      'You verify a phone number when you sign up, and you must verify a campus email address to buy, sell, or post. Phone verified means you can receive a text at that number. Campus email verified means you can receive mail at that address. Neither is an identity check, and neither confirms you are a student, faculty, or staff member.',
+      'You sign in with an email address, and you must verify a campus email address to buy, sell, or post. Campus email verified means you can receive mail at that address. It is not an identity check, and it does not confirm you are a student, faculty, or staff member.',
     ],
   },
   {
     heading: '3. What is real, and what is simulated',
     body: [
-      'This section must always match docs/HANDOFF.md §3 exactly, in plain language:',
       'No payments happen in the App. Payments are switched off: no payment processor is active, the App charges no fees, and it does not hold, transmit, or protect funds. A listing price is what the buyer and seller agree to settle between themselves in person.',
       'Sign-in codes are emailed to you. Text-message (SMS) sign-in is not active yet, so codes are never texted.',
       'The App does not verify your identity, run background checks, or vet other users beyond confirming an email address and, to buy, sell or post, a campus email address. Email verification is not identity verification.',
@@ -95,19 +92,20 @@ export const TERMS_SECTIONS: LegalSection[] = [
     body: [
       'You are responsible for what you post — listing text, photos, messages, Community posts, and comments. Do not post anything illegal, fraudulent, or that you do not have the right to post.',
       'Listings are live in Browse for 24 hours. An unsold listing then moves to the Archive, where it stays visible and a buyer can still propose a time and place for the seller to accept or decline; the seller can relist or remove it at any time. Community posts stay up until their author or a moderator removes them.',
-      'The operator can remove listings or content, and suspend or close accounts, at its discretion — including through the moderation tools described in docs/HANDOFF.md.',
+      'The operator can remove listings or content, and suspend or close accounts, at its discretion.',
     ],
   },
   {
     heading: '6. Account closure',
     body: [
-      'You can close your account from Settings. Closing your account removes your active listings, cancels pending meetup requests, and signs you out everywhere. This is anonymization, not full erasure: your message history and completed transactions are kept so the other people involved can still see what happened, for the retention period described in the Privacy Policy.',
+      'You can close your account from Settings. Closing your account removes your active listings, cancels pending meetup requests, and signs you out everywhere. Your profile is anonymized right away. 30 days later, the messages you sent, your listings, and your offer and meetup records are deleted, as described in the Privacy Policy.',
     ],
   },
   {
     heading: '7. No warranties, limitation of liability',
     body: [
-      `[FOUNDER TO CONFIRM: standard "as-is" disclaimer and liability limitation language — this needs a lawyer's wording, not a placeholder generated by an AI assistant. Do not launch without replacing this paragraph.]`,
+      'The App is provided "as is" and "as available", without warranties of any kind, express or implied, including warranties of merchantability, fitness for a particular purpose, and non-infringement. The operator does not promise the App will be uninterrupted, error-free, or secure.',
+      `To the fullest extent permitted by law, ${LEGAL_ENTITY_NAME} is not liable for any indirect, incidental, special, or consequential damages, or for any loss or harm arising from items, trades, meetups, or conduct between users. The operator's total liability for any claim relating to the App is limited to $50.`,
     ],
   },
   {
@@ -131,9 +129,10 @@ export const PRIVACY_TITLE = 'Privacy Policy';
 
 /** Short plain-English summary shown above the full text. Not a substitute for it. */
 export const PRIVACY_SUMMARY: string[] = [
-  'We keep your phone number and verification status, your campus email, your profile, and what you post (listings, messages, Community posts, comments and votes).',
+  'We keep your email address, whether your campus email is verified, your profile, and what you post (listings, messages, Community posts, comments and votes).',
   'Instagram and a contact phone number are shown to others only if you turn sharing on.',
   'We do not collect payment details or government ID. We do not sell your information.',
+  '30 days after you close your account, we delete your messages, listings and meetup records.',
 ];
 
 
@@ -141,13 +140,13 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
   {
     heading: '1. What this is',
     body: [
-      `This Privacy Policy explains what information ${LEGAL_ENTITY_NAME} collects through this App and what happens to it. This is a placeholder draft written for a prototype — it is not legal advice and has not been reviewed by a lawyer.`,
+      `This Privacy Policy explains what information ${LEGAL_ENTITY_NAME} collects through this App and what happens to it. It has not yet been reviewed by a lawyer.`,
     ],
   },
   {
     heading: '2. What we collect',
     body: [
-      'Account information: your phone number and whether it is verified, your campus email address and whether it is verified, your display name, and an optional bio and profile photo.',
+      'Account information: your email address, whether a campus email address is verified, your display name, and an optional bio and profile photo. If you add a phone number, we store it and whether it is verified.',
       'Optional contact sharing: if you add an Instagram handle or a contact phone number to your profile, we store it. It is shown to other students only if you turn sharing on, and you can turn it off at any time.',
       'Content you create: listings (title, description, price, photos, availability), messages you send other users, meetup requests, and reports you file.',
       'Community activity: Community posts (which stay up until deleted), comments and votes on them, and comments on listings.',
@@ -178,21 +177,21 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
       'Other users see your display name, bio, profile photo, active listings, Community posts, comments and votes, and campus-email-verified badge (not your actual email address or sign-in phone number) when you interact with them. Your Instagram handle and contact phone number are shown only if you turn sharing on.',
       'Messages are visible to you and the person you are messaging.',
       'The operator can see reports, account details, and content for moderation purposes.',
-      `We do not sell your information. [FOUNDER TO CONFIRM: confirm this is accurate once any third-party analytics or services are added — see item 2 above.]`,
+      'We do not sell your information.',
     ],
   },
   {
     heading: '6. Data retention and deletion',
     body: [
       `Retention period: ${DATA_RETENTION_PERIOD}`,
-      'Closing your account (Settings → Close account) anonymizes your profile immediately and cancels pending requests, but keeps message history and completed-transaction records tied to a "Deleted user" placeholder, so the other people involved can still see what happened.',
+      'Closing your account (Settings → Close account) anonymizes your profile immediately and cancels pending requests. Until the 30 days pass, the other people involved can still see past messages and meetups, shown as "Deleted user". Comments you left on listings or posts stay up under "Deleted user" unless you ask us to remove them.',
       `To request full deletion of your data beyond what account closure removes: ${DATA_DELETION_CONTACT}`,
     ],
   },
   {
     heading: '7. Children\'s privacy',
     body: [
-      `This App is not directed at children and requires self-declared age of at least ${MINIMUM_AGE} at sign-up (see the Terms of Service, section 2). [FOUNDER TO CONFIRM: if the minimum age above is ever lowered, this section and the app's App Store age rating must be revisited together — they cannot move independently.]`,
+      `This App is not directed at children and requires self-declared age of at least ${MINIMUM_AGE} at sign-up (see the Terms of Service, section 2).`,
     ],
   },
   {

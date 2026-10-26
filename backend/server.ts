@@ -8,6 +8,7 @@ import { resolveSmsMode } from './sms/provider';
 import { resolveEmailMode } from './email/provider';
 import { startBookingEmailDispatcher } from './email/bookings';
 import { startSmsDispatcher } from './sms/outbox';
+import { startRetentionSweeper } from './retention';
 import { env } from './env';
 import app from './hono';
 
@@ -24,6 +25,7 @@ async function main() {
   await runMigrations();
   startSmsDispatcher(db);
   startBookingEmailDispatcher(db);
+  startRetentionSweeper(db);
 
   const port = env.port;
   serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {

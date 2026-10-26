@@ -1,0 +1,32 @@
+# Downtime alert. Every 10 minutes GitHub checks the live API and website.
+# If either is down after three tries, the run fails and GitHub emails the
+# person who last changed this schedule (Settings > Notifications > Actions).
+# /api/health does not touch the database, so this never wakes Neon.
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: API health (api.trydibbs.com)
+        run: |
+          for i in 1 2 3; do
+            body=$(curl -fsS --max-time 60 https://api.trydibbs.com/api/health) && echo "$body" | grep -q '"ok":true' && { echo "API ok"; exit 0; }
+            echo "API check $i failed; retrying in 20s"; sleep 20
+          done
+          echo "::error::api.trydibbs.com/api/health is down"; exit 1
+      - name: Website (trydibbs.com)
+        run: |
+          for i in 1 2 3; do
+            curl -fsS --max-time 30 -o /dev/null https://trydibbs.com && { echo "Website ok"; exit 0; }
+            echo "Website check $i failed; retrying in 20s"; sleep 20
+          done
+          echo "::error::trydibbs.com is down"; exit 1
