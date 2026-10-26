@@ -173,10 +173,13 @@ app.use(
   '/api/trpc/reservation.checkAddress',
   rateLimit('reservation.checkAddress', env.rateLimitCheckAddressPerMinute, 60_000),
 );
-// Uploads need a sign-in, so each person gets their own bucket (a shared
-// per-IP bucket would cap a whole campus wifi at a few listings a minute).
-app.use('/api/uploads', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
-app.use('/api/uploads/*', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
+// Uploading needs a sign-in, so each person gets their own bucket. Only POST
+// counts: every photo on screen is a GET here, and one shared per-IP bucket
+// used to break images for a whole campus wifi after a few dozen. (The old
+// '/api/uploads' + '/api/uploads/*' pair also counted each upload twice.)
+app.on('POST', '/api/uploads', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
+// Viewing photos: a high per-IP ceiling, only to stop a runaway scraper.
+app.on('GET', '/api/uploads/:name', rateLimit('uploads.view', env.rateLimitPhotoViewsPerMinute, 60_000));
 
 /** Multipart upload, field name `file`. Same bearer auth as tRPC. */
 app.post('/api/uploads', async (c) => {

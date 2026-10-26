@@ -283,6 +283,10 @@ export const env = {
   get rateLimitUploadsPerMinute(): number {
     return Number(process.env.RATE_LIMIT_UPLOADS_PER_MIN ?? 30);
   },
+  /** Photo views (GET /api/uploads/:name) per IP. Campus wifi shares an IP. */
+  get rateLimitPhotoViewsPerMinute(): number {
+    return Number(process.env.RATE_LIMIT_PHOTO_VIEWS_PER_MIN ?? 6000);
+  },
   /** Per-session cap on tRPC calls, the API surface that carries all real traffic. */
   get rateLimitApiPerMinute(): number {
     return Number(process.env.RATE_LIMIT_API_PER_MIN ?? 300);
