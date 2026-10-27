@@ -55,6 +55,11 @@ export async function dispatchBookingEmails(db: Db, now = new Date()) {
 
 export function startBookingEmailDispatcher(db: Db) {
   if (env.nodeEnv === 'test') return;
-  const timer = setInterval(() => { void dispatchBookingEmails(db).catch(() => console.error('[email] dispatcher failed')); }, 30_000);
+  // Same DOM-vs-Node `setInterval` typing mismatch as backend/sms/outbox.ts:
+  // this file is Node-only but the tsconfig's DOM lib (for the Expo app
+  // side) makes the ambient type resolve to the browser overload, which has
+  // no `.unref`. The cast matches the real Node return type; no behavior
+  // change.
+  const timer = setInterval(() => { void dispatchBookingEmails(db).catch(() => console.error('[email] dispatcher failed')); }, 30_000) as unknown as NodeJS.Timeout;
   timer.unref?.();
 }
