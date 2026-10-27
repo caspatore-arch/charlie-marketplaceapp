@@ -253,3 +253,44 @@ Open items for the owner:
 - `docs/OVERHAUL.md` was not touched: the coordinator should record this decision there.
 - Native (iPhone) not run: no Xcode on this machine.
 
+## October 27 typecheck fix (automated daily pass)
+
+`npm run typecheck` was failing on `main` with three error sites, all the same
+cause: `backend/sms/outbox.ts:331`, `backend/email/bookings.ts:58`, and two
+newer ones in `backend/retention.ts:94-95` (`startRetentionSweeper`, added
+since). Cause, as already diagnosed on open PRs #2 and #4: this repo's
+`tsconfig.json` extends Expo's base config, which sets the DOM lib for the
+Expo app side, so the ambient `setInterval`/`setTimeout` types resolve to the
+browser overload (returns `number`, no `.unref`) even in these Node-only
+backend dispatcher files, where the real return value is a `NodeJS.Timeout`.
+
+PR #2 (`fix/sms-dispatcher-typecheck`) already fixes `outbox.ts` alone. PR #4
+(`fix/dispatcher-timer-typecheck`) fixes `outbox.ts` and `bookings.ts`, based
+on an older `main`, before `retention.ts` picked up the identical bug.
+Neither open PR is current, so typecheck was still red on `main` today. This
+pass applies the same fix pattern (type/cast the timer as `NodeJS.Timeout`
+with a comment explaining why; no behavior change) to all three files, on
+branch `fix/dispatcher-timer-typecheck-retention`, built in an isolated git
+worktree so as not to disturb this shared checkout or either open PR's
+branch.
+
+Verified today (fresh `npm install`, isolated worktree, local PGlite,
+`PAYMENTS_MODE`/`SMS_MODE`/`EMAIL_MODE` all simulated — no real money, texts
+or emails sent):
+- `npm run typecheck` — clean.
+- `npm run test:e2e` — 17/17 (the suite has grown past the 8 criteria the
+  original brief table describes; see prior notes on this).
+- `npm run test:geo` — 6/6.
+- `npx tsx scripts/payments-check.ts` — 39 passed, 0 failed, fake gateway
+  only.
+- `npm run test:workstreams` — 44/44.
+- `npm run lint` — 17 pre-existing errors (e.g. `components/ui/Skeleton.tsx`
+  ref-during-render); none in the three files this pass touched.
+
+Not done, not claimed: no feature work, no dependency or tsconfig change,
+nothing run on a physical device, nothing against a live Stripe/Resend/Twilio
+account. PRs #2 and #4 remain open and now each duplicate part of this fix —
+both still touch the identical `outbox.ts` hunk this pass also changes, so
+merging more than one of the three will conflict. The owner or coordinator
+should pick one and close the others rather than merge them all.
+

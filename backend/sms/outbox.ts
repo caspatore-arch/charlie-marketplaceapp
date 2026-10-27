@@ -320,14 +320,20 @@ export async function dispatchDueSms(db: Db, opts: { now?: Date; limit?: number 
   return result;
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: NodeJS.Timeout | null = null;
 
 /** Starts the background dispatcher (backend/server.ts). No-op if interval is 0. */
 export function startSmsDispatcher(db: Db): void {
   if (timer || env.smsDispatchIntervalMs === 0) return;
+  // This repo's tsconfig pulls in the DOM lib (for the Expo app side), which
+  // makes the ambient global `setInterval` type-resolve to the browser
+  // overload (returns `number`, no `.unref`) even on this Node-only backend
+  // file, where it actually returns a Timeout at runtime. The cast below is
+  // required to match that reality — it does not change behavior, only the
+  // type this file treats it as.
   timer = setInterval(() => {
     dispatchDueSms(db).catch((err) => console.error('[sms] dispatch failed', err));
-  }, env.smsDispatchIntervalMs);
+  }, env.smsDispatchIntervalMs) as unknown as NodeJS.Timeout;
   timer.unref?.();
 }
 

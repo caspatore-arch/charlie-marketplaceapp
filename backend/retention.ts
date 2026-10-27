@@ -91,6 +91,11 @@ export function startRetentionSweeper(db: Db) {
   const run = () => {
     void purgeClosedAccounts(db).catch(() => console.error('[retention] closed-account cleanup failed'));
   };
-  setTimeout(run, 60_000).unref?.();
-  setInterval(run, SWEEP_EVERY_MS).unref?.();
+  // Same DOM-vs-Node `setInterval`/`setTimeout` typing mismatch as
+  // backend/sms/outbox.ts and backend/email/bookings.ts: this file is
+  // Node-only but the tsconfig's DOM lib (for the Expo app side) makes the
+  // ambient type resolve to the browser overload, which has no `.unref`.
+  // The cast matches the real Node return type; no behavior change.
+  (setTimeout(run, 60_000) as unknown as NodeJS.Timeout).unref?.();
+  (setInterval(run, SWEEP_EVERY_MS) as unknown as NodeJS.Timeout).unref?.();
 }
