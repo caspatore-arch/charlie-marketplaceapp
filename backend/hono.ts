@@ -23,6 +23,7 @@ import {
   storage,
 } from './storage';
 import { adminApp } from './admin/routes';
+import { parsePlatform, recordVisit } from './admin/visits';
 import { appRouter } from './trpc/app-router';
 import { createContext, userFromAuthHeader } from './trpc/create-context';
 
@@ -49,6 +50,16 @@ app.use(
       : { origin: '*', allowHeaders: ['Authorization', 'Content-Type'] },
   ),
 );
+
+// Visit counter for the founder dashboard (backend/admin/visits.ts). A plain
+// POST with a query string and no body, so browsers send it without a CORS
+// preflight. Rate limited so one client can't inflate the count.
+app.post('/api/visit', rateLimit('visit.ip', 30, 60 * 60_000), async (c) => {
+  const platform = parsePlatform(c.req.query('platform'));
+  if (!platform) return c.json({ error: 'Unknown platform' }, 400);
+  await recordVisit(platform);
+  return c.body(null, 204);
+});
 
 app.post('/api/sms/inbound', async (c) => {
   if (!c.req.header('content-type')?.includes('application/x-www-form-urlencoded')) return c.text('Unsupported media type', 415);

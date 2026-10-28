@@ -83,6 +83,7 @@ export function dashboardPage(): string {
   <form method="post" action="/admin/logout"><button class="ghost small" type="submit">Sign out</button></form>
 </header>
 <div class="grid" id="app" hidden>
+  <div class="err" id="local-note" hidden><b>Local test data, not the live site.</b> These numbers come from the test database on this computer. Live numbers: <a href="https://api.trydibbs.com/admin">api.trydibbs.com/admin</a></div>
   <div class="grid cols">
     <div class="card">
       <div class="muted small">Accounts created</div>
@@ -94,6 +95,23 @@ export function dashboardPage(): string {
       <div class="card"><div class="num" id="week"></div><div class="muted small">Last 7 days</div></div>
       <div class="card"><div class="num" id="month"></div><div class="muted small">Last 30 days</div></div>
     </div>
+  </div>
+  <div class="grid cols">
+    <div class="card">
+      <div class="muted small">Site visits</div>
+      <div class="hero" id="v-total"></div>
+      <div class="muted small" id="v-split"></div>
+    </div>
+    <div class="row">
+      <div class="card"><div class="num" id="v-today"></div><div class="muted small">Today</div></div>
+      <div class="card"><div class="num" id="v-week"></div><div class="muted small">Last 7 days</div></div>
+      <div class="card"><div class="num" id="v-month"></div><div class="muted small">Last 30 days</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Visits per day</h2><div class="muted small">Each time someone opens the app or website. Last 30 days, Arizona time</div>
+    <div class="chart" id="v-chart"></div>
+    <div class="axis muted small"><span id="v-first"></span><span id="v-peak"></span><span id="v-last"></span></div>
   </div>
   <div class="card">
     <h2>New accounts per day</h2><div class="muted small">Last 30 days, Arizona time</div>
@@ -130,20 +148,31 @@ const shortDay = (d) => { const [, m, day] = d.split('-'); return Number(m) + '/
 const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); if (m < 1) return 'just now'; if (m < 60) return m + 'm ago'; const h = Math.round(m / 60); return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago'; };
 
 function render(s) {
+  $('local-note').hidden = s.environment !== 'local';
   const a = s.accounts;
   $('total').textContent = fmtN(a.total);
   $('excluded').textContent = 'Real people only. ' + a.demo + ' demo and ' + a.closed + ' closed accounts not counted.';
   $('today').textContent = fmtN(a.today); $('week').textContent = fmtN(a.last7Days); $('month').textContent = fmtN(a.last30Days);
 
-  const max = Math.max(1, ...s.daily.map((d) => d.count));
-  $('chart').replaceChildren(...s.daily.map((d) => {
-    const b = el('div', 'bar' + (d.count ? '' : ' zero'));
-    b.style.height = d.count ? (d.count / max * 100) + '%' : '2px';
-    b.dataset.tip = shortDay(d.day) + ': ' + d.count;
-    return b;
-  }));
-  $('first').textContent = shortDay(s.daily[0].day); $('last').textContent = shortDay(s.daily[s.daily.length - 1].day);
-  $('peak').textContent = 'peak ' + max + '/day';
+  const chart = (prefix, daily) => {
+    const max = Math.max(1, ...daily.map((d) => d.count));
+    $(prefix + 'chart').replaceChildren(...daily.map((d) => {
+      const b = el('div', 'bar' + (d.count ? '' : ' zero'));
+      b.style.height = d.count ? (d.count / max * 100) + '%' : '2px';
+      b.dataset.tip = shortDay(d.day) + ': ' + d.count;
+      return b;
+    }));
+    $(prefix + 'first').textContent = shortDay(daily[0].day); $(prefix + 'last').textContent = shortDay(daily[daily.length - 1].day);
+    $(prefix + 'peak').textContent = 'peak ' + fmtN(max) + '/day';
+  };
+  chart('', s.daily);
+
+  const v = s.visits;
+  $('v-total').textContent = fmtN(v.total);
+  const p = v.last30ByPlatform;
+  $('v-split').textContent = 'All time. Last 30 days: ' + fmtN(p.web) + ' web, ' + fmtN(p.ios) + ' iPhone, ' + fmtN(p.android) + ' Android.';
+  $('v-today').textContent = fmtN(v.today); $('v-week').textContent = fmtN(v.last7Days); $('v-month').textContent = fmtN(v.last30Days);
+  chart('v-', v.daily);
 
   $('breakdown').replaceChildren(...[
     ['Verified campus email', a.verifiedCampusEmail], ['Verified phone', a.verifiedPhone], ['Added a photo or bio', a.withProfile],

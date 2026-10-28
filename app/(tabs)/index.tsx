@@ -463,15 +463,17 @@ export default function BrowseScreen() {
                     ? 'Nothing in the Archive'
                     : filtersActive
                       ? 'No matches'
-                      : 'No listings yet'
+                      : 'Nothing new in the last 24 hours'
               }
               body={
                 hasSearch || filtersActive
                   ? 'Try widening your search or filters.'
-                  : 'Check back soon — new items get posted often.'
+                  : archived
+                    ? 'Check back soon — new items get posted often.'
+                    : 'Listings stay here for 24 hours, then move to the Archive, where you can still buy them.'
               }
-              actionLabel={hasSearch || filtersActive ? 'Clear filters' : undefined}
-              onAction={hasSearch || filtersActive ? clearFiltersAndSearch : undefined}
+              actionLabel={hasSearch || filtersActive ? 'Clear filters' : archived ? undefined : 'See the Archive'}
+              onAction={hasSearch || filtersActive ? clearFiltersAndSearch : archived ? undefined : () => setArchived(true)}
             />
           </View>
         }

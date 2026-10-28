@@ -13,6 +13,7 @@ import { env } from '../env';
 import { db, dbKind } from '../db/client';
 import { communityPosts, listings, messages, users } from '../db/schema';
 import { resolveEmailMode } from '../email/provider';
+import { getVisitStats } from './visits';
 
 /** Days are counted in campus time so "today" matches what the founder sees. */
 const TZ = 'America/Phoenix';
@@ -78,6 +79,7 @@ export async function getAdminStats() {
       [listingCount],
       [postCount],
       [messageCount],
+      visits,
     ] = await Promise.all([
       ctx.db.select({ n: count() }).from(users).where(real),
       ctx.db.select({ n: count() }).from(users).where(eq(users.isDemo, true)),
@@ -116,6 +118,7 @@ export async function getAdminStats() {
       // Text posts only: every listing also gets an automatic post, which is not separate activity.
       ctx.db.select({ n: count() }).from(communityPosts).where(isNull(communityPosts.listingId)),
       ctx.db.select({ n: count() }).from(messages),
+      getVisitStats(DAYS),
     ]);
 
     // Fill gaps so the chart always shows all 30 days, zeros included.
@@ -129,6 +132,8 @@ export async function getAdminStats() {
 
     return {
       generatedAt: new Date(),
+      /** 'local' = a PGlite test copy on someone's machine, not the live site. */
+      environment: dbKind === 'pglite' ? ('local' as const) : ('live' as const),
       accounts: {
         total: Number(totals!.n),
         today: Number(today!.n),
@@ -141,6 +146,7 @@ export async function getAdminStats() {
         closed: Number(closed!.n),
       },
       daily: series,
+      visits,
       recent,
       activity: {
         listings: Number(listingCount!.n),

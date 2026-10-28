@@ -1068,3 +1068,17 @@ export const bookingEmails = pgTable('booking_emails', {
   sendAfter: ts('send_after').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => [index('booking_emails_due_idx').on(t.status, t.sendAfter)]);
+
+/**
+ * Site visits for the founder dashboard: one counter per day (campus time)
+ * per platform. No IPs, accounts or devices are stored, only the count.
+ */
+export const siteVisits = pgTable(
+  'site_visits',
+  {
+    day: text('day').notNull(), // YYYY-MM-DD, America/Phoenix
+    platform: text('platform').notNull(), // web | ios | android
+    visits: integer('visits').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.platform] })],
+);

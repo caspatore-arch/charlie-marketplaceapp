@@ -17,6 +17,7 @@ import { Montserrat_700Bold } from '@expo-google-fonts/montserrat/700Bold';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { trpc, trpcClient } from '@/lib/trpc';
+import { countVisit } from '@/lib/visit';
 import { AuthProvider } from '@/components/AuthProvider';
 import { colors, fontFamilyFor, type } from '@/constants/theme';
 import { ConnectionBanner } from '@/components/ui/ConnectionBanner';
@@ -48,6 +49,11 @@ export default function RootLayout() {
   useEffect(() => {
     if (fontsSettled) SplashScreen.hideAsync().catch(() => {});
   }, [fontsSettled]);
+
+  // One visit per tab (web) or launch (phone) for the founder dashboard.
+  useEffect(() => {
+    countVisit();
+  }, []);
 
   if (!fontsSettled) return null;
 

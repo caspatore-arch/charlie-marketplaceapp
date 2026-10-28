@@ -141,6 +141,13 @@
       "when": 1793048995146,
       "tag": "0019_community_vote_direction",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793201716659,
+      "tag": "0020_site_visits",
+      "breakpoints": true
     }
   ]
 }
