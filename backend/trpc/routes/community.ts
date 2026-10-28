@@ -32,6 +32,7 @@ import {
   type CommunityPost,
 } from '../../db/schema';
 import type { Db } from '../../db/client';
+import { notifyModeratorsOfReport } from '../../email/moderationAlerts';
 import { engagementFor, listingHotExpr, listingHotParts } from '../engagement';
 import { HOT_COMMENT_VOTE_WEIGHT, HOT_COMMENT_WEIGHT, decayedSum } from '../hot';
 import { listingCaption } from '../listing-post';
@@ -674,16 +675,20 @@ export const communityRouter = router({
       if (post.authorId === ctx.user.id) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: "You can't report your own post." });
       }
-      await ctx.db.insert(reports).values({
-        reporterId: ctx.user.id,
-        targetUserId: post.authorId,
-        // A listing post is reported as the LISTING, so the moderator sees the
-        // item (and can remove it) in the same queue as reports from Browse.
-        targetListingId: post.listingId,
-        targetPostId: post.listingId ? null : post.id,
-        reason: input.reason,
-        details: input.details || null,
-      });
+      const [report] = await ctx.db
+        .insert(reports)
+        .values({
+          reporterId: ctx.user.id,
+          targetUserId: post.authorId,
+          // A listing post is reported as the LISTING, so the moderator sees the
+          // item (and can remove it) in the same queue as reports from Browse.
+          targetListingId: post.listingId,
+          targetPostId: post.listingId ? null : post.id,
+          reason: input.reason,
+          details: input.details || null,
+        })
+        .returning();
+      await notifyModeratorsOfReport(ctx.db, report!);
       return { ok: true as const };
     }),
 
