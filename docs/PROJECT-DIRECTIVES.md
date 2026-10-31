@@ -156,6 +156,11 @@ Owner's explicit operating rules persist:
   seed or destructive test scripts against production without reviewing scope.
 - Real email/SMS/payment tests require explicit live configuration. Keep ordinary
   automated tests simulated. Preserve dev/demo labels and production dev-login gates.
+- 2026-10-31: moderators now get a best-effort email when a new report is filed
+  (`backend/email/moderation.ts`, wired into `user.report` and `community.report`);
+  see `docs/HANDOFF.md` "Moderation". `npm run test:moderation-alert` covers it against
+  the simulated provider; real delivery through live Resend to a real moderator inbox
+  is unverified.
 - Review PR #1 migrations and existing hosted migration prechecks before rollout.
 - Maps remain backlog with an accessible list fallback. Profile category labels
   remain exploratory; profiles/follows themselves now exist in local commits.
