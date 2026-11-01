@@ -87,6 +87,12 @@ export default function RootLayout() {
                     MVP opens in a tab labelled "index". */}
                 <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Dibbs' }} />
                 <Stack.Screen name="listing/[id]" options={{ title: 'Listing' }} />
+                <Stack.Screen name="dibbs-offer/index" options={{ title: 'Dibbs offer requests' }} />
+                <Stack.Screen
+                  name="dibbs-offer/new"
+                  options={{ presentation: 'modal', title: 'Get a Dibbs offer', headerLeft: () => <HeaderCloseButton /> }}
+                />
+                <Stack.Screen name="dibbs-offer/[id]" options={{ title: 'Dibbs offer request' }} />
                 <Stack.Screen
                   name="listing/new"
                   options={{ presentation: 'modal', title: 'New listing', headerLeft: () => <HeaderCloseButton /> }}

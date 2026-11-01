@@ -10,6 +10,7 @@ import {
   bids,
   blocks,
   campuses,
+  dibbsOfferRequests,
   follows,
   listingPhotos,
   listingSpots,
@@ -103,7 +104,14 @@ export function slotStartsFor(
  */
 export async function slotConflicts(
   db: Db,
-  args: { sellerId: string; buyerId: string; startsAt: Date; excludeReservationId?: string },
+  args: {
+    sellerId: string;
+    buyerId: string;
+    startsAt: Date;
+    excludeReservationId?: string;
+    /** A Dibbs offer request being (re)scheduled, so it doesn't conflict with itself. */
+    excludeDibbsRequestId?: string;
+  },
 ): Promise<{ seller: boolean; buyer: boolean }> {
   const lo = new Date(args.startsAt.getTime() - MEETUP_SLOT_MS);
   const hi = new Date(args.startsAt.getTime() + MEETUP_SLOT_MS);
@@ -121,7 +129,19 @@ export async function slotConflicts(
       ),
     );
   const others = rows.filter((r) => r.id !== args.excludeReservationId);
-  const busy = (uid: string) => others.some((r) => r.sellerId === uid || r.buyerId === uid);
+  // A confirmed meetup with the Dibbs buying team also makes that seller busy.
+  const dibbsRows = await db
+    .select({ id: dibbsOfferRequests.id, sellerId: dibbsOfferRequests.sellerId })
+    .from(dibbsOfferRequests)
+    .where(
+      and(
+        inArray(dibbsOfferRequests.sellerId, [args.sellerId, args.buyerId]),
+        inArray(dibbsOfferRequests.status, ['meetup_confirmed', 'final_offer', 'final_accepted']),
+        sql`${dibbsOfferRequests.meetupStartsAt} > ${lo.toISOString()} and ${dibbsOfferRequests.meetupStartsAt} < ${hi.toISOString()}`,
+      ),
+    );
+  const dibbsBusy = dibbsRows.filter((r) => r.id !== args.excludeDibbsRequestId).map((r) => r.sellerId);
+  const busy = (uid: string) => others.some((r) => r.sellerId === uid || r.buyerId === uid) || dibbsBusy.includes(uid);
   return { seller: busy(args.sellerId), buyer: busy(args.buyerId) };
 }
 
@@ -499,6 +519,8 @@ export async function applyExpiry(db: Db): Promise<void> {
             staleAccepted.map((r) => r.listingId),
           ),
           eq(listings.status, 'reserved'),
+          // Never drop a hold placed by a confirmed Dibbs meetup (backend/dibbs/hold.ts).
+          sql`not exists (select 1 from ${dibbsOfferRequests} where ${dibbsOfferRequests.listingId} = ${listings.id} and ${dibbsOfferRequests.holdsListing})`,
         ),
       );
   }

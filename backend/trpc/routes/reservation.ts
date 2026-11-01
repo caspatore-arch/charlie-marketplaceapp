@@ -41,6 +41,7 @@ import {
 import { enqueueBookingEmails } from '../../email/bookings';
 import { cancelBookingSms, enqueueBookingSms } from '../../sms/outbox';
 import { directionsUrlForCoords, geocodeAddress, haversineMeters, GeocodeError } from '../../geocode';
+import { dibbsHoldsListing } from '../../dibbs/hold';
 import { notifyMeetupEvent, type MeetupEventKind } from '../../notifications/events';
 import {
   ARCHIVE_REQUEST_HORIZON_MS,
@@ -297,6 +298,8 @@ async function releaseListing(db: Db, listingId: string) {
     .where(and(eq(reservations.listingId, listingId), eq(reservations.status, 'accepted')))
     .limit(1);
   if (stillHeld.length > 0) return;
+  // A confirmed meetup with the Dibbs buying team holds the item too (backend/dibbs/hold.ts).
+  if (await dibbsHoldsListing(db, listingId)) return;
 
   const expired = listing.expiresAt != null && listing.expiresAt < new Date();
   await db

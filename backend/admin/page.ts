@@ -128,6 +128,17 @@ export function dashboardPage(): string {
     <div class="card"><div class="num" id="messages"></div><div class="muted small">Messages</div></div>
   </div>
   <div class="card">
+    <h2>Dibbs offer requests</h2>
+    <div class="muted small">Private requests from students who want Dibbs to buy an item. Reviewed by staff accounts in the app, so every action records who did it. Counts only here.</div>
+    <div class="row" style="margin-top:12px">
+      <div><div class="num" id="do-action"></div><div class="muted small">Need staff action</div></div>
+      <div><div class="num" id="do-open"></div><div class="muted small">Open</div></div>
+      <div><div class="num" id="do-oldest"></div><div class="muted small">Oldest waiting for review</div></div>
+    </div>
+    <div class="muted small" id="do-setup" style="margin-top:8px"></div>
+    <p style="margin:12px 0 0"><a id="do-link" target="_blank" rel="noopener">Open the staff queue</a> <span class="muted small">(sign in with a staff account)</span></p>
+  </div>
+  <div class="card">
     <h2>Posting access</h2>
     <div class="muted small">Who can buy, sell, make offers, book and post. Default: any verified email can trade (campus or not); a phone-only account needs a campus email. Approved: a phone-only account can trade without one (not a campus, student or ID check; shows as "Approved seller"). Blocked: can't buy, sell or post at all.</div>
     <form class="search" id="access-form" role="search">
@@ -201,6 +212,18 @@ function render(s) {
     if (sub) { const n = href ? el('a', 'small', sub) : el('div', 'muted small', sub); if (href) { n.href = href; n.target = '_blank'; n.rel = 'noopener'; } p.append(n); }
     return p;
   };
+  const d = s.dibbsOffers;
+  if (d) {
+    const mins = d.oldestWaitingMinutes;
+    $('do-action').textContent = fmtN(d.needsAction);
+    $('do-open').textContent = fmtN(d.open);
+    $('do-oldest').textContent = mins == null ? '—' : mins < 60 ? mins + ' min' : mins < 2880 ? Math.round(mins / 60) + ' h' : Math.round(mins / 1440) + ' d';
+    const setup = [];
+    if (!d.staffAccounts) setup.push('No staff accounts yet: set DIBBS_STAFF_USER_IDS on the server.');
+    if (!d.teamEmailConfigured) setup.push('Team email alerts are off: set DIBBS_OFFERS_EMAIL on the server.');
+    $('do-setup').textContent = setup.join(' ');
+    $('do-link').href = d.reviewUrl;
+  }
   const st = s.storage;
   $('storage').replaceChildren(
     place('Accounts, listings, messages', st.database.provider, st.database.host),

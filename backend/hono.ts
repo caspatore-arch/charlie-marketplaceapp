@@ -2,7 +2,21 @@ import { trpcServer } from '@hono/trpc-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
+import { and, eq, gte, sql } from 'drizzle-orm';
+
 import { db, dbKind } from './db/client';
+import { dibbsOfferMedia } from './db/schema';
+import {
+  MAX_UNATTACHED_UPLOADS_PER_DAY,
+  PRIVATE_VIDEO_MAX_BYTES,
+  PrivateMediaError,
+  getPrivate,
+  newPrivateKey,
+  putPrivate,
+  signedMediaPath,
+  validatePrivateMedia,
+  verifySignedMedia,
+} from './dibbs/media';
 import { env } from './env';
 import { callerKey, rateLimit } from './ratelimit';
 import { paymentsMode } from './stripe/client';
@@ -238,6 +252,89 @@ app.get('/api/uploads/:name', async (c) => {
     'Content-Type': found.contentType,
     'Cache-Control': 'public, max-age=86400',
   });
+});
+
+/* ------------------------------------------- private media (Dibbs offers) */
+
+app.on('POST', '/api/private-media', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
+app.on('GET', '/api/private-media/:id', rateLimit('uploads.view', env.rateLimitPhotoViewsPerMinute, 60_000));
+
+/**
+ * Upload a photo or short video for a "Get a Dibbs offer" request. Stored
+ * privately and returned as an id; the request claims it on submit. Only the
+ * uploader (and, once attached, Dibbs staff) can ever get a link to it.
+ */
+app.post('/api/private-media', async (c) => {
+  const user = await userFromAuthHeader(c.req.header('authorization'));
+  if (!user) return c.json({ error: 'Sign in to upload.' }, 401);
+  const declared = Number(c.req.header('content-length') ?? 0);
+  if (declared > PRIVATE_VIDEO_MAX_BYTES + 1024 * 1024) {
+    return c.json({ error: 'That file is too large. Videos can be up to 50 MB and photos up to 8 MB.' }, 413);
+  }
+  const recent = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(dibbsOfferMedia)
+    .where(and(eq(dibbsOfferMedia.uploaderId, user.id), gte(dibbsOfferMedia.createdAt, new Date(Date.now() - 86_400_000))));
+  if ((recent[0]?.n ?? 0) >= MAX_UNATTACHED_UPLOADS_PER_DAY) {
+    return c.json({ error: 'You’ve uploaded a lot today. Try again tomorrow.' }, 429);
+  }
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ error: 'That upload was not a valid multipart form.' }, 400);
+  }
+  const file = form.get('file');
+  if (!(file instanceof File)) return c.json({ error: 'Attach a photo or video in the "file" field.' }, 400);
+  try {
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const media = validatePrivateMedia(bytes, file.type || '');
+    const key = newPrivateKey(media.ext);
+    await putPrivate(key, bytes, media.contentType);
+    const [row] = await db
+      .insert(dibbsOfferMedia)
+      .values({
+        uploaderId: user.id,
+        kind: media.kind,
+        contentType: media.contentType,
+        storageKey: key,
+        bytes: bytes.byteLength,
+        durationMs: media.durationMs,
+      })
+      .returning();
+    return c.json({ id: row!.id, kind: media.kind, durationMs: media.durationMs, url: signedMediaPath(row!.id) });
+  } catch (err) {
+    if (err instanceof PrivateMediaError) return c.json({ error: err.message }, err.status);
+    console.error('[private-media] upload failed');
+    return c.json({ error: 'That upload could not be saved. Try again.' }, 500);
+  }
+});
+
+/** Serves private media only with a valid, unexpired signature. Supports Range for video playback. */
+app.get('/api/private-media/:id', async (c) => {
+  const id = c.req.param('id');
+  const noStore = { 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
+  if (!/^[0-9a-f-]{36}$/.test(id) || !verifySignedMedia(id, c.req.query('e'), c.req.query('s'))) {
+    return c.json({ error: 'This link has expired. Reopen the request to see it.' }, 403, noStore);
+  }
+  const [row] = await db.select().from(dibbsOfferMedia).where(eq(dibbsOfferMedia.id, id)).limit(1);
+  const bytes = row ? await getPrivate(row.storageKey) : null;
+  if (!row || !bytes) return c.json({ error: 'Not found' }, 404, noStore);
+  const headers = { ...noStore, 'Content-Type': row.contentType, 'Accept-Ranges': 'bytes', 'Content-Disposition': 'inline' };
+  const range = /^bytes=(\d*)-(\d*)$/.exec(c.req.header('range') ?? '');
+  if (range && (range[1] || range[2])) {
+    const size = bytes.byteLength;
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start >= size || start > end) {
+      return c.body(null, 416, { ...headers, 'Content-Range': `bytes */${size}` });
+    }
+    return c.body(bytes.subarray(start, end + 1) as unknown as ArrayBuffer, 206, {
+      ...headers,
+      'Content-Range': `bytes ${start}-${end}/${size}`,
+    });
+  }
+  return c.body(bytes as unknown as ArrayBuffer, 200, headers);
 });
 
 app.use(

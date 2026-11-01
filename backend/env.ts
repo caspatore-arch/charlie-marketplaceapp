@@ -84,6 +84,41 @@ export const env = {
       .map((id) => id.trim())
       .filter(Boolean);
   },
+  /* --------------------------------------------- Dibbs offer requests */
+
+  /**
+   * App accounts allowed to review "Get a Dibbs offer" requests and act as
+   * the Dibbs buying team. Separate from MODERATOR_USER_IDS on purpose.
+   */
+  get dibbsStaffUserIds(): string[] {
+    return (process.env.DIBBS_STAFF_USER_IDS ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+  },
+  /** Team inbox for new-request alerts. Unset = alerts are skipped (requests are still saved). */
+  get dibbsOffersEmail(): string | undefined {
+    const v = process.env.DIBBS_OFFERS_EMAIL?.trim();
+    return v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : undefined;
+  },
+  /** Website origin used for links in emails. */
+  get webBaseUrl(): string {
+    return (process.env.EXPO_PUBLIC_WEB_BASE_URL ?? 'https://trydibbs.com').replace(/\/$/, '');
+  },
+  /** HMAC key for private media links. Unset = a random key per process (links then die on restart, which is safe). */
+  get privateMediaSecret(): string | undefined {
+    const v = process.env.PRIVATE_MEDIA_SECRET?.trim();
+    return v && v.length >= 32 ? v : undefined;
+  },
+  get privateUploadsDir(): string {
+    return process.env.PRIVATE_UPLOADS_DIR ?? 'backend/data/private-uploads';
+  },
+  /** Separate bucket for private media. Required when S3_PUBLIC_BASE_URL makes the main bucket public. */
+  get s3PrivateBucket(): string | undefined {
+    const v = process.env.S3_PRIVATE_BUCKET?.trim();
+    return v ? v : undefined;
+  },
+
   /* ------------------------------------------------- listing autofill AI */
 
   /**

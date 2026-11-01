@@ -162,8 +162,9 @@ Owner's explicit operating rules persist:
 - Saved-search alerts, collections, richer discovery, product previews and campus
   “Wanted” improvements are research recommendations, not approved build scope.
   Compare against existing Community functionality before proposing duplicate work.
-- Consumer slides describe a team-offer feature as planned; do not present it as
-  implemented. Slides and logo/research work are supporting assets, not release proof.
+- Consumer slides describe a team-offer feature. Since 2026-11-01 it exists as local,
+  uncommitted, undeployed code ("Get a Dibbs offer", below); do not present it as live.
+  Slides and logo/research work are supporting assets, not release proof.
 - SMS carrier registration/consent and STOP-sync work, real payments, payout policy,
   geocoding provider choice, push delivery and scaled rate limiting remain separate
   integration decisions; confirm current code and deployment before declaring gaps closed.
@@ -252,4 +253,41 @@ Open items for the owner:
 - The draft Terms/Privacy wording was updated to match (posts and archived listings do not expire), but retention (`DATA_RETENTION_PERIOD`) and deletion promises still need the founder's and a lawyer's review (`docs/LEGAL-TODO.md`).
 - `docs/OVERHAUL.md` was not touched: the coordinator should record this decision there.
 - Native (iPhone) not run: no Xcode on this machine.
+
+## November 1 "Get a Dibbs offer" (local, uncommitted, not deployed)
+
+Owner request: Dibbs buys items directly from students. Staff review each request by hand and send offers; no automatic or AI pricing. Behavior is specified in `docs/CONTRACT.md` ("Dibbs offer requests"). Nothing is committed, pushed or deployed; no hosted database has been migrated (adds migration `0021_dibbs_offer_requests`, additive only).
+
+What exists:
+- Sell now starts with two choices: "List on Dibbs" (the unchanged listing flow, plus an optional, unchecked "Also get a Dibbs offer") and "Get a Dibbs offer" (a private request: photos or one short video, item name, optional condition/specs/description, no asking price).
+- A private request page the seller can revisit from Profile, with updates, answers to questions, estimate response, campus meetup scheduling (same spots, 15-minute grid, 7-day horizon), explicit accept/decline of the final offer after inspection, and withdraw.
+- A staff queue in the app at `/staff/dibbs-offers` for accounts in `DIBBS_STAFF_USER_IDS`, with media, details, waiting time, status, linked listing, every action recorded by staff id, and a version check against conflicting updates. `/admin` shows counts and links to it (its shared password can't identify who acted).
+- Team alert email to `DIBBS_OFFERS_EMAIL` through the existing Resend adapter, via a durable retrying queue; seller emails and pushes for updates.
+- Private media is stored and served separately from public photos, by short-lived signed links only.
+- Listing and request for the same item share one lock (the listing's `reserved` status); the 24-hour Browse period, Archive and the normal booking flow are unchanged.
+
+Owner decisions still open (reversible defaults in code):
+- **Eligible categories**: none enforced (phones/electronics are examples only). No minimum purchase price.
+- **Staffed hours**: none shown or promised; copy says the team aims to reply quickly, not guaranteed.
+- **Payout method**: not integrated. Completing the handoff never means payment was sent; staff can record a payout made outside the app by hand. No live payments or payout provider.
+- **Offer validity**: estimates lapse after 48 hours unanswered (`DIBBS_ESTIMATE_VALID_MS` in `backend/dibbs/rules.ts`).
+- **Team inbox and staff accounts**: set `DIBBS_OFFERS_EMAIL` and `DIBBS_STAFF_USER_IDS` on Render before use. With R2 public access (`S3_PUBLIC_BASE_URL`), also create and set `S3_PRIVATE_BUCKET`, or private uploads are refused.
+- `docs/OVERHAUL.md` was not touched: the coordinator should record the new Sell choice there.
+
+Checks run on November 1, 2026, on throwaway local databases with simulated email (never the shared dev DB or production):
+- `npm run typecheck` passes; eslint on every new and changed file has no errors.
+- New `npm run test:dibbs-offers`: 218/218. It covers private access (other students get NOT_FOUND; non-staff get FORBIDDEN), media privacy (signed links only, tampered or expired links refused, private files unreachable via `/api/uploads`, type sniffing, the 30 s video limit, per-request limits), staff version conflicts and audit, estimate and final-offer version checks, duplicate requests, email queue retry/dedupe/skip, booking conflicts in both directions, hold and release, sold-elsewhere, estimate expiry, and leaks into feed, Archive, Community, profiles and listing pages.
+- Existing suites unchanged and passing: `test:workstreams` 44/44, `test:e2e` 17/17, `test:archive` 43, `test:engagement` 62, `test:comments` 24, `test:save` 9, `test:payments` 39, `test:geo` 6/6.
+- Browser (local web build, isolated backend, 375x812 and 1280x800), exercised end to end:
+  - Sell choice screen, then the private request form, with a real upload through `POST /api/private-media` and the confirmation.
+  - The staff queue and detail, sending a $450–$550 range with a confirm step and the staff name recorded.
+  - The seller's estimate view, agree to meet with the existing time picker and campus spots only, and "Waiting for Dibbs".
+  - List flow with the unchecked "Also get a Dibbs offer" box, and the Profile entry.
+  - The simulated team email contained the item, details and the sign-in-required review link.
+- Not run:
+  - Native iPhone (no Xcode).
+  - Real Resend delivery and the inline photo preview in a real inbox.
+  - A real video file from a phone camera (the duration parser is unit-tested with synthetic MP4 headers).
+  - `/admin` card visually (typechecked only).
+  - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 

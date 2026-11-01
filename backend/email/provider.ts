@@ -21,6 +21,8 @@ export interface EmailMessage {
   text: string;
   html?: string;
   idempotencyKey?: string;
+  /** Small files (base64). `contentId` lets the HTML show it inline as `cid:<contentId>`. */
+  attachments?: { filename: string; content: string; contentType?: string; contentId?: string }[];
 }
 
 export interface EmailProvider {
@@ -67,7 +69,23 @@ export class ResendEmailProvider implements EmailProvider {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.resendApiKey}`, 'Content-Type': 'application/json', ...(msg.idempotencyKey ? { 'Idempotency-Key': msg.idempotencyKey } : {}) },
-      body: JSON.stringify({ from: env.emailFrom, to: [msg.to], subject: msg.subject, text: msg.text, html: msg.html }),
+      body: JSON.stringify({
+        from: env.emailFrom,
+        to: [msg.to],
+        subject: msg.subject,
+        text: msg.text,
+        html: msg.html,
+        ...(msg.attachments?.length
+          ? {
+              attachments: msg.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                ...(a.contentType ? { content_type: a.contentType } : {}),
+                ...(a.contentId ? { content_id: a.contentId } : {}),
+              })),
+            }
+          : {}),
+      }),
       signal: AbortSignal.timeout(10_000),
     });
     const json = (await res.json().catch(() => ({}))) as { id?: string; message?: string; name?: string };

@@ -7,6 +7,7 @@ import { db, dbKind } from './db/client';
 import { resolveSmsMode } from './sms/provider';
 import { resolveEmailMode } from './email/provider';
 import { startBookingEmailDispatcher } from './email/bookings';
+import { startDibbsEmailDispatcher } from './dibbs/notify';
 import { startSmsDispatcher } from './sms/outbox';
 import { startRetentionSweeper } from './retention';
 import { env } from './env';
@@ -25,6 +26,7 @@ async function main() {
   await runMigrations();
   startSmsDispatcher(db);
   startBookingEmailDispatcher(db);
+  startDibbsEmailDispatcher(db);
   startRetentionSweeper(db);
 
   const port = env.port;

@@ -1082,3 +1082,187 @@ export const siteVisits = pgTable(
   },
   (t) => [primaryKey({ columns: [t.day, t.platform] })],
 );
+
+/* ------------------------------------------------- Dibbs offer requests */
+
+/**
+ * "Get a Dibbs offer": a student asks the Dibbs buying team to buy an item.
+ * Private between the seller and authorized staff (DIBBS_STAFF_USER_IDS);
+ * never part of Browse, Archive, profiles, Community, search or share pages.
+ * State machine and rules: docs/CONTRACT.md "Dibbs offer requests".
+ */
+export const dibbsOfferStatusEnum = pgEnum('dibbs_offer_status', [
+  'submitted', // waiting for the team (also after the seller answers a question)
+  'in_review', // a staff member started reviewing
+  'needs_info', // the team asked the seller a question
+  'offered', // an estimate (exact or range) is waiting for the seller
+  'meetup_proposed', // a campus meetup time is proposed, waiting for the other side
+  'meetup_confirmed', // both agreed on a time and place
+  'final_offer', // Dibbs inspected the item and made a final offer
+  'final_accepted', // the seller explicitly accepted the final offer
+  'completed', // the handoff happened (payment is tracked separately)
+  'declined', // the team politely declined
+  'seller_declined', // the seller turned down the estimate
+  'final_declined', // the seller turned down the final offer
+  'withdrawn', // the seller withdrew the request
+  'expired', // the estimate lapsed before the seller answered
+  'closed', // staff closed it with an outcome (no-show, sold elsewhere, ...)
+]);
+
+export const dibbsOfferRequests = pgTable(
+  'dibbs_offer_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sellerId: uuid('seller_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    campusId: uuid('campus_id')
+      .notNull()
+      .references(() => campuses.id),
+    /** Optional public listing for the same physical item ("Also get a Dibbs offer"). */
+    listingId: uuid('listing_id').references(() => listings.id, { onDelete: 'set null' }),
+    /** Client-generated id so a double tap or retry never creates two requests. */
+    clientRequestId: uuid('client_request_id').notNull(),
+    itemName: text('item_name').notNull(),
+    condition: conditionEnum('condition'),
+    specs: text('specs'),
+    description: text('description'),
+    status: dibbsOfferStatusEnum('status').notNull().default('submitted'),
+    /** Optimistic-concurrency counter: every change bumps it; staff actions must send the value they saw. */
+    version: integer('version').notNull().default(1),
+    /** Staff member who started the review (informational; the version check prevents conflicts). */
+    assignedStaffId: uuid('assigned_staff_id').references(() => users.id, { onDelete: 'set null' }),
+
+    /* Estimate (subject to inspection). Exact = low = high. */
+    estimateKind: text('estimate_kind'), // 'exact' | 'range'
+    estimateLowCents: integer('estimate_low_cents'),
+    estimateHighCents: integer('estimate_high_cents'),
+    /** Bumped on every estimate sent; the seller's answer must name the version they saw. */
+    estimateVersion: integer('estimate_version').notNull().default(0),
+    estimateSentAt: ts('estimate_sent_at'),
+    estimateExpiresAt: ts('estimate_expires_at'),
+
+    /* Campus meetup (same spots and 15-minute grid as listing meetups). */
+    meetupSpotId: uuid('meetup_spot_id').references(() => meetupSpots.id),
+    meetupStartsAt: ts('meetup_starts_at'),
+    meetupProposedBy: text('meetup_proposed_by'), // 'seller' | 'dibbs'
+    meetupConfirmedAt: ts('meetup_confirmed_at'),
+    /** True while this request holds its linked listing as 'reserved'. */
+    holdsListing: boolean('holds_listing').notNull().default(false),
+
+    /* Final offer after inspection; never accepted without the seller's explicit answer. */
+    finalOfferCents: integer('final_offer_cents'),
+    finalOfferVersion: integer('final_offer_version').notNull().default(0),
+    finalOfferSentAt: ts('final_offer_sent_at'),
+    finalAcceptedCents: integer('final_accepted_cents'),
+    finalAcceptedAt: ts('final_accepted_at'),
+
+    /* Handoff (meetup completion) — separate from payment. */
+    completedAt: ts('completed_at'),
+    /** Payout method is undecided; staff record a payout made outside the app by hand. */
+    payoutStatus: text('payout_status').notNull().default('not_recorded'), // 'not_recorded' | 'recorded_outside_app'
+    payoutRecordedAt: ts('payout_recorded_at'),
+    closedOutcome: text('closed_outcome'),
+
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('dibbs_offer_requests_client_uq').on(t.sellerId, t.clientRequestId),
+    // One open request per public listing.
+    uniqueIndex('dibbs_offer_requests_open_listing_uq')
+      .on(t.listingId)
+      .where(
+        sql`${t.listingId} is not null and ${t.status} not in ('completed','declined','seller_declined','final_declined','withdrawn','expired','closed')`,
+      ),
+    index('dibbs_offer_requests_seller_idx').on(t.sellerId, t.createdAt),
+    index('dibbs_offer_requests_status_idx').on(t.status, t.createdAt),
+    check(
+      'dibbs_offer_estimate_valid',
+      sql`(${t.estimateLowCents} is null and ${t.estimateHighCents} is null) or (
+        ${t.estimateLowCents} > 0 and ${t.estimateHighCents} >= ${t.estimateLowCents}
+      )`,
+    ),
+    check('dibbs_offer_final_positive', sql`${t.finalOfferCents} is null or ${t.finalOfferCents} > 0`),
+  ],
+);
+
+/** Photos and short videos for a request. Stored privately; served only by signed, short-lived URLs. */
+export const dibbsOfferMedia = pgTable(
+  'dibbs_offer_media',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    uploaderId: uuid('uploader_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Null until a request (or a reply to a question) claims the upload. */
+    requestId: uuid('request_id').references(() => dibbsOfferRequests.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(), // 'image' | 'video'
+    contentType: text('content_type').notNull(),
+    storageKey: text('storage_key').notNull().unique(),
+    bytes: integer('bytes').notNull(),
+    durationMs: integer('duration_ms'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('dibbs_offer_media_request_idx').on(t.requestId, t.sortOrder),
+    index('dibbs_offer_media_uploader_idx').on(t.uploaderId, t.createdAt),
+  ],
+);
+
+/** Append-only audit trail: who did what, and what the seller may see. */
+export const dibbsOfferEvents = pgTable(
+  'dibbs_offer_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => dibbsOfferRequests.id, { onDelete: 'cascade' }),
+    actorKind: text('actor_kind').notNull(), // 'seller' | 'staff' | 'system'
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    kind: text('kind').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status'),
+    message: text('message'),
+    /** Amounts, spot and time for estimate/final/meetup events. */
+    amountLowCents: integer('amount_low_cents'),
+    amountHighCents: integer('amount_high_cents'),
+    spotId: uuid('spot_id'),
+    startsAt: ts('starts_at'),
+    /** False for staff-only notes. */
+    visibleToSeller: boolean('visible_to_seller').notNull().default(true),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('dibbs_offer_events_request_idx').on(t.requestId, t.createdAt)],
+);
+
+/**
+ * Durable email queue for Dibbs offer requests (team alerts and seller
+ * updates). Same pattern as booking_emails: unique dedupe key, SKIP LOCKED
+ * claims, backoff retries, recipient resolved at send time.
+ */
+export const dibbsOfferNotifications = pgTable(
+  'dibbs_offer_notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => dibbsOfferRequests.id, { onDelete: 'cascade' }),
+    audience: text('audience').notNull(), // 'team' | 'seller'
+    kind: text('kind').notNull(),
+    /** The request version (estimate version for estimates) this message describes. */
+    refVersion: integer('ref_version').notNull().default(0),
+    dedupeKey: text('dedupe_key').notNull().unique(),
+    status: text('status').notNull().default('scheduled'), // scheduled | sending | sent | failed | skipped
+    attempts: integer('attempts').notNull().default(0),
+    sendAfter: ts('send_after').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [index('dibbs_offer_notifications_due_idx').on(t.status, t.sendAfter)],
+);
+
+export type DibbsOfferRequest = typeof dibbsOfferRequests.$inferSelect;
+export type DibbsOfferStatus = DibbsOfferRequest['status'];
+export type DibbsOfferMedia = typeof dibbsOfferMedia.$inferSelect;
+export type DibbsOfferEvent = typeof dibbsOfferEvents.$inferSelect;

@@ -9,6 +9,7 @@ import {
   communityComments,
   emailCodes,
   communityPosts,
+  dibbsOfferRequests,
   follows,
   listings,
   offers,
@@ -19,6 +20,7 @@ import {
   sessions,
   users,
 } from '../../db/schema';
+import { OPEN_STATUSES } from '../../dibbs/rules';
 import { postingStatus } from '../../auth/posting-access';
 import { cancelUserSms } from '../../sms/outbox';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
@@ -614,6 +616,22 @@ export const userRouter = router({
             message: 'Finish or cancel your open meetups before closing your account.',
           });
         }
+        const [openDibbsMeetup] = await tx
+          .select({ id: dibbsOfferRequests.id })
+          .from(dibbsOfferRequests)
+          .where(
+            and(
+              eq(dibbsOfferRequests.sellerId, userId),
+              inArray(dibbsOfferRequests.status, ['meetup_confirmed', 'final_offer', 'final_accepted']),
+            ),
+          )
+          .limit(1);
+        if (openDibbsMeetup) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Finish or cancel your meetup with Dibbs before closing your account.',
+          });
+        }
 
         const now = new Date();
 
@@ -652,6 +670,11 @@ export const userRouter = router({
           .set({ removedAt: now, removedById: userId })
           .where(and(eq(communityPosts.authorId, userId), sql`${communityPosts.removedAt} is null`));
         await tx.delete(phoneCodes).where(eq(phoneCodes.userId, userId));
+        // Open Dibbs offer requests end with the account (their private media stays staff-only).
+        await tx
+          .update(dibbsOfferRequests)
+          .set({ status: 'withdrawn', holdsListing: false, updatedAt: now, version: sql`${dibbsOfferRequests.version} + 1` })
+          .where(and(eq(dibbsOfferRequests.sellerId, userId), inArray(dibbsOfferRequests.status, [...OPEN_STATUSES])));
 
         await tx
           .update(listings)

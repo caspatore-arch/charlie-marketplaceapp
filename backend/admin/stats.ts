@@ -7,11 +7,12 @@
  *
  * "Real" accounts exclude seeded demo users and closed (anonymized) accounts.
  */
-import { and, count, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import { env } from '../env';
 import { db, dbKind } from '../db/client';
-import { communityPosts, listings, messages, users } from '../db/schema';
+import { communityPosts, dibbsOfferRequests, listings, messages, users } from '../db/schema';
+import { OPEN_STATUSES } from '../dibbs/rules';
 import { resolveEmailMode } from '../email/provider';
 import { getVisitStats } from './visits';
 
@@ -55,6 +56,31 @@ function photoStorageLabel(): { provider: string; location: string } {
         ? 'S3-compatible storage'
         : 'Amazon S3';
   return { provider, location: `bucket "${env.s3Bucket}"${env.s3Region ? ` (${env.s3Region})` : ''}` };
+}
+
+/**
+ * "Get a Dibbs offer" queue, counts only (requests are private to the seller
+ * and staff, so no item names or people here). Staff review in the app.
+ */
+async function dibbsOfferCounts() {
+  const waiting = ['submitted', 'in_review', 'meetup_proposed', 'meetup_confirmed', 'final_accepted'] as const;
+  const [[open], [needsAction], [oldest]] = await Promise.all([
+    db.select({ n: count() }).from(dibbsOfferRequests).where(inArray(dibbsOfferRequests.status, [...OPEN_STATUSES])),
+    db.select({ n: count() }).from(dibbsOfferRequests).where(inArray(dibbsOfferRequests.status, [...waiting])),
+    db
+      .select({ at: sql<Date | null>`min(${dibbsOfferRequests.createdAt})` })
+      .from(dibbsOfferRequests)
+      .where(inArray(dibbsOfferRequests.status, ['submitted', 'in_review'])),
+  ]);
+  const oldestAt = oldest?.at ? new Date(oldest.at) : null;
+  return {
+    open: Number(open!.n),
+    needsAction: Number(needsAction!.n),
+    oldestWaitingMinutes: oldestAt ? Math.max(0, Math.round((Date.now() - oldestAt.getTime()) / 60_000)) : null,
+    reviewUrl: `${env.webBaseUrl}/staff/dibbs-offers`,
+    staffAccounts: env.dibbsStaffUserIds.length,
+    teamEmailConfigured: !!env.dibbsOffersEmail,
+  };
 }
 
 export async function getAdminStats() {
@@ -120,6 +146,7 @@ export async function getAdminStats() {
       ctx.db.select({ n: count() }).from(messages),
       getVisitStats(DAYS),
     ]);
+    const dibbsOffers = await dibbsOfferCounts();
 
     // Fill gaps so the chart always shows all 30 days, zeros included.
     const byDay = new Map(daily.map((d) => [d.day, Number(d.n)]));
@@ -153,6 +180,7 @@ export async function getAdminStats() {
         communityPosts: Number(postCount!.n),
         messages: Number(messageCount!.n),
       },
+      dibbsOffers,
       storage: {
         database: databaseLabel(),
         photos: photoStorageLabel(),

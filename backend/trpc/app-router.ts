@@ -4,6 +4,7 @@ import { bidRouter } from './routes/bid';
 import { campusRouter } from './routes/campus';
 import { communityRouter } from './routes/community';
 import { conversationRouter } from './routes/conversation';
+import { dibbsOfferRouter, dibbsStaffRouter } from './routes/dibbsOffer';
 import { listingRouter } from './routes/listing';
 import { listingCommentRouter } from './routes/listingComment';
 import { moderationRouter } from './routes/moderation';
@@ -27,6 +28,8 @@ export const appRouter = router({
   payment: paymentRouter,
   moderation: moderationRouter,
   notification: notificationRouter,
+  dibbsOffer: dibbsOfferRouter,
+  dibbsStaff: dibbsStaffRouter,
 });
 
 export type AppRouter = typeof appRouter;
