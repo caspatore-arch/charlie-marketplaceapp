@@ -11,17 +11,18 @@
  * instead of filling in a whole listing only to be refused on Publish. A
  * blocked account gets a plain "can't sell" note instead.
  *
- * After those gates, a two-card choice comes first: "List on Dibbs" (this
- * form) or "Get a Dibbs offer" (private request, /dibbs-offer/new). `?mode=list`
- * skips the choice. The list form has an unchecked "Also get a Dibbs offer"
- * box: if ticked, `dibbsOffer.create` runs after the listing publishes, and a
- * failure there never undoes the listing.
+ * After those gates, a three-card choice comes first: "List on Dibbs" (this
+ * form), "Get a Dibbs offer" (private request, /dibbs-offer/new), or "Do both"
+ * (this form with "Also get a Dibbs offer" already ticked). `?mode=list` and
+ * `?mode=both` skip the choice. Plain listing keeps the box unticked: if
+ * ticked, `dibbsOffer.create` runs after the listing publishes, and a failure
+ * there never undoes the listing.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Crypto from 'expo-crypto';
-import { ChevronRight, Send, Tag } from 'lucide-react-native';
+import { ChevronRight, Layers, Send, Tag } from 'lucide-react-native';
 import { Text } from '@/components/ui/Text';
 import { Card } from '@/components/ui/Card';
 import { CampusEmailVerify } from '@/components/auth/CampusEmailVerify';
@@ -66,10 +67,11 @@ export default function NewListingScreen() {
   const [tipsReplay, setTipsReplay] = useState(0);
   // `?mode=list` skips the choice and goes straight to the public listing form.
   const { mode: modeParam } = useLocalSearchParams<{ mode?: string }>();
-  const [mode, setMode] = useState<'choose' | 'list'>(modeParam === 'list' ? 'list' : 'choose');
+  const [mode, setMode] = useState<'choose' | 'list'>(modeParam === 'list' || modeParam === 'both' ? 'list' : 'choose');
   // "Also get a Dibbs offer": unchecked by default. One request id per form,
   // so a retry can never create a second request.
-  const [alsoDibbs, setAlsoDibbs] = useState(false);
+  // Only "Do both" starts this ticked; plain "List on Dibbs" leaves it unticked.
+  const [alsoDibbs, setAlsoDibbs] = useState(modeParam === 'both');
   const alsoDibbsAtSubmit = useRef(false);
   const [dibbsRequestId] = useState(() => Crypto.randomUUID());
   const dibbsCreate = trpc.dibbsOffer.create.useMutation();
@@ -235,6 +237,26 @@ export default function NewListingScreen() {
             <Text variant="bodySm" color="inkMuted">
               Send photos privately to the Dibbs team and get an estimate. Nothing is posted publicly, and you can say
               no at any point.
+            </Text>
+          </View>
+          <ChevronRight size={20} color={colors.inkFaint} />
+        </Card>
+        <Card
+          onPress={() => {
+            setAlsoDibbs(true);
+            setMode('list');
+          }}
+          style={styles.choiceCard}
+          accessibilityLabel="Do both. List it for everyone on campus and also send it privately to the Dibbs team for an estimate."
+        >
+          <View style={styles.choiceIcon}>
+            <Layers size={22} color={colors.accentInk} />
+          </View>
+          <View style={styles.choiceText}>
+            <Text variant="heading">Do both</Text>
+            <Text variant="bodySm" color="inkMuted">
+              List it for everyone and also get a private Dibbs estimate. Once a meetup is confirmed either way, the
+              other goes on hold, since it&apos;s the same item.
             </Text>
           </View>
           <ChevronRight size={20} color={colors.inkFaint} />
