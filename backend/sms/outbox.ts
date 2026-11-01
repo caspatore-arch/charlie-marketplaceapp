@@ -31,6 +31,7 @@
 import { and, eq, inArray, lt, lte, sql } from 'drizzle-orm';
 
 import type { Db } from '../db/client';
+import { setInterval } from '../lib/timers';
 import {
   campuses,
   listings,

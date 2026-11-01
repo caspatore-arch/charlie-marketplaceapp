@@ -253,3 +253,41 @@ Open items for the owner:
 - `docs/OVERHAUL.md` was not touched: the coordinator should record this decision there.
 - Native (iPhone) not run: no Xcode on this machine.
 
+## November 1 typecheck fix (daily build)
+
+`npm run typecheck` was red on `main`: `backend/email/bookings.ts`,
+`backend/retention.ts` (twice) and `backend/sms/outbox.ts` called
+`setInterval`/`setTimeout` and then `.unref()` on the result, but the shared
+`tsconfig.json` extends Expo's base config, which sets `"lib": ["DOM",
+"ESNext"]`. That makes the ambient `setInterval`/`setTimeout` resolve to the
+browser overload (returns `number`), not Node's (`NodeJS.Timeout`, which has
+`.unref()`). Four prior unmerged draft PRs (#2, #4, #6, #8, going back to
+October 22) hit the same error in different files and patched it with a cast
+at that one call site each time; none were merged, so the next backend timer
+added anywhere would trip the same error again, as it did here.
+
+Fix: added `backend/lib/timers.ts`, a small wrapper that re-exports
+`setInterval`/`setTimeout` from `node:timers` with an explicit `NodeJS.Timeout`
+return type (one cast, in one place, documented), and pointed the three
+backend files at it instead of the ambient globals. No tsconfig change, no
+dependency bump, no behavior change — same intervals, same `.unref()` calls.
+
+Verified on `main` plus this change, same sandbox pattern as other entries
+here (throwaway `PGLITE_DIR`, never the shared dev DB):
+- `npm run typecheck`: clean (was 4 errors).
+- `npm run lint`: unchanged — the 17 pre-existing errors are all in
+  `components/ui/Skeleton.tsx` and unrelated files; none touch the files
+  changed here.
+- `npm run test:e2e`: 17/17. `npm run test:geo`: 6/6. `npx tsx
+  scripts/payments-check.ts`: 39/39. `npm run test:workstreams`: 44/44.
+
+Not verified: native/device (no Xcode on this machine, as with every other
+entry here); this change touches no client code so that risk is low. Opened
+as PR `daily-build/fix-timer-typecheck`, not merged to `main`.
+
+Open item for whoever reviews the backlog of unmerged daily-build PRs
+(#2, #4, #6, #8, #9, #10 as of today): several target the same small set of
+files and overlap or duplicate each other (two separate "email moderators on
+report" PRs, four separate typecheck fixes for the same root cause). Closing
+the superseded ones before merging would avoid conflicts.
+

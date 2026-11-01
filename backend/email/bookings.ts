@@ -1,8 +1,9 @@
 import { and, eq, inArray, lt, lte } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { bookingEmails, campuses, listings, meetupSpots, reservations, users } from '../db/schema';
-import { emailProvider } from './provider';
 import { env } from '../env';
+import { setInterval } from '../lib/timers';
+import { emailProvider } from './provider';
 
 /** Run inside the booking transaction, so a committed booking always has its queue rows. */
 export async function enqueueBookingEmails(db: Db, reservation: typeof reservations.$inferSelect) {
