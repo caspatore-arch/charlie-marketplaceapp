@@ -154,7 +154,7 @@ user.updateMe         P    { displayName?, avatarUrl?, bio? } → User
 user.block            P    { userId }               → { ok }
 user.unblock          P    { userId }               → { ok }
 user.blocked          P    –                        → PublicProfile[]
-user.report           P    { targetUserId?, targetListingId?, reason, details? } → { ok }
+user.report           P    { targetUserId?, targetListingId?, reason, details? } → { ok }   (also emails every `MODERATOR_USER_IDS` moderator with an address on file; best-effort, never fails the report)
 user.deleteAccount    P    { confirmText: 'DELETE' }        → { ok: true }   (see "Account closure" below)
 
 payment.quote         pub  { priceCents }           → { priceCents, platformFeeCents, sellerNetCents, feePercent, simulated: true, label: 'Simulated — no money moves' }
@@ -422,7 +422,7 @@ community.feed         P  { kind?, cursor?, limit? (1–50, default 20) } → { 
 community.byId         P  { id }                       → one item (same shape)
 community.create       C  { kind, body }               → item
 community.remove       P  { id }                       → { ok }   author only; sets removedAt/removedById
-community.report       P  { id, reason, details? }     → { ok }   inserts a `reports` row with targetPostId and targetUserId = author; not your own post
+community.report       P  { id, reason, details? }     → { ok }   inserts a `reports` row with targetPostId and targetUserId = author; not your own post; same moderator email alert as `user.report`
 community.moderatorRemove M { id }                     → { ok }   takedown from the moderation queue
 ```
 `reports.targetPostId` -> `community_posts` (cascade). Reports enter the same moderation queue.
