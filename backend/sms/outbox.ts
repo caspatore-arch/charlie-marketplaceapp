@@ -41,6 +41,7 @@ import {
   type User,
 } from '../db/schema';
 import { env } from '../env';
+import { setInterval } from '../lib/timers';
 import { smsProvider, SmsSendError } from './provider';
 
 export const REMINDER_LEAD_MS = 30 * 60 * 1000;
