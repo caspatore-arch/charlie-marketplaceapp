@@ -63,9 +63,9 @@ import { campusVerifiedProcedure, protectedProcedure, router } from '../trpc';
 
 /* ------------------------------------------------------------ procedures */
 
-/** Signed-in account listed in DIBBS_STAFF_USER_IDS. */
+/** Signed-in account listed in DIBBS_STAFF_USER_IDS or DIBBS_STAFF_EMAILS. */
 const staffProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (!isDibbsStaff(ctx.user.id)) {
+  if (!isDibbsStaff(ctx.user)) {
     throw new TRPCError({ code: 'FORBIDDEN', message: 'Dibbs staff access required.' });
   }
   return next({ ctx });
@@ -906,7 +906,7 @@ async function runStaffAction(db: Db, staffId: string, id: string, expectedVersi
 
 export const dibbsStaffRouter = router({
   /** Lets the app show the staff queue entry; false for everyone else. */
-  amI: protectedProcedure.query(({ ctx }) => ({ isStaff: isDibbsStaff(ctx.user.id) })),
+  amI: protectedProcedure.query(({ ctx }) => ({ isStaff: isDibbsStaff(ctx.user) })),
 
   queue: staffProcedure
     .input(z.object({ filter: z.enum(['open', 'action', 'closed', 'all']).default('open') }))

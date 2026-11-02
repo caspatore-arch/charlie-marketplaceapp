@@ -219,7 +219,7 @@ function render(s) {
     $('do-open').textContent = fmtN(d.open);
     $('do-oldest').textContent = mins == null ? '—' : mins < 60 ? mins + ' min' : mins < 2880 ? Math.round(mins / 60) + ' h' : Math.round(mins / 1440) + ' d';
     const setup = [];
-    if (!d.staffAccounts) setup.push('No staff accounts yet: set DIBBS_STAFF_USER_IDS on the server.');
+    if (!d.staffAccounts) setup.push('No staff accounts yet: set DIBBS_STAFF_EMAILS (or DIBBS_STAFF_USER_IDS) on the server.');
     if (!d.teamEmailConfigured) setup.push('Team email alerts are off: set DIBBS_OFFERS_EMAIL on the server.');
     $('do-setup').textContent = setup.join(' ');
     $('do-link').href = d.reviewUrl;

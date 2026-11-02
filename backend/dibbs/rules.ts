@@ -50,8 +50,17 @@ export const PROPOSE_MEETUP_FROM: readonly DibbsOfferStatus[] = ['offered', 'mee
 /** States the seller may withdraw from: anything open before the handoff is recorded. */
 export const WITHDRAW_FROM: readonly DibbsOfferStatus[] = OPEN_STATUSES;
 
-export function isDibbsStaff(userId: string | null | undefined): boolean {
-  return !!userId && env.dibbsStaffUserIds.includes(userId);
+/**
+ * Staff = an open account listed in DIBBS_STAFF_USER_IDS, or whose stored
+ * (code-verified) sign-in email is in DIBBS_STAFF_EMAILS.
+ */
+export function isDibbsStaff(
+  user: { id: string; email?: string | null; deletedAt?: Date | null } | null | undefined,
+): boolean {
+  if (!user || user.deletedAt) return false;
+  if (env.dibbsStaffUserIds.includes(user.id)) return true;
+  const email = user.email?.trim().toLowerCase();
+  return !!email && env.dibbsStaffEmails.includes(email);
 }
 
 /** Who the seller is waiting on, for list badges. */

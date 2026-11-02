@@ -96,6 +96,17 @@ export const env = {
       .map((id) => id.trim())
       .filter(Boolean);
   },
+  /**
+   * Staff by sign-in email instead of user id (either list grants access).
+   * Safe because an account's email is only ever stored after a code proved
+   * the inbox (backend/trpc/routes/auth.ts). Lowercased; invalid entries dropped.
+   */
+  get dibbsStaffEmails(): string[] {
+    return (process.env.DIBBS_STAFF_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  },
   /** Team inbox for new-request alerts. Unset = alerts are skipped (requests are still saved). */
   get dibbsOffersEmail(): string | undefined {
     const v = process.env.DIBBS_OFFERS_EMAIL?.trim();

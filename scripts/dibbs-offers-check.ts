@@ -747,6 +747,25 @@ async function main() {
   await dispatchDibbsEmails(db, new Date(Date.now() + 1000));
   check('a seller email whose request moved on (seller already declined) is skipped', (await rowsFor(RN5.id)).filter((r) => r.audience === 'seller').every((r) => r.status === 'skipped') && !provider.sent.some((m) => m.subject.includes('Notif Camera Epsilon') && m.to === emailOf(S3)));
 
+  // ---------------------------------------------------- staff by sign-in email
+  {
+    const { isDibbsStaff } = await import('../backend/dibbs/rules');
+    const before = await (await as(OTHER)).dibbsStaff.amI();
+    check('without DIBBS_STAFF_EMAILS, a non-listed account is not staff', before.isStaff === false);
+    // Mixed case and spaces in the setting still match the stored (lowercased) email.
+    process.env.DIBBS_STAFF_EMAILS = ` ${emailOf(OTHER).toUpperCase()} , not-an-email, someone@else.test `;
+    const other = await as(OTHER);
+    check('DIBBS_STAFF_EMAILS grants staff access by sign-in email (case-insensitive)', (await other.dibbsStaff.amI()).isStaff === true);
+    const q = await other.dibbsStaff.queue({ filter: 'all' });
+    check('an email-listed staff member can open the queue', Array.isArray(q) && q.length > 0, String(q.length));
+    await rejects('an account with a different email is still refused', () => s1.dibbsStaff.queue({ filter: 'open' }), 'FORBIDDEN');
+    check('an account with no email never matches', isDibbsStaff({ id: NOPOST, email: null }) === false);
+    check('a closed account never counts as staff, even if its email is listed', isDibbsStaff({ id: OTHER, email: emailOf(OTHER), deletedAt: new Date() }) === false);
+    check('user-id staff keep working alongside the email list', (await staffA.dibbsStaff.amI()).isStaff === true);
+    delete process.env.DIBBS_STAFF_EMAILS;
+    await rejects('removing the email from the setting removes access', () => other.dibbsStaff.queue({ filter: 'open' }), 'FORBIDDEN');
+  }
+
   await pglite?.close();
   console.log(`\n${passes} passed, ${failures} failed`);
   process.exit(failures ? 1 : 0);

@@ -78,7 +78,7 @@ async function dibbsOfferCounts() {
     needsAction: Number(needsAction!.n),
     oldestWaitingMinutes: oldestAt ? Math.max(0, Math.round((Date.now() - oldestAt.getTime()) / 60_000)) : null,
     reviewUrl: `${env.webBaseUrl}/staff/dibbs-offers`,
-    staffAccounts: env.dibbsStaffUserIds.length,
+    staffAccounts: env.dibbsStaffUserIds.length + env.dibbsStaffEmails.length,
     teamEmailConfigured: !!env.dibbsOffersEmail,
   };
 }

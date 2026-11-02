@@ -254,14 +254,23 @@ Open items for the owner:
 - `docs/OVERHAUL.md` was not touched: the coordinator should record this decision there.
 - Native (iPhone) not run: no Xcode on this machine.
 
-## November 1 "Get a Dibbs offer" (local, uncommitted, not deployed)
+## November 1 "Get a Dibbs offer" (on main; API live, website pending)
 
-Owner request: Dibbs buys items directly from students. Staff review each request by hand and send offers; no automatic or AI pricing. Behavior is specified in `docs/CONTRACT.md` ("Dibbs offer requests"). Nothing is committed, pushed or deployed; no hosted database has been migrated (adds migration `0021_dibbs_offer_requests`, additive only).
+Owner request: Dibbs buys items directly from students. Staff review each request by hand and send offers; no automatic or AI pricing. Behavior is specified in `docs/CONTRACT.md` ("Dibbs offer requests").
+
+Deployment status, verified November 1, 2026:
+- Merged to `main` on owner instruction (PR caspatore-arch/charlie-marketplaceapp#12, commits `f540178`, `9186ea0`).
+- Render deployed the API about 3 minutes later. Health is OK and migration `0021_dibbs_offer_requests` (additive) ran on Neon.
+- Checked live: new endpoints refuse unsigned or anonymous access, and Browse and Archive are unchanged.
+- **Website not updated.** Netlify skipped the production deploy ("account credit usage exceeded" for this billing cycle), so trydibbs.com still serves `main@4c8bf34` (Oct 28) without the new screens. Fix: owner upgrades the Netlify team or waits for the next cycle, then retries the skipped deploy. The PR's deploy preview shows the new screens.
+- Not yet usable in production:
+  - No staff are configured (`DIBBS_STAFF_EMAILS`), and team alerts are off (`DIBBS_OFFERS_EMAIL`).
+  - Private offer media sits on Render's disk, which is wiped on redeploy, until R2 is set up (`docs/R2-SETUP.md`).
 
 What exists:
 - Sell now starts with three choices: "List on Dibbs" (the unchanged listing flow, plus an optional, unchecked "Also get a Dibbs offer"), "Get a Dibbs offer" (a private request: photos or one short video, item name, optional condition/specs/description, no asking price), and "Do both" (owner request: the listing form with "Also get a Dibbs offer" already ticked; it can still be unticked).
 - A private request page the seller can revisit from Profile, with updates, answers to questions, estimate response, campus meetup scheduling (same spots, 15-minute grid, 7-day horizon), explicit accept/decline of the final offer after inspection, and withdraw.
-- A staff queue in the app at `/staff/dibbs-offers` for accounts in `DIBBS_STAFF_USER_IDS`, with media, details, waiting time, status, linked listing, every action recorded by staff id, and a version check against conflicting updates. `/admin` shows counts and links to it (its shared password can't identify who acted).
+- A staff queue in the app at `/staff/dibbs-offers` for accounts listed by sign-in email in `DIBBS_STAFF_EMAILS` (owner request, Nov 1) or by id in `DIBBS_STAFF_USER_IDS`, with media, details, waiting time, status, linked listing, every action recorded by staff id, and a version check against conflicting updates. `/admin` shows counts and links to it (its shared password can't identify who acted).
 - Team alert email to `DIBBS_OFFERS_EMAIL` through the existing Resend adapter, via a durable retrying queue; seller emails and pushes for updates.
 - Private media is stored and served separately from public photos, by short-lived signed links only.
 - Listing and request for the same item share one lock (the listing's `reserved` status); the 24-hour Browse period, Archive and the normal booking flow are unchanged.
@@ -271,7 +280,7 @@ Owner decisions still open (reversible defaults in code):
 - **Staffed hours**: none shown or promised; copy says the team aims to reply quickly, not guaranteed.
 - **Payout method**: not integrated. Completing the handoff never means payment was sent; staff can record a payout made outside the app by hand. No live payments or payout provider.
 - **Offer validity**: estimates lapse after 48 hours unanswered (`DIBBS_ESTIMATE_VALID_MS` in `backend/dibbs/rules.ts`).
-- **Team inbox and staff accounts**: set `DIBBS_OFFERS_EMAIL` and `DIBBS_STAFF_USER_IDS` on Render before use. With R2 public access (`S3_PUBLIC_BASE_URL`), also create and set `S3_PRIVATE_BUCKET`, or private uploads are refused.
+- **Team inbox and staff accounts**: set `DIBBS_OFFERS_EMAIL` and `DIBBS_STAFF_EMAILS` (staff sign-in emails) on Render before use. With R2 public access (`S3_PUBLIC_BASE_URL`), also create and set `S3_PRIVATE_BUCKET`, or private uploads are refused.
 - `docs/OVERHAUL.md` was not touched: the coordinator should record the new Sell choice there.
 
 Checks run on November 1, 2026, on throwaway local databases with simulated email (never the shared dev DB or production):
