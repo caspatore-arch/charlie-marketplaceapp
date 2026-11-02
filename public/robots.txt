@@ -1,0 +1,47 @@
+# Dibbs (https://trydibbs.com). Search engines and AI assistants are welcome.
+# Private, signed-in screens are listed below; they have nothing useful to index.
+
+User-agent: *
+Allow: /
+Disallow: /auth
+Disallow: /conversation
+Disallow: /inbox
+Disallow: /settings
+Disallow: /saved
+Disallow: /reservation
+Disallow: /payments
+Disallow: /moderation
+Disallow: /staff
+Disallow: /dibbs-offer
+Disallow: /concepts
+Disallow: /create-profile
+
+# AI crawlers, named so it's clear they are allowed (ChatGPT, Claude,
+# Perplexity, Google Gemini, Apple, Common Crawl).
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot
+User-agent: Applebot-Extended
+User-agent: CCBot
+Allow: /
+Disallow: /auth
+Disallow: /conversation
+Disallow: /inbox
+Disallow: /settings
+Disallow: /saved
+Disallow: /reservation
+Disallow: /payments
+Disallow: /moderation
+Disallow: /staff
+Disallow: /dibbs-offer
+Disallow: /concepts
+Disallow: /create-profile
+
+Sitemap: https://trydibbs.com/sitemap.xml

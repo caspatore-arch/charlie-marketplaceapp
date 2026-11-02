@@ -1,0 +1,19 @@
+# Dibbs
+
+> Dibbs is a campus marketplace for University of Arizona students in Tucson. Students list used items for 24 hours with an asking price, buyers make offers or book a time and a campus meetup spot, and both sides confirm the handoff in person.
+
+Dibbs is independent and is not run by the University of Arizona. Payment is arranged between buyer and seller; Dibbs does not offer buyer or seller payment protection.
+
+## Pages
+
+- [Browse listings](https://trydibbs.com/): what students are selling right now
+- [How Dibbs works](https://trydibbs.com/about): listing, booking a meetup, handing off
+- [Why Dibbs](https://trydibbs.com/why-dibbs): why a campus-only marketplace
+- [Terms](https://trydibbs.com/legal/terms)
+- [Privacy](https://trydibbs.com/legal/privacy)
+
+## Common uses
+
+- Selling dorm and apartment furniture at move-out
+- Buying used textbooks, bikes, scooters, mini fridges and electronics
+- Finding cheap move-in gear near campus

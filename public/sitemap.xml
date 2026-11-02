@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Public pages of trydibbs.com. Add new public pages here (docs/SEO.md). -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://trydibbs.com/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>https://trydibbs.com/about</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://trydibbs.com/why-dibbs</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://trydibbs.com/legal/terms</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://trydibbs.com/legal/privacy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+</urlset>

@@ -5,31 +5,20 @@
 import { Platform, type ViewStyle } from 'react-native';
 
 /**
- * Palette derived from the Dibbs logo (white brush script on vermilion).
+ * Palette taken from the Dibbs Instagram: white wordmark on navy.
  *
- * The logo red was sampled from the artwork itself, not guessed:
- * assets/branding/*.png decode to #ee362c / #ef3b2f / #ed4234 — the same
- * intended colour three times, with generation noise, since the marks were
- * produced by an image model rather than drawn as vectors. `brand` below is
- * the single canonical value; do not re-sample a PNG for a new one.
+ * The navy was sampled from the footer band of the Instagram post artwork
+ * (it decodes to #0D305B across the set), so `brand` is that value, not a
+ * guess. White on it is ~12:1, so unlike the old logo red there is no need to
+ * split a "brand" colour from an "interactive" one for contrast; both are the
+ * same navy and `accentPressed` darkens it for pressed states.
  *
- * THE RULE THAT SHAPES THIS WHOLE PALETTE: the logo red is NOT accessible as
- * a small-text background. White on #EE3B30 is 3.96:1 — fine for a logo and
- * for large text or graphics (3:1), but under the 4.5:1 WCAG AA floor for
- * normal-size text. So the red is split in two:
- *
- *   brand   #EE3B30  the real logo red. Splash, app icon, the logo lockup,
- *                    large brand surfaces. White on it only at display sizes.
- *   accent  #DE2F26  the interactive red: buttons, active tab, links. Deeper
- *                    by just enough to clear AA for white button labels
- *                    (4.63:1). Beside the brand red nobody reads them as two
- *                    colours, which is the point.
- *
- * Every value here was verified with a real contrast calculation, not by eye.
+ * Contrast notes: `accentInk` on `accentSoft` is ~11:1. Red is now used only
+ * for `danger`, which finally makes destructive actions look different from
+ * ordinary branded controls.
  */
 export const colors = {
-  // Warm near-white, biased very slightly red so the ground belongs to the
-  // brand rather than sitting under it as generic off-white.
+  // Near-white ground.
   bg: '#FCF8F7',
   surface: '#FFFFFF',
   surfaceMuted: '#F5F0EE',
@@ -46,27 +35,23 @@ export const colors = {
   inkFaint: '#6E6860',
   line: '#E8E1DE',
 
-  /** The literal logo red. Large text / graphics / brand surfaces only. */
-  brand: '#EE3B30',
-  /** Interactive red. White text on this is AA at any size (4.63:1). */
-  accent: '#DE2F26',
-  /** Pressed state for accent surfaces (5.72:1 with white). */
-  accentPressed: '#C4281F',
+  /** The Instagram navy. Brand surfaces, splash, logo lockup. */
+  brand: '#0D305B',
+  /** Interactive navy. White text on this is AA at any size (~12:1). */
+  accent: '#0D305B',
+  /** Pressed state for accent surfaces. */
+  accentPressed: '#09233F',
   /** Tinted background for accent chips and banners. */
-  accentSoft: '#FDEAE8',
-  /** Text/icons ON accentSoft. Plain `accent` on that tint is 3.99:1 — it
-   *  FAILS. Use this instead (6.28:1) anywhere red text sits on a red tint. */
-  accentInk: '#A82018',
+  accentSoft: '#E6EDF6',
+  /** Text/icons ON accentSoft. */
+  accentInk: '#0D305B',
 
   success: '#2E7D4F',
   successSoft: '#E4F3EA',
   warning: '#9A6B00',
   warningSoft: '#FBF1D6',
-  // Deliberately a darker, bluer crimson than `accent`. With a red brand, a
-  // destructive action can no longer be signalled by redness alone — it reads
-  // as just another branded control. Destructive affordances must therefore
-  // also carry an explicit verb ("Delete", "Cancel meetup") or an icon; this
-  // colour is a reinforcement, never the only signal.
+  // Destructive actions. Red is now reserved for this, but still pair it with
+  // an explicit verb ("Delete", "Cancel meetup") or icon, never colour alone.
   danger: '#9B1C1C',
   demo: '#5B4FCF',
   demoSoft: '#ECEAFB',
