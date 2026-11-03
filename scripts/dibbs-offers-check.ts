@@ -402,6 +402,48 @@ async function main() {
   const staffMediaGet = await getUrl(staffView.media[0]!.url);
   check('staff get working signed links for the request’s media', staffMediaGet.status === 200);
 
+  /* ============================== HEALTH: PRODUCTION CONFIG VISIBILITY ============================== */
+  console.log('\n# health reports whether Dibbs offers are actually usable');
+
+  const dibbsOffersHealth = async () => {
+    const body = (await (await app.request('/api/health')).json()) as {
+      dibbsOffers: { staffConfigured: boolean; teamInboxConfigured: boolean; privateMediaReady: boolean };
+    };
+    return body.dibbsOffers;
+  };
+
+  {
+    // Staff and a team inbox are configured for every other scenario in this file.
+    const h = await dibbsOffersHealth();
+    check('health: staff configured', h.staffConfigured === true);
+    check('health: team inbox configured', h.teamInboxConfigured === true);
+    check('health: private media ready (local disk)', h.privateMediaReady === true);
+  }
+  {
+    // The unconfigured-on-Render state this is meant to catch: no staff, no team inbox.
+    const savedStaffIds = process.env.DIBBS_STAFF_USER_IDS;
+    const savedInbox = process.env.DIBBS_OFFERS_EMAIL;
+    delete process.env.DIBBS_STAFF_USER_IDS;
+    delete process.env.DIBBS_STAFF_EMAILS;
+    delete process.env.DIBBS_OFFERS_EMAIL;
+    const h = await dibbsOffersHealth();
+    check('health: staff NOT configured once both lists are unset', h.staffConfigured === false);
+    check('health: team inbox NOT configured once unset', h.teamInboxConfigured === false);
+    process.env.DIBBS_STAFF_USER_IDS = savedStaffIds;
+    process.env.DIBBS_OFFERS_EMAIL = savedInbox;
+  }
+  {
+    // A public main bucket with no separate private bucket: uploads would be refused (503).
+    process.env.S3_BUCKET = 'dibbs-photos';
+    process.env.S3_PUBLIC_BASE_URL = 'https://media.example.test';
+    const unready = await dibbsOffersHealth();
+    check('health: private media NOT ready (public bucket, no private bucket)', unready.privateMediaReady === false);
+    delete process.env.S3_BUCKET;
+    delete process.env.S3_PUBLIC_BASE_URL;
+    const restored = await dibbsOffersHealth();
+    check('health: private media ready again back on local disk', restored.privateMediaReady === true);
+  }
+
   /* ============================== STAFF PERMISSIONS, ESTIMATES, FINAL OFFER ============================== */
   console.log('\n# staff conflicts and estimate flow');
 

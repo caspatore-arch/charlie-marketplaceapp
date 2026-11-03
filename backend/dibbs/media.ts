@@ -228,11 +228,26 @@ class S3PrivateStore implements PrivateStore {
  * main bucket, but only while it is private (no S3_PUBLIC_BASE_URL). A public
  * main bucket and no private bucket = private uploads are refused (503).
  */
-function pickStore(): PrivateStore | null {
-  if (!env.s3Bucket) return new LocalPrivateStore();
-  if (env.s3PrivateBucket) return new S3PrivateStore(env.s3PrivateBucket);
-  if (!env.s3PublicBaseUrl) return new S3PrivateStore(env.s3Bucket);
+type StoreKind = 'disk' | 's3-private' | 's3-shared' | null;
+
+function storeKind(): StoreKind {
+  if (!env.s3Bucket) return 'disk';
+  if (env.s3PrivateBucket) return 's3-private';
+  if (!env.s3PublicBaseUrl) return 's3-shared';
   return null;
+}
+
+function pickStore(): PrivateStore | null {
+  const kind = storeKind();
+  if (kind === 'disk') return new LocalPrivateStore();
+  if (kind === 's3-private') return new S3PrivateStore(env.s3PrivateBucket!);
+  if (kind === 's3-shared') return new S3PrivateStore(env.s3Bucket!);
+  return null;
+}
+
+/** No I/O; for /api/health. True when a private-media store is actually reachable right now. */
+export function privateMediaReady(): boolean {
+  return storeKind() !== null;
 }
 
 let store: PrivateStore | null | undefined;
