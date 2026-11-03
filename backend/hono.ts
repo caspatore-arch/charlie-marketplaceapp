@@ -12,6 +12,7 @@ import {
   PrivateMediaError,
   getPrivate,
   newPrivateKey,
+  privateMediaReady,
   putPrivate,
   signedMediaPath,
   validatePrivateMedia,
@@ -101,6 +102,15 @@ app.get('/api/health', (c) => {
     },
     sms: { mode: resolveSmsMode().mode, simulated: resolveSmsMode().mode === 'simulated' },
     email: { mode: resolveEmailMode().mode, simulated: resolveEmailMode().mode === 'simulated' },
+    // "Get a Dibbs offer" (docs/PROJECT-DIRECTIVES.md, Nov 1): requests are
+    // accepted even when none of this is configured, but staff can't review
+    // them and sellers may not get an estimate or an alert. Surfaced here so
+    // a stuck Render env var shows up without reading logs.
+    dibbsOffers: {
+      staffConfigured: env.dibbsStaffEmails.length > 0 || env.dibbsStaffUserIds.length > 0,
+      teamInboxConfigured: Boolean(env.dibbsOffersEmail),
+      privateMediaReady: privateMediaReady(),
+    },
   });
 });
 
