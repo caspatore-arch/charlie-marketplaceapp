@@ -300,3 +300,35 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 4 typecheck fix: background-timer `.unref()` (on branch, PR open)
+
+`npm run typecheck` fails on a clean `npm install` (confirmed on a fresh checkout,
+not just this one): `tsc --noEmit` reports `Property 'unref' does not exist on type
+'number'` in `backend/dibbs/notify.ts`, `backend/email/bookings.ts`,
+`backend/retention.ts` and `backend/sms/outbox.ts`. Root cause: `tsconfig.json`'s
+`lib` is `["DOM", "ESNext"]` (needed for the Expo/web client) and the installed
+`@types/node` (`^26.5.1`) no longer declares global `setInterval`/`setTimeout`
+overrides when `dom` is in `lib`, so those calls resolve to `lib.dom.d.ts`'s
+browser signature (`(...) => number`) instead of Node's `(...) => NodeJS.Timeout`.
+This is a real, reproducible failure on install, not an artifact of this session
+— whatever machine last reported "typecheck passes" for these files most likely
+had an older `node_modules` still on disk.
+
+Fix: cast each timer handle to `NodeJS.Timeout` at the point `.unref()` is called
+(or on the variable's declared type for `backend/sms/outbox.ts`'s module-level
+`timer`). No behavior change — `setInterval`/`setTimeout`/`.unref()` still call
+the same Node runtime functions; only the compile-time type was wrong. No test,
+schema, env var or UI file touched.
+
+Verified on a clean `npm install` in a separate worktree (`fix/timer-unref-typecheck`):
+`npm run typecheck` (clean), `npx eslint` on the 4 changed files (clean, 0
+problems), `npm run test:workstreams` 44/44, `npm run test:e2e` 17/17, `npm run
+test:geo` 6/6, `npm run test:payments` 39/39, `npm run test:retention` 19/19,
+`npm run test:dibbs-offers` 226/226. `npm run lint` across the whole repo still
+reports its existing ~19-20 unrelated errors (e.g. `Skeleton.tsx`, `Confetti.tsx`
+ref-during-render); none are in the files this change touched.
+
+Not run/verified: native iPhone (no Xcode), and whether the founder's own local
+`node_modules` actually reproduces the failure (could not check their machine from
+here) — if it doesn't, the discrepancy is almost certainly a stale local install
+rather than a different root cause.
