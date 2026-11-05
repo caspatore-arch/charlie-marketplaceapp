@@ -300,3 +300,48 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 5 — `npm run typecheck` was broken on `main`; open PR backlog needs review
+
+Confirmed on a clean `npm install` on `origin/main` at `6428bd9`: `tsc --noEmit`
+failed with `Property 'unref' does not exist on type 'number'` in
+`backend/dibbs/notify.ts`, `backend/email/bookings.ts`, `backend/retention.ts`
+and `backend/sms/outbox.ts`. Same root cause PR #15 already documented on
+November 4 (the installed `@types/node` no longer overrides `setInterval`/
+`setTimeout` once `tsconfig.json`'s `lib` includes `"DOM"`, so those calls
+resolve to the browser `number` signature instead of Node's `NodeJS.Timeout`):
+not a regression introduced today, a standing break on `main` that nobody has
+merged a fix for yet.
+
+**Before doing anything else, the founder should know:** as of today there are
+9 open PRs, all still drafts, going back to #1 from October 21 — none merged.
+Three of them duplicate each other:
+- #13 (Nov 2) and #15 (Nov 4) both fix this exact typecheck break with the same
+  minimal cast; this PR (branch `daily-build/typecheck-unref-fix`) is a third,
+  opened only because today's build couldn't verify anything else while `main`
+  stayed red. **Merge any one of the three, then close the other two** — don't
+  review all three.
+- #7 (Oct 28) and #10 (Oct 31) both add a moderator email alert on new reports;
+  #10 is the later, more complete version (it also updates the docs). Merge #10,
+  close #7.
+- #9 (Nominatim 1 req/sec throttle), #14 (`/api/health` reports Dibbs-offers
+  config), #5 (migration-precheck docs) and #3 (test coverage for
+  `confirmEmailLink`) are each a single, non-overlapping, already-verified
+  change with no duplicate — safe to review independently.
+- #1 (Oct 21, offer-acceptance booking) is the oldest and largest; review it
+  against current `main` before the others, since several later PRs touch
+  adjacent reservation code.
+
+None of this is a code problem the next automated run can fix by itself — it
+needs a human to open GitHub and press merge (or ask Claude to merge once
+reviewed). Until that happens, each day's build either re-fixes the same
+typecheck break or has to work around a growing pile of unmerged, possibly
+conflicting branches.
+
+Verified today (clean `npm install`, throwaway local database, nothing
+pushed to `main`): `npm run typecheck` clean; `npx eslint` on the 4 changed
+files, 0 problems; `npm run test:e2e` 17/17; `npm run test:geo` 6/6; `npx tsx
+scripts/payments-check.ts` 39/39; `npm run test:workstreams` 44/44. Not
+verified: native iPhone (no Xcode in this environment); whether PR #13 or #15
+differ from this fix in any way (not diffed line-by-line against each other,
+only against the same root-cause description).
+

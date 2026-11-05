@@ -320,14 +320,14 @@ export async function dispatchDueSms(db: Db, opts: { now?: Date; limit?: number 
   return result;
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: NodeJS.Timeout | null = null;
 
 /** Starts the background dispatcher (backend/server.ts). No-op if interval is 0. */
 export function startSmsDispatcher(db: Db): void {
   if (timer || env.smsDispatchIntervalMs === 0) return;
   timer = setInterval(() => {
     dispatchDueSms(db).catch((err) => console.error('[sms] dispatch failed', err));
-  }, env.smsDispatchIntervalMs);
+  }, env.smsDispatchIntervalMs) as unknown as NodeJS.Timeout;
   timer.unref?.();
 }
 

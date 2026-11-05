@@ -311,6 +311,6 @@ export function startDibbsEmailDispatcher(db: Db) {
   if (env.nodeEnv === 'test') return;
   const timer = setInterval(() => {
     void dispatchDibbsEmails(db).catch(() => console.error('[dibbs] email dispatcher failed'));
-  }, 30_000);
+  }, 30_000) as unknown as NodeJS.Timeout;
   timer.unref?.();
 }
