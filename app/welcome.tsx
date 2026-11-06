@@ -18,6 +18,7 @@
 import React, { useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
+import { Camera } from 'lucide-react-native';
 import { Redirect, Stack, useRouter } from 'expo-router';
 import { Text } from '@/components/ui/Text';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -47,6 +48,16 @@ const STEPS = [
     title: 'Meet, check it, hand it over',
     body: 'Meet in public on campus. Check the item together, pay the seller directly, and confirm the handoff in Dibbs.',
   },
+];
+
+// "Get a Dibbs offer": the Dibbs team buys the item directly. Owner asked
+// (Nov 3) to promise an offer within an hour and a same-day sale; the hour
+// only holds while staff are on, so the copy says "during team hours".
+// Payment happens outside the app, so the copy never says "paid" or "cash".
+const OFFER_STEPS = [
+  { title: 'Snap a photo', body: 'Photos or a short video, plus what it is. No listing and no asking price.' },
+  { title: 'Get an offer within an hour', body: 'A real person on the Dibbs team looks at it and sends you an offer.' },
+  { title: 'Sell it the same day', body: 'Pick a time at a campus spot, we check the item together, and you decide whether to take the final offer.' },
 ];
 
 // The four reasons, in the owner's order. Safe-and-sure is worded as facts the
@@ -80,6 +91,9 @@ export default function WelcomeScreen() {
   const reduceMotion = useReduceMotion();
   const { status } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signup');
+  // Set when they came in through a "Get a Dibbs offer" button, so signing up
+  // lands them on the photo form instead of the feed.
+  const [wantsOffer, setWantsOffer] = useState(false);
   // Once the card finishes we navigate ourselves; this stops the signed-in
   // redirect below from racing it and skipping profile setup.
   const [finishing, setFinishing] = useState(false);
@@ -101,7 +115,17 @@ export default function WelcomeScreen() {
 
   const onFinished = ({ isNewAccount }: AuthFinish) => {
     setFinishing(true);
-    router.replace(isNewAccount ? '/create-profile' : '/');
+    if (wantsOffer) {
+      router.replace(isNewAccount ? '/create-profile?next=offer' : '/dibbs-offer/new');
+    } else {
+      router.replace(isNewAccount ? '/create-profile' : '/');
+    }
+  };
+
+  const startOffer = () => {
+    setWantsOffer(true);
+    setMode('signup');
+    scrollToRef(cardRef);
   };
 
   const card = (
@@ -129,7 +153,11 @@ export default function WelcomeScreen() {
         {mode === 'signup' ? 'Make your Dibbs account' : 'Welcome back'}
       </Text>
 
-      <Text variant="body" color="inkMuted">Sign in with your email to buy, sell and book a meetup. It is free, and sellers keep 100%.</Text>
+      <Text variant="body" color="inkMuted">
+        {wantsOffer
+          ? 'Make a free account, then send your photos to the Dibbs team for an offer.'
+          : 'Sign in with your email to buy, sell and book a meetup. It is free, and sellers keep 100%.'}
+      </Text>
 
       {status === 'loading' || finishing ? (
         <View style={styles.loading}>
@@ -202,11 +230,20 @@ export default function WelcomeScreen() {
                 University of Arizona students
               </Text>
             </View>
+            {/* The Dibbs offer sits up here so it's one of the first things
+                people see, not something they have to scroll to. */}
+            <View style={styles.heroOffer}>
+              <Camera size={22} color={colors.white} />
+              <Text variant="body" color="white" weight="600" style={styles.heroOfferText}>
+                Rather not list it? Send a photo to the Dibbs team and get an offer, within an hour during team hours.
+              </Text>
+            </View>
             <View style={styles.ctaRow}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Create account"
                 onPress={() => {
+                  setWantsOffer(false);
                   setMode('signup');
                   scrollToRef(cardRef);
                 }}
@@ -214,6 +251,16 @@ export default function WelcomeScreen() {
               >
                 <Text variant="heading" weight="700" color="accentInk">
                   Create account
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Get a Dibbs offer"
+                onPress={startOffer}
+                style={({ pressed }) => [styles.ctaOutline, pressed ? { opacity: 0.85 } : null]}
+              >
+                <Text variant="heading" weight="700" color="white">
+                  Get a Dibbs offer
                 </Text>
               </Pressable>
               <Pressable
@@ -229,6 +276,41 @@ export default function WelcomeScreen() {
         </View>
 
         <View style={styles.inner}>
+          <View style={styles.offer}>
+            <Text variant="caption" weight="700" color="accentInk" style={styles.sectionLabel}>
+              GET A DIBBS OFFER
+            </Text>
+            <Text variant="displaySm" accessibilityRole="header">Sell it to Dibbs in three steps.</Text>
+            <View style={[styles.offerSteps, wide ? styles.offerStepsWide : null]}>
+              {OFFER_STEPS.map((s, i) => (
+                <View key={s.title} style={[styles.offerStep, wide ? styles.offerStepWide : null]}>
+                  <View style={styles.num}>
+                    <Text variant="label" weight="700" color="accentInk">
+                      {i + 1}
+                    </Text>
+                  </View>
+                  <View style={styles.stepText}>
+                    <Text variant="heading" weight="700">{s.title}</Text>
+                    <Text variant="bodySm" color="inkMuted" style={styles.stepBody}>{s.body}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+            <View style={styles.offerFoot}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Create an account to get a Dibbs offer"
+                onPress={startOffer}
+                style={({ pressed }) => [styles.offerCta, pressed ? { opacity: 0.85 } : null]}
+              >
+                <Text variant="label" weight="700" color="white">Get a Dibbs offer</Text>
+              </Pressable>
+              <Text variant="small" color="inkMuted" style={styles.offerNote}>
+                Offers within an hour during Dibbs team hours. You agree on how you get paid with the team; the app doesn’t handle payment.
+              </Text>
+            </View>
+          </View>
+
           <View style={styles.benefits}>
             <Text variant="displaySm" accessibilityRole="header">Why students use Dibbs</Text>
             {PITCH.map((item) => (
@@ -305,7 +387,50 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: radius.md,
   },
+  ctaOutline: {
+    minHeight: 54,
+    justifyContent: 'center',
+    paddingHorizontal: space.xxl,
+    borderWidth: 2,
+    borderColor: colors.white,
+    borderRadius: radius.md,
+  },
+  heroOffer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    marginTop: space.xl,
+    maxWidth: 560,
+    padding: space.lg,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  heroOfferText: { flex: 1 },
   navLink: { minHeight: 48, justifyContent: 'center', paddingHorizontal: space.md, backgroundColor: colors.white, borderRadius: radius.pill },
+  offer: {
+    marginTop: space.xxxl,
+    padding: space.xl,
+    gap: space.lg,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  offerSteps: { gap: space.lg },
+  offerStepsWide: { flexDirection: 'row', gap: space.xxl },
+  offerStep: { flexDirection: 'row', gap: space.lg, alignItems: 'flex-start' },
+  offerStepWide: { flex: 1 },
+  offerFoot: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.md },
+  offerCta: {
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: space.xl,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+  },
+  offerNote: { flexShrink: 1, flexBasis: 260 },
   benefits: { gap: space.md, paddingTop: space.xxxl },
   benefit: { padding: space.xl, borderRadius: radius.lg, gap: space.sm, backgroundColor: colors.tint },
   page: { flex: 1, backgroundColor: colors.bg },

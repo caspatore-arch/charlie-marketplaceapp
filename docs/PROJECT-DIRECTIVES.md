@@ -278,6 +278,15 @@ What exists:
 Owner decisions still open (reversible defaults in code):
 - **Eligible categories**: none enforced (phones/electronics are examples only). No minimum purchase price.
 - **Staffed hours**: none shown or promised; copy says the team aims to reply quickly, not guaranteed.
+  Owner decision, Nov 3: the welcome page (`app/welcome.tsx`, "Get a Dibbs offer" section) now
+  promises "an offer within an hour" and "sell it the same day", qualified as "during Dibbs team
+  hours". Team hours are still not set or shown anywhere, so set them and staff the queue before
+  this copy reaches production. In-app request screens still say "aims to reply quickly".
+  Owner request, Nov 6: the welcome hero also offers it (a send-a-photo line and a "Get a Dibbs
+  offer" button; signing up from either goes to `/dibbs-offer/new` after profile setup), and an
+  empty Browse feed shows "Sell your stuff" with "Get a Dibbs offer" first and "Put it on the
+  marketplace" second (`components/browse/EmptyFeedSell.tsx`). Nov 6 check: trydibbs.com's
+  live bundle includes the Dibbs offer screens, so Netlify is deploying again.
 - **Payout method**: not integrated. Completing the handoff never means payment was sent; staff can record a payout made outside the app by hand. No live payments or payout provider.
 - **Offer validity**: estimates lapse after 48 hours unanswered (`DIBBS_ESTIMATE_VALID_MS` in `backend/dibbs/rules.ts`).
 - **Team inbox and staff accounts**: set `DIBBS_OFFERS_EMAIL` and `DIBBS_STAFF_EMAILS` (staff sign-in emails) on Render before use. With R2 public access (`S3_PUBLIC_BASE_URL`), also create and set `S3_PRIVATE_BUCKET`, or private uploads are refused.

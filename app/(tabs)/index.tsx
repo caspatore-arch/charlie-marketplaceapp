@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { FeedListingCard } from '@/components/browse/FeedListingCard';
+import { EmptyFeedSell } from '@/components/browse/EmptyFeedSell';
 import { FilterBar, type BrowseSort, type CategoryFilter } from '@/components/browse/FilterBar';
 import { SearchBar } from '@/components/browse/SearchBar';
 import { PriceFilterSheet } from '@/components/browse/PriceFilterSheet';
@@ -454,27 +455,22 @@ export default function BrowseScreen() {
         }
         ListEmptyComponent={
           <View style={styles.padHorizontal}>
-            <EmptyState
-              icon={<Search size={40} color={colors.inkFaint} />}
-              title={
-                hasSearch
-                  ? `No results for "${debouncedSearch}"`
-                  : archived
-                    ? 'Nothing in the Archive'
-                    : filtersActive
-                      ? 'No matches'
-                      : 'Nothing new in the last 24 hours'
-              }
-              body={
-                hasSearch || filtersActive
-                  ? 'Try widening your search or filters.'
-                  : archived
-                    ? 'Check back soon — new items get posted often.'
-                    : 'Listings stay here for 24 hours, then move to the Archive, where you can still buy them.'
-              }
-              actionLabel={hasSearch || filtersActive ? 'Clear filters' : archived ? undefined : 'See the Archive'}
-              onAction={hasSearch || filtersActive ? clearFiltersAndSearch : archived ? undefined : () => setArchived(true)}
-            />
+            {/* Empty live feed: point people at selling, Dibbs offer first. */}
+            {!hasSearch && !filtersActive && !archived ? (
+              <EmptyFeedSell onSeeArchive={() => setArchived(true)} />
+            ) : (
+              <EmptyState
+                icon={<Search size={40} color={colors.inkFaint} />}
+                title={hasSearch ? `No results for "${debouncedSearch}"` : archived ? 'Nothing in the Archive' : 'No matches'}
+                body={
+                  hasSearch || filtersActive
+                    ? 'Try widening your search or filters.'
+                    : 'Check back soon — new items get posted often.'
+                }
+                actionLabel={hasSearch || filtersActive ? 'Clear filters' : undefined}
+                onAction={hasSearch || filtersActive ? clearFiltersAndSearch : undefined}
+              />
+            )}
           </View>
         }
       />

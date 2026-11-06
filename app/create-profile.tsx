@@ -12,7 +12,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Camera } from 'lucide-react-native';
 import { Text } from '@/components/ui/Text';
 import { Input, TextArea } from '@/components/ui/Input';
@@ -30,6 +30,11 @@ const AVATAR = 112;
 
 export default function CreateProfileScreen() {
   const router = useRouter();
+  // `?next=offer` comes from the welcome page's "Get a Dibbs offer" buttons.
+  // Only that one known value is honored, so the param can't send people anywhere else.
+  const { next } = useLocalSearchParams<{ next?: string }>();
+  const wantsOffer = next === 'offer';
+  const nextHref = wantsOffer ? '/dibbs-offer/new' : '/';
   const { status } = useAuth();
   const utils = trpc.useUtils();
   const meQuery = trpc.auth.me.useQuery(undefined, { enabled: status === 'signedIn' });
@@ -55,7 +60,7 @@ export default function CreateProfileScreen() {
   const save = trpc.user.updateMe.useMutation({
     onSuccess: async () => {
       await utils.auth.me.invalidate();
-      router.replace('/');
+      router.replace(nextHref);
     },
     onError: (e) => setError(e.message),
   });
@@ -185,12 +190,12 @@ export default function CreateProfileScreen() {
               {error ? <Notice tone="error">{error}</Notice> : null}
 
               <Button
-                title="Save and start browsing"
+                title={wantsOffer ? 'Save and send your photos' : 'Save and start browsing'}
                 onPress={onSave}
                 loading={save.isPending}
                 disabled={uploading || save.isPending}
               />
-              <TextLink align="center" onPress={() => router.replace('/')}>Skip for now</TextLink>
+              <TextLink align="center" onPress={() => router.replace(nextHref)}>Skip for now</TextLink>
             </View>
           )}
         </View>
