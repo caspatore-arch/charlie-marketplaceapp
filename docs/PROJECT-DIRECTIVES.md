@@ -23,6 +23,9 @@ Verified in the provider dashboards on Oct 25-26, 2026. These override older doc
   set on Render as of Oct 25 (being fixed). Do not claim photos are persistent until
   verified.
 - **SMS and payments:** simulated. `/admin` is enabled (`ADMIN_PASSWORD` set).
+  Owner decision, 2026-11-06: Dibbs does not need texts or in-app payments. Do not
+  plan Twilio/SMS go-live or Stripe go-live work; email is the only sign-in and
+  reminder channel, and buyers pay sellers directly at the meetup.
 - **Sign-in:** any email can sign in, and since 2026-10-26 (owner decision) any
   verified email can trade too; a campus email adds the "Campus email verified"
   badge. Phone-only accounts still need a campus email or the founder's Approved
