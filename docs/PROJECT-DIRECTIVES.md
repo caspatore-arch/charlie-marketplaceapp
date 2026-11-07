@@ -361,3 +361,43 @@ timer-typecheck fix six times without one being merged. Merging this PR (or
 any one of its predecessors) breaks the cycle; leaving the backlog unmerged
 means tomorrow's run most likely does it again on whatever file next adds a
 background timer.
+
+## November 7 — same fix written an 8th and 9th time; rebased #13 instead of adding a 10th
+
+`main` was still red with the identical five errors (`notify.ts`, `bookings.ts`,
+`retention.ts` ×2, `outbox.ts`) described above, because PR #13 was still
+unmerged. Two more automated runs had since opened PR #15
+(`fix/timer-unref-typecheck`, Nov 4) and PR #16 (`daily-build/typecheck-unref-fix`,
+Nov 5) — both independent reinventions of the same `backend/lib/timers.ts`
+wrapper, both based on the same pre-#13 commit, neither aware #13 already
+existed. That is the exact failure mode PR #13's own description warned about.
+
+This run did not open a tenth draft. Instead it rebased PR #13's branch
+(`daily-build/fix-node-timer-types`) onto current `main` (no conflicts — the
+commits in between touch `app/welcome.tsx`, `app/create-profile.tsx`,
+`app/(tabs)/index.tsx`, `components/browse/EmptyFeedSell.tsx`, none of the
+five files this fix touches) and closed #15 and #16 as duplicates of #13,
+same as #13 closed #2/#4/#6/#8/#11.
+
+Re-verified on a throwaway sandbox database, November 7, 2026:
+- `npm run typecheck`: clean.
+- `npx eslint` on exactly the 5 changed files: clean. Full `npm run lint`:
+  same 17 pre-existing errors as before (`components/ui/Skeleton.tsx` and
+  others), none in files this change touches.
+- `npm run test:e2e`: 17/17. `npm run test:geo`: 6/6. `npx tsx
+  scripts/payments-check.ts`: 39 passed, 0 failed. `npm run test:workstreams`:
+  44/44. `npm run test:retention`: 19/19. `npm run test:dibbs-offers`:
+  226/226.
+
+Not verified: native/device (no Xcode on this machine); real delivery through
+the affected background dispatchers (only the timer import path changed, not
+dispatch logic).
+
+**Open item for the owner, stronger this time:** this is the ninth independent
+draft of the identical one-line-root-cause fix, across 16 days, with zero
+merges. The daily automated build has no way to know a fix landed except by
+checking whether `npm run typecheck` is green on `main` — it cannot merge its
+own PRs. Someone needs to either merge #13 by hand, or tell the automation it
+may merge its own green, test-passing, non-SMS/non-payments PRs, or this exact
+cycle (and the token cost of writing this file entry every few days) repeats
+indefinitely.
