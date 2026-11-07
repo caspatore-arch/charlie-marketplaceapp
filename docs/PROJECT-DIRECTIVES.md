@@ -312,3 +312,52 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 2 typecheck fix, and a consolidated PR (daily build)
+
+`npm run typecheck` was red on `main` again: `backend/dibbs/notify.ts` (added
+November 1, after PR #11 below was opened) called `setInterval` and then
+`.unref()` on the result, the same `DOM` vs. Node `setInterval` overload
+clash documented in PR #11's description. That PR (`daily-build/fix-timer-typecheck`,
+opened against an older `main` and still unmerged) already has the right fix
+and docs for the three files it covers; it just doesn't know about
+`notify.ts`, which didn't exist yet when it was opened.
+
+Rather than add a sixth unmerged draft with the same root cause (after #2,
+#4, #6, #8 and #11, going back to October 22, none merged), this run opened
+one consolidated PR, `daily-build/fix-node-timer-types`, off current `main`:
+the same `backend/lib/timers.ts` wrapper (re-exports `node:timers`'
+`setInterval`/`setTimeout` cast to their real Node return type, `.unref()`
+included), pointed at by all four affected files including `notify.ts`. It
+also closes #2, #4, #6, #8 and #11 as superseded, with a comment linking the
+new PR — they fixed a subset of the same bug and merging any of them first
+would just put the next file in the same position `notify.ts` was in.
+(#9 "Nominatim rate limit" and #7/#10, two separate "email moderators on a
+report" drafts, are left open: different feature, not a typecheck fix, and
+not today's task — but #7 and #10 look like duplicates of each other too;
+worth the owner's attention separately.)
+
+No tsconfig change, no dependency bump, no behavior change — same intervals,
+same `.unref()` calls, same dispatcher logic.
+
+Verified on a throwaway sandbox database (`PGLITE_DIR`, never the shared dev
+DB or production), November 2, 2026:
+- `npm run typecheck`: clean (was 5 errors, one per affected file).
+- `npm run lint`: unchanged — the pre-existing errors are all in files this
+  change doesn't touch (`components/ui/Skeleton.tsx` and others).
+- `npm run test:e2e`: 17/17. `npm run test:geo`: 6/6. `npx tsx
+  scripts/payments-check.ts`: 39/39. `npm run test:workstreams`: 44/44.
+  `npm run test:retention`: 19/19 (touches `backend/retention.ts`).
+  `npm run test:dibbs-offers`: 226/226 (touches `backend/dibbs/notify.ts`).
+
+Not verified: native/device (no Xcode on this machine, as with every other
+entry here); this change touches no client code so that risk is low. Real
+delivery of the affected background dispatchers (Dibbs offer emails, booking
+emails, the SMS outbox, the retention sweep) was not separately re-verified
+beyond the scripts above, since the change is the import path of a timer
+function, not the dispatch logic itself.
+
+Open item for the owner: the daily automated build has now written the same
+timer-typecheck fix six times without one being merged. Merging this PR (or
+any one of its predecessors) breaks the cycle; leaving the backlog unmerged
+means tomorrow's run most likely does it again on whatever file next adds a
+background timer.
