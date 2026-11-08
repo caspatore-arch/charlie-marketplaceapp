@@ -312,3 +312,66 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 8 — moderator comment/post removal: NOT_FOUND on a bad id, no audit overwrite on retry
+
+Daily automated build. Not a new feature; a small correctness/audit-trail fix to
+existing moderator takedown endpoints, picked because it was a real, isolated,
+testable gap not already covered by any open PR (see "open PR pile-up" note below).
+
+`listingComment.moderatorRemove`, `community.moderatorRemoveComment` and
+`community.moderatorRemove` (`backend/trpc/routes/listingComment.ts`,
+`backend/trpc/routes/community.ts`) ran an unconditional `UPDATE ... SET
+removed_at = now(), removed_by_id = <moderator>` with no existence or
+already-removed check first. Two real effects: a request with a wrong or
+mistyped id silently returned `{ ok: true }` with zero rows affected (the
+moderator UI would show success for nothing), and retrying on an
+already-removed row overwrote `removed_at`/`removed_by_id`, erasing who
+removed it first and when.
+
+`app/moderation.tsx`'s own comment says `community.moderatorRemove` is
+deliberately retried on a failed follow-up `reviewReport` call "so a removed
+post never leaves its report open" — so simply making a repeat call throw
+would break that documented retry-safety. The fix keeps retries safe (an
+already-removed row still returns `{ ok: true }`, no error) but stops
+re-stamping `removed_at`/`removed_by_id` on that second call, and now throws
+`NOT_FOUND` only when the id matches no row at all. Applied identically to
+all three endpoints for consistency; no client code, schema or migration
+changes.
+
+Verified on a throwaway sandbox database (`PGLITE_DIR`, never the shared dev
+DB or production), November 8, 2026:
+- `npm run typecheck`: same 5 pre-existing `backend/lib/timers`-style
+  `.unref()` errors as on `main` (notify.ts, bookings.ts, retention.ts ×2,
+  outbox.ts) — unrelated to this change, already fixed in open PR #17, not
+  reintroduced or worsened by this branch.
+- `npm run test:comments`: 36/36 (added 16 new cases: non-moderator FORBIDDEN,
+  unknown-id NOT_FOUND, audit fields stamped once, and unchanged on retry —
+  for all three endpoints).
+- `npm run test:e2e`: 17/17. `npm run test:workstreams`: 44/44. `npm run
+  test:engagement`: 62/62. `npm run test:archive`: 43/43. `npm run
+  test:dibbs-offers`: 226/226. `npm run test:geo`: 6/6. `npx tsx
+  scripts/payments-check.ts`: 39/39.
+- `npx eslint` on the three changed files: clean. Full `npm run lint`: the
+  same 17 pre-existing errors as documented in the November 7 entry above
+  (`components/ui/Skeleton.tsx` and others), none in files this change
+  touches.
+
+Not verified: native/device (no Xcode on this machine, as with every other
+entry here); this change touches no client code. `listingComment.moderatorRemove`
+and `community.moderatorRemoveComment` currently have no caller in `app/` or
+`components/` that I could find (only `community.moderatorRemove`, for posts,
+is wired up, from the moderation queue) — the fix still applies since both are
+reachable over tRPC by anyone with a moderator account, and keeping all three
+consistent avoids a future run "rediscovering" the same gap in whichever one
+gets a UI first.
+
+**Open PR pile-up, flagged again:** nine PRs are open (#1, #3, #5, #7, #9,
+#10, #14, #17, and this one), all drafts, none merged, several already stale
+against current `main`. #17 (the `backend/lib/timers.ts` typecheck fix) is
+current and would merge cleanly right now with zero conflicts against this
+branch's base. Per the November 7 entry's request: the daily build still has
+no way to merge its own PRs, so green, tested, non-SMS/non-payments PRs keep
+accumulating. This run did not merge anything itself (that is the owner's
+call to make or delegate), only re-confirmed #17 is ready and avoided
+duplicating it or any other open PR's subject matter.
+

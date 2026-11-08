@@ -137,8 +137,18 @@ export const listingCommentRouter = router({
     return { ok: true as const };
   }),
 
-  /** Moderator takedown of a single comment. */
+  /**
+   * Moderator takedown of a single comment. Safe to retry (returns ok on an
+   * already-removed comment) without re-stamping who/when it was first removed.
+   */
   moderatorRemove: moderatorProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+    const [comment] = await ctx.db
+      .select({ removedAt: listingComments.removedAt })
+      .from(listingComments)
+      .where(eq(listingComments.id, input.id))
+      .limit(1);
+    if (!comment) throw gone();
+    if (comment.removedAt) return { ok: true as const };
     await ctx.db
       .update(listingComments)
       .set({ removedAt: new Date(), removedById: ctx.user.id })

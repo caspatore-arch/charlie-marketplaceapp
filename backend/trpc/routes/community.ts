@@ -579,10 +579,20 @@ export const communityRouter = router({
     return { ok: true as const };
   }),
 
-  /** Moderator takedown of a single comment. */
+  /**
+   * Moderator takedown of a single comment. Safe to retry (returns ok on an
+   * already-removed comment) without re-stamping who/when it was first removed.
+   */
   moderatorRemoveComment: moderatorProcedure
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
+      const [comment] = await ctx.db
+        .select({ removedAt: communityComments.removedAt })
+        .from(communityComments)
+        .where(eq(communityComments.id, input.id))
+        .limit(1);
+      if (!comment) throw new TRPCError({ code: 'NOT_FOUND', message: 'That comment no longer exists.' });
+      if (comment.removedAt) return { ok: true as const };
       await ctx.db
         .update(communityComments)
         .set({ removedAt: new Date(), removedById: ctx.user.id })
@@ -687,8 +697,19 @@ export const communityRouter = router({
       return { ok: true as const };
     }),
 
-  /** Moderator takedown (used from the moderation queue). */
+  /**
+   * Moderator takedown (used from the moderation queue). Safe to retry
+   * (returns ok on an already-removed post) without re-stamping who/when it
+   * was first removed — app/moderation.tsx relies on this to retry safely.
+   */
   moderatorRemove: moderatorProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+    const [post] = await ctx.db
+      .select({ removedAt: communityPosts.removedAt })
+      .from(communityPosts)
+      .where(eq(communityPosts.id, input.id))
+      .limit(1);
+    if (!post) throw new TRPCError({ code: 'NOT_FOUND', message: 'That post no longer exists.' });
+    if (post.removedAt) return { ok: true as const };
     await ctx.db
       .update(communityPosts)
       .set({ removedAt: new Date(), removedById: ctx.user.id })
