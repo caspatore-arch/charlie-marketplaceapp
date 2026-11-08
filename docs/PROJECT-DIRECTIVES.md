@@ -270,6 +270,48 @@ Deployment status, verified November 1, 2026:
   - No staff are configured (`DIBBS_STAFF_EMAILS`), and team alerts are off (`DIBBS_OFFERS_EMAIL`).
   - Private offer media sits on Render's disk, which is wiped on redeploy, until R2 is set up (`docs/R2-SETUP.md`).
 
+### November 3 — `/api/health` now reports whether it is actually usable
+
+Until now those three gaps were silent: a request was accepted and saved even
+with no staff, no team-inbox alert and (in the public-bucket-but-no-private-bucket
+case) a 503 on upload, and the only way to notice was reading Render logs or
+trying the flow by hand. `/api/health` now adds a `dibbsOffers` object
+(`backend/hono.ts`, config read in `backend/env.ts`, store check in
+`backend/dibbs/media.ts`'s new `privateMediaReady()`):
+
+```json
+"dibbsOffers": { "staffConfigured": true, "teamInboxConfigured": true, "privateMediaReady": true }
+```
+
+- `staffConfigured`: `true` once `DIBBS_STAFF_EMAILS` or `DIBBS_STAFF_USER_IDS`
+  has at least one entry — i.e. someone can actually open `/staff/dibbs-offers`.
+- `teamInboxConfigured`: `true` once `DIBBS_OFFERS_EMAIL` is set — i.e. new-request
+  alerts go out instead of being silently skipped (`backend/dibbs/notify.ts` already
+  logged this once per process; it still does).
+- `privateMediaReady`: `true` when a private-media store is actually reachable
+  right now (local disk, or S3 with `S3_PRIVATE_BUCKET`, or S3 with no
+  `S3_PUBLIC_BASE_URL`); `false` in the "public main bucket, no private bucket"
+  case, where uploads are refused with a 503.
+
+This does not set the Render env vars or configure R2 — that is still the
+owner's step (see the two bullets above and `docs/R2-SETUP.md`). It only makes
+the gap visible without reading logs, so whoever flips those switches on Render
+can confirm it actually took by re-hitting `/api/health` instead of guessing.
+
+Verified November 3, 2026, on a throwaway local database (never the shared dev
+DB or production): `npm run typecheck` (no new errors; five pre-existing
+`unref()` errors in unrelated files — `backend/dibbs/notify.ts`,
+`backend/email/bookings.ts`, `backend/retention.ts`, `backend/sms/outbox.ts` —
+predate this change and were not introduced or touched by it); `npx eslint` on
+the three changed files, clean; `npm run test:dibbs-offers` 233/233 (7 new
+checks: configured/unconfigured staff and team inbox, and private-media-ready
+across local disk, public-bucket-without-private-bucket, and back); existing
+suites unaffected: `test:e2e` 17/17, `test:geo` 6/6, `npx tsx
+scripts/payments-check.ts` 39/39. Not verified: the real Render/Neon
+production environment (no access from this session) or that these three env
+vars, once set there, are the only remaining blockers — R2 upload/read across
+a real redeploy is still unverified per item 4 above.
+
 What exists:
 - Sell now starts with three choices: "List on Dibbs" (the unchanged listing flow, plus an optional, unchecked "Also get a Dibbs offer"), "Get a Dibbs offer" (a private request: photos or one short video, item name, optional condition/specs/description, no asking price), and "Do both" (owner request: the listing form with "Also get a Dibbs offer" already ticked; it can still be unticked).
 - A private request page the seller can revisit from Profile, with updates, answers to questions, estimate response, campus meetup scheduling (same spots, 15-minute grid, 7-day horizon), explicit accept/decline of the final offer after inspection, and withdraw.
