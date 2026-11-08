@@ -22,6 +22,8 @@ const SELLER = '00000000-0000-4000-8000-0000000000d1';
 const BUYER = '00000000-0000-4000-8000-0000000000d2';
 const OTHER = '00000000-0000-4000-8000-0000000000d3';
 const UNVERIFIED = '00000000-0000-4000-8000-0000000000d4';
+const MODERATOR = '00000000-0000-4000-8000-0000000000d5';
+process.env.MODERATOR_USER_IDS = MODERATOR;
 
 let passes = 0;
 let failures = 0;
@@ -44,7 +46,9 @@ async function main() {
   const { eq } = await import('drizzle-orm');
   const { db, pglite } = await import('../backend/db/client');
   const { runMigrations } = await import('../backend/db/migrate');
-  const { blocks, campuses, communityPosts, listings, users } = await import('../backend/db/schema');
+  const { blocks, campuses, communityComments, communityPosts, listingComments, listings, users } = await import(
+    '../backend/db/schema'
+  );
   const { appRouter } = await import('../backend/trpc/app-router');
 
   await runMigrations();
@@ -61,6 +65,7 @@ async function main() {
     [BUYER, 'Buyer', true],
     [OTHER, 'Other', true],
     [UNVERIFIED, 'Unverified', false],
+    [MODERATOR, 'Moderator', true],
   ] as const) {
     await db.insert(users).values({
       id,
@@ -83,6 +88,7 @@ async function main() {
   const buyer = await as(BUYER);
   const other = await as(OTHER);
   const unverified = await as(UNVERIFIED);
+  const moderator = await as(MODERATOR);
 
   const mkListing = async (title: string) =>
     (
@@ -117,6 +123,17 @@ async function main() {
   await seller.listingComment.remove({ id: a2.id });
   check('seller removed a buyer comment', (await anon.listingComment.list({ listingId: lamp.id })).length === 2);
 
+  const m = await buyer.listingComment.add({ listingId: lamp.id, body: 'Pending removal' });
+  await rejects('non-moderator cannot use moderatorRemove', () => other.listingComment.moderatorRemove({ id: m.id }), 'FORBIDDEN');
+  await rejects('moderatorRemove on an unknown id is NOT_FOUND', () => moderator.listingComment.moderatorRemove({ id: chair.id }), 'NOT_FOUND');
+  await moderator.listingComment.moderatorRemove({ id: m.id });
+  const [afterFirstRemove] = await db.select().from(listingComments).where(eq(listingComments.id, m.id));
+  check('moderatorRemove stamps removedById', afterFirstRemove?.removedById === MODERATOR);
+  const removedAtFirst = afterFirstRemove?.removedAt?.getTime();
+  await moderator.listingComment.moderatorRemove({ id: m.id });
+  const [afterRetry] = await db.select().from(listingComments).where(eq(listingComments.id, m.id));
+  check('retrying moderatorRemove on an already-removed comment does not re-stamp it', afterRetry?.removedAt?.getTime() === removedAtFirst);
+
   await db.insert(blocks).values({ blockerId: SELLER, blockedId: OTHER });
   await rejects('blocked user cannot comment on the seller’s listing', () => other.listingComment.add({ listingId: lamp.id, body: 'hi' }), 'NOT_FOUND');
   check('blocked user does not see the seller’s comments', (await other.listingComment.list({ listingId: lamp.id })).every((c) => c.author.id !== SELLER));
@@ -148,6 +165,32 @@ async function main() {
   const thread = await buyer.community.comments({ postId: post.id });
   check('community list returns parentId', thread.filter((c) => c.parentId === c1.id).length === 2);
   check('post comment count includes replies', (await buyer.community.byId({ id: post.id })).commentCount === 3);
+
+  await rejects('non-moderator cannot use community.moderatorRemoveComment', () => other.community.moderatorRemoveComment({ id: c1.id }), 'FORBIDDEN');
+  await rejects('community.moderatorRemoveComment on an unknown id is NOT_FOUND', () => moderator.community.moderatorRemoveComment({ id: post2.id }), 'NOT_FOUND');
+  await moderator.community.moderatorRemoveComment({ id: c1.id });
+  const [commentAfterFirst] = await db.select().from(communityComments).where(eq(communityComments.id, c1.id));
+  check('community.moderatorRemoveComment stamps removedById', commentAfterFirst?.removedById === MODERATOR);
+  const commentRemovedAtFirst = commentAfterFirst?.removedAt?.getTime();
+  await moderator.community.moderatorRemoveComment({ id: c1.id });
+  const [commentAfterRetry] = await db.select().from(communityComments).where(eq(communityComments.id, c1.id));
+  check(
+    'retrying community.moderatorRemoveComment on an already-removed comment does not re-stamp it',
+    commentAfterRetry?.removedAt?.getTime() === commentRemovedAtFirst,
+  );
+
+  await rejects('non-moderator cannot use community.moderatorRemove', () => other.community.moderatorRemove({ id: post2.id }), 'FORBIDDEN');
+  await rejects('community.moderatorRemove on an unknown id is NOT_FOUND', () => moderator.community.moderatorRemove({ id: lamp.id }), 'NOT_FOUND');
+  await moderator.community.moderatorRemove({ id: post2.id });
+  const [postAfterFirst] = await db.select().from(communityPosts).where(eq(communityPosts.id, post2.id));
+  check('community.moderatorRemove stamps removedById', postAfterFirst?.removedById === MODERATOR);
+  const postRemovedAtFirst = postAfterFirst?.removedAt?.getTime();
+  await moderator.community.moderatorRemove({ id: post2.id });
+  const [postAfterRetry] = await db.select().from(communityPosts).where(eq(communityPosts.id, post2.id));
+  check(
+    'retrying community.moderatorRemove on an already-removed post does not re-stamp it (safe retry after a failed reviewReport, per app/moderation.tsx)',
+    postAfterRetry?.removedAt?.getTime() === postRemovedAtFirst,
+  );
 
   await pglite?.close();
   console.log(`\n${passes} passed, ${failures} failed`);
