@@ -52,3 +52,6 @@ backend/data/
 .codex-deck-build/
 output/
 *.pptx
+
+# per-session isolated worktrees (CLAUDE.md: never browse these)
+.claude/worktrees/
