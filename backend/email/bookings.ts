@@ -56,5 +56,5 @@ export async function dispatchBookingEmails(db: Db, now = new Date()) {
 export function startBookingEmailDispatcher(db: Db) {
   if (env.nodeEnv === 'test') return;
   const timer = setInterval(() => { void dispatchBookingEmails(db).catch(() => console.error('[email] dispatcher failed')); }, 30_000);
-  timer.unref?.();
+  (timer as unknown as { unref?: () => void }).unref?.();
 }

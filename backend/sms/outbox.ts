@@ -328,7 +328,7 @@ export function startSmsDispatcher(db: Db): void {
   timer = setInterval(() => {
     dispatchDueSms(db).catch((err) => console.error('[sms] dispatch failed', err));
   }, env.smsDispatchIntervalMs);
-  timer.unref?.();
+  (timer as unknown as { unref?: () => void }).unref?.();
 }
 
 /** Count of queued texts — used by tests and the health endpoint. */

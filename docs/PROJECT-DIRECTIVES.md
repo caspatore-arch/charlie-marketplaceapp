@@ -312,3 +312,24 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 9 typecheck fix (background dispatcher timers)
+
+`npm run typecheck` was failing on `main` with 5 errors, all `Property 'unref' does not
+exist on type 'number'`, in `backend/dibbs/notify.ts`, `backend/email/bookings.ts`,
+`backend/retention.ts` and `backend/sms/outbox.ts`. Cause: the shared Expo tsconfig
+loads the `DOM` lib for the whole repo (client and backend type-check together), and
+`setInterval`/`setTimeout` from `lib.dom.d.ts` return `number` there instead of
+`@types/node`'s `NodeJS.Timeout`, so the existing `timer.unref?.()` calls (used so these
+background dispatchers don't keep `tsx`/tests alive) no longer type-checked. Fixed by
+casting the handle at each call site (`as unknown as { unref?: () => void }`, the same
+ad hoc cast style already used elsewhere in `backend/`) rather than touching
+`tsconfig.json`, which the client also depends on. No runtime or behavior change.
+
+Verified: `npm run typecheck` clean; `npm run test:e2e` 17/17 (the acceptance table
+elsewhere says 8/8 — that count is stale, the suite has grown); `npm run test:geo` 6/6;
+`npx tsx scripts/payments-check.ts` 39 passed, 0 failed; `npm run test:workstreams`
+44/44; `eslint` on the four changed files clean. Not touched: `tsconfig.json`, any
+feature/UI code, dependencies (`npm install` reformatted unrelated `libc` metadata in
+`package-lock.json`; left unstaged and out of this change since nothing was actually
+bumped).
+

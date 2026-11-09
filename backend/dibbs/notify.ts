@@ -312,5 +312,5 @@ export function startDibbsEmailDispatcher(db: Db) {
   const timer = setInterval(() => {
     void dispatchDibbsEmails(db).catch(() => console.error('[dibbs] email dispatcher failed'));
   }, 30_000);
-  timer.unref?.();
+  (timer as unknown as { unref?: () => void }).unref?.();
 }
