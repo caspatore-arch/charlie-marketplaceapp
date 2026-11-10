@@ -342,6 +342,30 @@ async function main() {
     eq(same?.reason, 'seller_busy', 'with a reason');
   });
 
+  await check('booking: a decline and a cancel racing on one request — exactly one lands', async () => {
+    const listing = await makeListing(MAYA, { startH: 1, endH: 3 });
+    const jordan = await as(JORDAN);
+    const maya = await as(MAYA);
+    const slots = (await jordan.reservation.slots({ listingId: listing.id })).slots.filter((x) => x.available);
+    const req = await jordan.reservation.request({ listingId: listing.id, spotId: SPOT_A, startsAt: slots[0]!.startsAt });
+    const settled = await Promise.allSettled([maya.reservation.decline({ id: req.id }), jordan.reservation.cancel({ id: req.id })]);
+    eq(settled.filter((x) => x.status === 'fulfilled').length, 1, 'exactly one of decline/cancel wins');
+    const loser = settled.find((x) => x.status === 'rejected') as PromiseRejectedResult;
+    eq((loser.reason as { code: string }).code, 'CONFLICT', 'the other sees CONFLICT, not a silent overwrite');
+    const [row] = await db.select().from(schema.reservations).where(d.eq(schema.reservations.id, req.id));
+    assert(row!.status === 'declined' || row!.status === 'cancelled', `settled on a single terminal status, got ${row!.status}`);
+    const events = await db
+      .select()
+      .from(schema.reservationEvents)
+      .where(d.and(d.eq(schema.reservationEvents.reservationId, req.id), d.inArray(schema.reservationEvents.kind, ['declined', 'cancelled'])));
+    eq(events.length, 1, 'exactly one terminal event recorded, not one for each racer');
+    // Retrying the loser's action again (as a client might after a dropped
+    // response) must still be a clean CONFLICT, never a second write.
+    await expectCode('CONFLICT', () =>
+      row!.status === 'declined' ? jordan.reservation.cancel({ id: req.id }) : maya.reservation.decline({ id: req.id }),
+    );
+  });
+
   await check('booking: cancelling frees the slot and returns the item to the feed', async () => {
     const res = await db
       .select()

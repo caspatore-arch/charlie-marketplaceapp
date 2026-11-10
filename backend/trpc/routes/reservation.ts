@@ -743,11 +743,16 @@ export const reservationRouter = router({
         throw new TRPCError({ code: 'CONFLICT', message: 'This request is already closed.' });
       }
 
+      // Re-check the status in the WHERE clause: without it, a concurrent
+      // decline/cancel/accept that lands between the read above and this
+      // write would be silently overwritten (last write wins) instead of
+      // surfacing as a conflict.
       const [updated] = await ctx.db
         .update(reservations)
         .set({ status: 'declined', updatedAt: new Date() })
-        .where(eq(reservations.id, res.id))
+        .where(and(eq(reservations.id, res.id), inArray(reservations.status, ['requested', 'countered'])))
         .returning();
+      if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'This request is already closed.' });
 
       await releaseListing(ctx.db, res.listingId);
       await recordReservationEvent(ctx.db, updated!, 'declined', ctx.user.id);
@@ -773,6 +778,10 @@ export const reservationRouter = router({
         throw new TRPCError({ code: 'CONFLICT', message: 'This request is already closed.' });
       }
 
+      // Re-check the status in the WHERE clause: without it, a concurrent
+      // decline/cancel/accept that lands between the read above and this
+      // write would be silently overwritten (last write wins) instead of
+      // surfacing as a conflict.
       const [updated] = await ctx.db
         .update(reservations)
         .set({
@@ -782,8 +791,9 @@ export const reservationRouter = router({
           handoffCode: null,
           updatedAt: new Date(),
         })
-        .where(eq(reservations.id, res.id))
+        .where(and(eq(reservations.id, res.id), inArray(reservations.status, [...OPEN_STATUSES])))
         .returning();
+      if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'This request is already closed.' });
 
       await releaseListing(ctx.db, res.listingId);
       await cancelBookingSms(ctx.db, res.id);

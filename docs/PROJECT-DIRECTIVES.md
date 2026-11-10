@@ -312,3 +312,41 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 10 daily build: a decline/cancel race on one meetup request, and the open-PR backlog
+
+Daily automated build. Two things, not one feature:
+
+**1. Fixed a real race in `backend/trpc/routes/reservation.ts`.** `decline` (seller)
+and `cancel` (either party) each read the reservation, checked its status in
+JavaScript, then ran `UPDATE ... WHERE id = $1` with no status condition — so two
+concurrent calls on the same request (the seller declines while the buyer cancels,
+or a double-tap retry) could both pass the JS check and both write, each firing its
+own event/SMS-cancel/push, last write wins. `accept` already guarded this with a
+transaction + row lock, and `offer.decline`/`offer.withdraw` already guard it with a
+status-conditioned `WHERE`; `reservation.decline`/`cancel` were the two outliers.
+Fixed by adding the same status guard to the `WHERE` clause and throwing `CONFLICT`
+("This request is already closed.") when no row comes back. `listing.remove` with an
+open meetup was checked and is not a bug — the seller is explicitly warned there that
+removing the listing doesn't cancel the meetup.
+
+Verified on a throwaway sandbox database (never the shared dev DB or production):
+`npm run typecheck` — same 5 pre-existing `.unref()` errors as `main`, nothing new
+(see below); new `npm run test:workstreams` case races `reservation.decline` against
+`reservation.cancel` on one request — confirmed it actually catches the bug (reverted
+just the `WHERE`-clause guard, the new test failed with "got 2, want 1"; restored,
+it passed) — `test:workstreams` 45/45, `test:e2e` 17/17, `test:archive` 43/43;
+`eslint` on the two changed files clean.
+
+**2. The open-PR backlog is real and growing.** As of today there are **11 open
+draft PRs** (#1, #3, #5, #7, #9, #10, #14, #17, #18, #19), none merged. Several are
+now duplicates of each other because each day's build doesn't always check the
+existing queue first: #7 and #10 both email moderators on a new report; #17 and #19
+both fix the same `npm run typecheck` failure (`setInterval`/`setTimeout(...).unref()`
+not typechecking under the shared DOM-lib tsconfig in `backend/dibbs/notify.ts`,
+`backend/email/bookings.ts`, `backend/retention.ts`, `backend/sms/outbox.ts`) —
+**`npm run typecheck` is still red on `main` right now**, and PR #19 is a clean,
+up-to-date, already-verified fix for it sitting unmerged. This run did not re-fix
+the typecheck error a third time, and did not touch any of the other 10 PRs' subject
+matter, to avoid adding a 12th. PR #18 (Nov 8) already flagged this same pileup at 9
+open PRs; it is now 11. Merging is outside what this automated run does on its own —
+flagging it here and in the push notification for the owner to act on.
