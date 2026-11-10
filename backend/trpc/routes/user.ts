@@ -22,6 +22,7 @@ import {
 } from '../../db/schema';
 import { OPEN_STATUSES } from '../../dibbs/rules';
 import { postingStatus } from '../../auth/posting-access';
+import { notifyModeratorsOfReport } from '../../email/moderation';
 import { cancelUserSms } from '../../sms/outbox';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
 import {
@@ -531,13 +532,17 @@ export const userRouter = router({
           message: 'Tell us what you are reporting.',
         });
       }
-      await ctx.db.insert(reports).values({
-        reporterId: ctx.user.id,
-        targetUserId: input.targetUserId ?? null,
-        targetListingId: input.targetListingId ?? null,
-        reason: input.reason,
-        details: input.details ?? null,
-      });
+      const [report] = await ctx.db
+        .insert(reports)
+        .values({
+          reporterId: ctx.user.id,
+          targetUserId: input.targetUserId ?? null,
+          targetListingId: input.targetListingId ?? null,
+          reason: input.reason,
+          details: input.details ?? null,
+        })
+        .returning();
+      void notifyModeratorsOfReport(ctx.db, report!);
       return { ok: true as const };
     }),
 
