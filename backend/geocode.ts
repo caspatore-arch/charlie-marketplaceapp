@@ -7,10 +7,12 @@
  * repeated address never re-hits the third party.
  *
  * IMPORTANT — production note: Nominatim's usage policy (https://operations.osmfoundation.org/policies/nominatim/)
- * forbids heavy/commercial use of the public instance. This is fine for a
- * pilot's low request volume, but **production needs a paid geocoder**
- * (e.g. Google Geocoding API, Mapbox, Radar) before any real traffic.
- * Also noted in docs/HANDOFF.md's "Simulated or unfinished" table.
+ * forbids heavy/commercial use of the public instance and caps it at 1
+ * request/second absolute maximum; `reserveNominatimSlot` below enforces
+ * that ceiling across concurrent lookups. This is fine for a pilot's low
+ * request volume, but **production needs a paid geocoder** (e.g. Google
+ * Geocoding API, Mapbox, Radar) before any real traffic. Also noted in
+ * docs/HANDOFF.md's "Simulated or unfinished" table.
  *
  * Because the network may be unavailable in this environment (CI, sandboxed
  * dev), set `GEOCODER=stub` to use a small deterministic offline fixture
@@ -82,8 +84,35 @@ async function geocodeStub(address: string): Promise<GeocodeResult> {
   return hit;
 }
 
-async function geocodeViaNominatim(address: string): Promise<GeocodeResult> {
+/**
+ * Nominatim's usage policy caps the public instance at an absolute maximum
+ * of **1 request per second**. This serializes every call through a single
+ * queue so concurrent lookups (e.g. two reservations resolving addresses at
+ * once) never send requests closer together than that, no matter how many
+ * are in flight — a cache hit in `geocodeAddress` never reaches this at all.
+ */
+const NOMINATIM_MIN_INTERVAL_MS = 1_000;
+let nominatimQueue: Promise<void> = Promise.resolve();
+let nominatimLastRequestAt = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function reserveNominatimSlot(): Promise<void> {
+  const slot = nominatimQueue.then(async () => {
+    const wait = NOMINATIM_MIN_INTERVAL_MS - (Date.now() - nominatimLastRequestAt);
+    if (wait > 0) await sleep(wait);
+    nominatimLastRequestAt = Date.now();
+  });
+  nominatimQueue = slot;
+  return slot;
+}
+
+export async function geocodeViaNominatim(address: string): Promise<GeocodeResult> {
   const url = `${NOMINATIM_URL}?format=json&limit=1&q=${encodeURIComponent(address)}`;
+
+  await reserveNominatimSlot();
 
   let res: Response;
   try {

@@ -74,6 +74,7 @@
     "test:dibbs-offers": "tsx scripts/dibbs-offers-check.ts",
     "test:engagement": "tsx scripts/engagement-check.ts",
     "test:geo": "tsx scripts/geo-check.ts",
+    "test:geo-throttle": "tsx scripts/geocode-throttle-check.ts",
     "test:payments": "tsx scripts/payments-check.ts",
     "test:save": "tsx scripts/save-check.ts",
     "test:retention": "tsx scripts/retention-check.ts",
