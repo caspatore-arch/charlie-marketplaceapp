@@ -115,7 +115,10 @@ export const moderationRouter = router({
             .where(eq(listings.id, listing.id));
 
           // An accepted hold on a listing that just got pulled is cancelled —
-          // never a completed sale, which is left alone.
+          // never a completed sale, which is left alone. The write below
+          // re-checks status itself (not just the read above) so a handoff
+          // that completes between this read and that write isn't clobbered
+          // back to cancelled.
           const [acceptedReservation] = await ctx.db
             .select()
             .from(reservations)
@@ -132,7 +135,7 @@ export const moderationRouter = router({
                 handoffCode: null,
                 updatedAt: now,
               })
-              .where(eq(reservations.id, acceptedReservation.id));
+              .where(and(eq(reservations.id, acceptedReservation.id), eq(reservations.status, 'accepted')));
           }
         }
       }
