@@ -312,3 +312,41 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 11 — moderation/reservation race fix, and the open-PR backlog is now 12 (daily automated build)
+
+Checked all open PRs before picking work, specifically to avoid re-fixing the
+`npm run typecheck` `.unref()` issue a 10th time (it's fixed and ready in #19; #13
+and #17 are the same fix and should be closed once #19 merges). Picked a different,
+unreviewed correctness bug instead: PR #21,
+"Moderation: removing a listing can't clobber a sale that just completed."
+
+`moderation.reviewReport`'s `remove_listing` action reads the listing's `accepted`
+reservation, then cancels it with an `UPDATE` guarded only on the reservation's id,
+not its status — so a handoff that finishes (both sides confirm) in the gap between
+that read and that write can get silently overwritten back to `cancelled` /
+`listing_removed`, contradicting the comment already in the source above it. Fixed
+by adding `status = 'accepted'` to that `UPDATE`'s `WHERE`, matching the idiom
+already used in `offer.ts`'s decline/withdraw. No schema, dependency or behavior
+change for the ordinary case.
+
+Verified on a throwaway sandbox database: `npm run typecheck` (same 5 pre-existing
+`.unref()` errors already on `main`, nothing new), `test:workstreams` 46/46 (2 new),
+`test:e2e` 17/17, `test:geo` 6/6, `payments-check.ts` 39/0, `test:archive` 43/43,
+targeted eslint clean. **Not verified**: the race itself did not reproduce as an
+automated test against this in-process PGlite backend (tried several ways; unlocked
+concurrent calls here resolve in call order instead of truly interleaving, unlike
+the lock-based races elsewhere in this suite) — the fix rests on reading the diff,
+not a reproduced failure. Native/device not run (no Xcode here).
+
+**The open-PR backlog needs owner attention.** As of today there are 12 open draft
+PRs, oldest since October 21 (#1, flagged as this project's top queue item below and
+still unreviewed three weeks later), none merged. The typecheck fix alone has been
+independently rewritten at least ten times (#2, #4, #6, #8, #11, #13, #15, #16, #17,
+#19) because each daily run has no merge authority and a prior run's fix sits
+unseen by the next one; #18 (Nov 8) and #20 (Nov 10) already flagged this pileup
+once each, and it has only grown since. Recommend: merge #19 (simplest, matches
+current `main`) and close #13/#17 as superseded, then work through the rest of the
+queue oldest-first starting with #1. Automated runs will keep finding genuinely new
+issues (like #21) rather than re-litigating old ones, but the backlog won't shrink
+on its own without someone merging.
+
