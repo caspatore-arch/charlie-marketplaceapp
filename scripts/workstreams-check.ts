@@ -22,6 +22,8 @@ process.env.NODE_ENV = 'test';
 process.env.EMAIL_MODE = 'simulated';
 process.env.SMS_MODE = 'simulated';
 process.env.SMS_DISPATCH_INTERVAL_MS = '0';
+// Maya (below) doubles as the demo moderator, same id e2e.ts uses for this.
+process.env.MODERATOR_USER_IDS = '00000000-0000-4000-8000-000000000001';
 
 type Result = { name: string; ok: boolean; detail?: string };
 const results: Result[] = [];
@@ -999,6 +1001,70 @@ async function main() {
     eq((await jordan.payment.config()).paymentsEnabled, false, 'config reports payments off');
     await expectCode('PRECONDITION_FAILED', () => jordan.payment.createIntent({ reservationId: booked.id }));
   });
+
+  /* ================================================== moderation */
+
+  await check('moderation: remove_listing still cancels the one accepted hold on it', async () => {
+    const listing = await makeListing(MAYA);
+    const jordan = await as(JORDAN);
+    const maya = await as(MAYA);
+    const slots = (await jordan.reservation.slots({ listingId: listing.id })).slots.filter((x) => x.available);
+    const booked = await jordan.reservation.book({ listingId: listing.id, spotId: SPOT_A, startsAt: slots[0]!.startsAt });
+    eq(booked.status, 'accepted', 'booked and accepted');
+
+    await jordan.user.report({ targetListingId: listing.id, targetUserId: MAYA, reason: 'prohibited_item', details: 'test' });
+    const report = (await maya.moderation.reports({ status: 'open' })).find((r) => r.targetListingId === listing.id);
+    assert(report != null, 'the report is visible to the moderator');
+
+    await maya.moderation.reviewReport({ id: report!.id, action: 'remove_listing' });
+
+    const [listingRow] = await db.select().from(schema.listings).where(d.eq(schema.listings.id, listing.id));
+    eq(listingRow!.status, 'removed', 'the listing is removed');
+    const [resRow] = await db.select().from(schema.reservations).where(d.eq(schema.reservations.id, booked.id));
+    eq(resRow!.status, 'cancelled', 'the accepted hold is cancelled with it');
+    eq(resRow!.cancelReason, 'listing_removed', 'with the right reason');
+    eq(resRow!.handoffCode, null, 'and no handoff code left to read out');
+  });
+
+  await check('moderation: remove_listing never touches a reservation that already completed', async () => {
+    const listing = await makeListing(MAYA);
+    const jordan = await as(JORDAN);
+    const maya = await as(MAYA);
+    const slots = (await jordan.reservation.slots({ listingId: listing.id })).slots.filter((x) => x.available);
+    const booked = await jordan.reservation.book({ listingId: listing.id, spotId: SPOT_A, startsAt: slots[0]!.startsAt });
+
+    // The sale completes in full before the report is ever filed — the
+    // ordinary, non-racing order of events.
+    await jordan.reservation.confirmHandoff({ id: booked.id });
+    await maya.reservation.confirmHandoff({ id: booked.id, code: booked.handoffCode! });
+    const [completedRow] = await db.select().from(schema.reservations).where(d.eq(schema.reservations.id, booked.id));
+    eq(completedRow!.status, 'completed', 'the handoff completed the sale');
+
+    await jordan.user.report({ targetListingId: listing.id, targetUserId: MAYA, reason: 'prohibited_item', details: 'test' });
+    const report = (await maya.moderation.reports({ status: 'open' })).find((r) => r.targetListingId === listing.id);
+    await maya.moderation.reviewReport({ id: report!.id, action: 'remove_listing' });
+
+    const [listingRow] = await db.select().from(schema.listings).where(d.eq(schema.listings.id, listing.id));
+    eq(listingRow!.status, 'removed', 'the listing can still be pulled after the fact');
+    const [resRow] = await db.select().from(schema.reservations).where(d.eq(schema.reservations.id, booked.id));
+    eq(resRow!.status, 'completed', 'the already-completed sale is left alone, exactly as the comment above the fix promises');
+  });
+
+  // Note on what this doesn't cover: moderation's reservation-cancel write
+  // (above) used to run with no status condition, so a handoff that
+  // completes *between* its read of "accepted" and its write could get
+  // silently clobbered back to "cancelled" — a real TOCTOU, fixed by
+  // conditioning that UPDATE's WHERE on status = 'accepted' (same idiom as
+  // offer.ts's decline/withdraw). A race narrow enough to need two
+  // unguarded DB writes to land in the same few-millisecond gap doesn't
+  // reproduce reliably against this in-process PGlite backend: an
+  // unlocked async call here resolves to completion before a second one
+  // gets scheduled, so `Promise.allSettled([a(), b()])` deterministically
+  // finishes `a()` first every time rather than truly interleaving (tried
+  // repeatedly, including pre-settling one side first; same result every
+  // time). The two tests above are a non-regression check on the ordinary,
+  // sequential cases the fix had to keep working, not a reproduction of
+  // the race itself — that part is supported by reading the diff.
 
   /* ------------------------------------------------------------ report */
   const failed = results.filter((r) => !r.ok);
