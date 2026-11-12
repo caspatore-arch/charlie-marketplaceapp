@@ -21,6 +21,26 @@ Where to look instead:
 > Profile. Where any older text says "auction", "Inbox tab" or "request then accept",
 > read `docs/CONTRACT.md`.
 
+## November 12 typecheck fix (no behavior change)
+
+`npm run typecheck` was failing with 5 errors (`Property 'unref' does not exist on
+type 'number'`) in `backend/dibbs/notify.ts`, `backend/email/bookings.ts`,
+`backend/retention.ts` and `backend/sms/outbox.ts`. The repo's single `tsconfig.json`
+pulls in the DOM lib for the Expo app, so `setInterval`/`setTimeout` type as the
+browser signature everywhere, including in backend code that actually runs under
+Node. Fixed by casting the timer handles to `NodeJS.Timeout` at each call site; the
+dispatchers still `.unref()` exactly as before. See PR
+`fix/backend-timer-unref-typecheck`.
+
+Verified on a throwaway/in-process database, never the shared dev DB or production:
+`npm run typecheck` (0 errors), `npm run test:e2e` (17/17), `npm run test:geo` (6/6),
+`npx tsx scripts/payments-check.ts` (39/39), `npm run test:workstreams` (44/44).
+`npm run lint` still reports the same 17 pre-existing errors in unrelated UI files
+(e.g. `components/ui/Skeleton.tsx`); none are in the files touched here.
+
+Not verified: native iPhone (no Xcode on this machine), and this fix was not
+exercised against the hosted Render/Neon production environment.
+
 ## 3. Simulated or unfinished — read before demoing
 
 Updated 2026-10-26 against the verified production facts in
