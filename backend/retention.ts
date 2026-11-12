@@ -91,6 +91,6 @@ export function startRetentionSweeper(db: Db) {
   const run = () => {
     void purgeClosedAccounts(db).catch(() => console.error('[retention] closed-account cleanup failed'));
   };
-  setTimeout(run, 60_000).unref?.();
-  setInterval(run, SWEEP_EVERY_MS).unref?.();
+  (setTimeout(run, 60_000) as unknown as NodeJS.Timeout).unref?.();
+  (setInterval(run, SWEEP_EVERY_MS) as unknown as NodeJS.Timeout).unref?.();
 }
