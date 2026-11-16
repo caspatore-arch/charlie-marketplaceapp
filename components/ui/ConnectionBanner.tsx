@@ -9,17 +9,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, RotateCw } from 'lucide-react-native';
+import { useIsFetching, useIsMutating, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Hourglass, RotateCw } from 'lucide-react-native';
 import { Text } from './Text';
 import { colors, radius, space, minTouchHeight } from '@/constants/theme';
 import { useConnection } from '@/hooks/useConnection';
+
+const SLOW_REQUEST_MS = 5_000;
 
 export function ConnectionBanner() {
   const { status, apiBaseUrl, retry } = useConnection();
   const insets = useSafeAreaInsets();
   const [reduceMotion, setReduceMotion] = useState(false);
-  const opacity = useRef(new Animated.Value(0)).current;
+  // Lazy state, not useAnimatedValue: react-native-web does not export that hook.
+  const [opacity] = useState(() => new Animated.Value(0));
   const visible = status === 'offline';
   const queryClient = useQueryClient();
   const wasOffline = useRef(false);
@@ -52,7 +55,41 @@ export function ConnectionBanner() {
     }).start();
   }, [visible, reduceMotion, opacity]);
 
-  if (!visible) return null;
+  // Cold-start notice: the API host sleeps when idle, so the first request
+  // after a quiet period can take up to a minute. Show a calm line once any
+  // request has been pending for 5s; hide it when everything settles.
+  const pending = useIsFetching() + useIsMutating() > 0;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => setSlow(true), SLOW_REQUEST_MS);
+    return () => {
+      clearTimeout(timer);
+      setSlow(false);
+    };
+  }, [pending]);
+
+  if (!visible) {
+    if (!slow) return null;
+    return (
+      <View style={[styles.wrap, { top: insets.top }]} pointerEvents="box-none">
+        <View
+          style={styles.card}
+          accessible
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          accessibilityLabel="Waking up the server. This can take up to a minute."
+        >
+          <View style={styles.headerRow}>
+            <Hourglass size={16} color={colors.warning} />
+            <Text variant="label" color="warning" style={styles.title}>
+              Waking up the server. This can take up to a minute.
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <Animated.View

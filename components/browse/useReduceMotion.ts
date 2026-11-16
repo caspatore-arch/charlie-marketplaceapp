@@ -4,17 +4,17 @@
  * asking the OS separately is wasted work. On web, react-native-web backs this
  * with the `prefers-reduced-motion` media query.
  */
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { AccessibilityInfo } from 'react-native';
 
 let current = false;
 let started = false;
-const listeners = new Set<(v: boolean) => void>();
+const listeners = new Set<() => void>();
 
 function set(next: boolean) {
   if (next === current) return;
   current = next;
-  listeners.forEach((l) => l(next));
+  listeners.forEach((l) => l());
 }
 
 function start() {
@@ -24,15 +24,18 @@ function start() {
   AccessibilityInfo.addEventListener?.('reduceMotionChanged', set);
 }
 
+function subscribe(listener: () => void): () => void {
+  start();
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function getSnapshot(): boolean {
+  return current;
+}
+
 export function useReduceMotion(): boolean {
-  const [value, setValue] = useState(current);
-  useEffect(() => {
-    start();
-    listeners.add(setValue);
-    setValue(current);
-    return () => {
-      listeners.delete(setValue);
-    };
-  }, []);
-  return value;
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

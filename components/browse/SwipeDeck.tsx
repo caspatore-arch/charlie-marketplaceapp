@@ -198,6 +198,9 @@ function SwipeCard({
           <Image
             source={{ uri: resolveMediaUrl(item.coverPhotoUrl) }}
             style={styles.photo}
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel={`Photo of ${item.title}`}
             contentFit="cover"
             transition={150}
           />
