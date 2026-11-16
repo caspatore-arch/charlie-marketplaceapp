@@ -37,6 +37,7 @@ Updated 2026-10-26 against the verified production facts in
 | Reminders / push | Push not implemented. Screens poll every 5-10 s while open. Meetup reminders are texts, which are simulated (see SMS). |
 | Read receipts | None; unread count = messages from the other person. |
 | Listing expiry | A listing shows in Browse for 24 hours, then moves to the Archive; community posts do not expire. Applied lazily when data is read, not by a background job. |
+| Removing a listing | 2026-11-16: `listing.remove` now refuses a **sold** listing (CONFLICT), because removing it let Relist put an item that already changed hands back on Browse. Removing an already-removed listing is a no-op, and both `remove` and `relist` write only if the status is still one they accept, so a sale completing (or a second relist) between the read and the write is not overwritten. Removing a listing with a booked meetup still does **not** cancel the meetup; the Edit screen warns the seller (unchanged, deliberate). Tested in `npm run test:archive` by sequential calls; a true concurrent race was not forced. |
 | Demo photos | Generated SVG placeholders with a "DEMO" mark. Real photos come from the picker. |
 | Photo storage | Cloudflare R2 bucket `dibbs-photos` exists, but on 2026-10-25 `S3_BUCKET` was not yet set on the API host. Do **not** claim photos persist until `docs/DEPLOY.md` section 4 is verified. |
 | Time zone | Sell form uses the device's time zone (fine on campus). |

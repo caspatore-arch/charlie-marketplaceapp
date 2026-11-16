@@ -146,6 +146,13 @@ async function bidCountFor(db: Db, listingId: string): Promise<number> {
 }
 
 /** Loads a listing the caller owns, or throws NOT_FOUND / FORBIDDEN. */
+function soldConflict() {
+  return new TRPCError({
+    code: 'CONFLICT',
+    message: 'This item already sold, so it stays in your sold history and can’t be removed.',
+  });
+}
+
 async function loadOwnListing(db: Db, id: string, userId: string) {
   const [listing] = await db.select().from(listings).where(eq(listings.id, id)).limit(1);
   if (!listing) throw new TRPCError({ code: 'NOT_FOUND', message: 'That item no longer exists.' });
@@ -511,10 +518,28 @@ export const listingRouter = router({
           message: "This auction already has bids, so it can't be removed.",
         });
       }
-      await ctx.db
+      // A sold listing is the record of a finished sale: removing it would let
+      // Relist (expired/removed → active) put an item that already changed
+      // hands back on Browse. Already removed is a no-op, so a double tap or a
+      // retry does not rewrite updatedAt. The status condition in the WHERE
+      // (not just the check above) is what stops a sale completing between the
+      // read and the write from being overwritten.
+      if (existing.status === 'sold') throw soldConflict();
+      if (existing.status === 'removed') return { ok: true as const };
+      const removed = await ctx.db
         .update(listings)
         .set({ status: 'removed', updatedAt: new Date() })
-        .where(eq(listings.id, existing.id));
+        .where(and(eq(listings.id, existing.id), inArray(listings.status, ['active', 'reserved', 'expired'])))
+        .returning({ id: listings.id });
+      if (removed.length === 0) {
+        const [current] = await ctx.db
+          .select({ status: listings.status })
+          .from(listings)
+          .where(eq(listings.id, existing.id))
+          .limit(1);
+        if (current?.status === 'sold') throw soldConflict();
+        // Removed by a concurrent call (or a moderator) in the meantime: same outcome.
+      }
       await expireOffers(ctx.db);
       return { ok: true as const };
     }),
@@ -572,8 +597,13 @@ export const listingRouter = router({
           createdAt: now,
           updatedAt: now,
         })
-        .where(eq(listings.id, existing.id))
+        // Conditioned on the status checked above, so two relists racing (a
+        // double tap) cannot both pass and post the "listing posted" SMS twice.
+        .where(and(eq(listings.id, existing.id), inArray(listings.status, ['expired', 'removed'])))
         .returning();
+      if (!updated) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'Only expired or removed items can be relisted.' });
+      }
       await replaceWindows(ctx.db, existing.id, input.windows ?? []);
       await enqueueListingPosted(ctx.db, existing.id);
       await upsertListingPostQuietly(ctx.db, updated!);

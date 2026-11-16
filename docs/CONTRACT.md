@@ -109,9 +109,11 @@ listing.create        C    { title, description?, category, condition, priceCent
 listing.update        P    { id, ...same fields optional }             → ListingDetail
       Editing `windows` re-applies the same window rules against the listing's own expiry; omitting `windows` leaves them alone.
       CONFLICT when the listing is a legacy auction ("…closes at its original end time. Relist it with an asking price afterwards."); BAD_REQUEST when saleType: 'auction' is sent.
-listing.remove        P    { id }                   → { ok }   (CONFLICT when a legacy auction already has bids)
+listing.remove        P    { id }                   → { ok }   (CONFLICT when a legacy auction already has bids, or when the listing is
+      `sold`: a finished sale stays in the seller's history and is never relistable. Already `removed` → { ok } with no write.
+      The UPDATE is conditioned on status active/reserved/expired. Does not cancel a booked meetup.)
 listing.relist        C    { id, isSellToday, priceCents?, windows?, (legacy: saleType?, startPriceCents?, buyoutPriceCents?) } → ListingDetail
-      (expired/removed → active, saleType forced to 'fixed', expiresAt = now + 24h, windows replaced (none if omitted). Old bids are KEPT as history, not deleted. 'auction' is refused. Enqueues the listing-posted SMS.)
+      (expired/removed → active, CONFLICT otherwise (the UPDATE is conditioned on that status, so a double relist posts once), saleType forced to 'fixed', expiresAt = now + 24h, windows replaced (none if omitted). Old bids are KEPT as history, not deleted. 'auction' is refused. Enqueues the listing-posted SMS.)
 
 bid.place             P    { listingId, amountCents } → always PRECONDITION_FAILED "Bidding has been replaced by offers. Update Dibbs to make an offer or book at the asking price."
 bid.buyout            P    { listingId }           → always PRECONDITION_FAILED (same message)
