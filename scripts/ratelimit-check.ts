@@ -4,13 +4,25 @@
  *   npm run test:ratelimit
  *
  * Covers: Cloudflare's CF-Connecting-IP wins over a faked X-Forwarded-For, so
- * changing that header per request no longer dodges a per-IP limit; signed-in
- * callers get their own bucket even on one shared IP; signed-out callers on
- * one IP get the larger IP cap; a 429 carries Retry-After.
+ * changing that header per request no longer dodges a per-IP limit; without
+ * Cloudflare only the right-most (proxy-added) X-Forwarded-For hop counts;
+ * True-Client-IP and X-Real-IP are ignored; signed-in callers get their own
+ * bucket even on one shared IP; a token that is not a live session gets no
+ * bucket of its own; signed-out callers on one IP get the larger IP cap; a
+ * 429 carries Retry-After. Sessions come from a stub resolver, so no database.
  */
 import { Hono } from 'hono';
 
-import { __resetRateLimitsForTests, callerKey, rateLimit } from '../backend/ratelimit';
+import { __resetRateLimitsForTests, callerKey, rateLimit, setSessionResolver } from '../backend/ratelimit';
+
+// Stand-in for the session lookup backend/hono.ts installs: only these two
+// tokens are live sessions.
+const LIVE: Record<string, string> = { 'Bearer alice-token': 'alice', 'Bearer bob-token': 'bob' };
+let lookups = 0;
+setSessionResolver(async (header) => {
+  lookups += 1;
+  return LIVE[header] ?? null;
+});
 
 let passes = 0;
 let failures = 0;
@@ -43,8 +55,12 @@ async function main() {
   check('different real visitors get separate buckets', twoVisitors.every((s) => s === 200));
 
   __resetRateLimitsForTests();
-  const noCf = await hits(ipOnly, 6, () => ({ 'x-forwarded-for': '198.51.100.1, 10.0.0.1' }));
-  check('falls back to the first X-Forwarded-For entry without Cloudflare', noCf.at(-1) === 429 && noCf.slice(0, 5).every((s) => s === 200));
+  const noCf = await hits(ipOnly, 6, (i) => ({ 'x-forwarded-for': `198.51.100.${i}, 10.0.0.1` }));
+  check('without Cloudflare, only the right-most X-Forwarded-For hop counts', noCf.at(-1) === 429 && noCf.slice(0, 5).every((s) => s === 200), noCf.join(','));
+
+  __resetRateLimitsForTests();
+  const fakeHeaders = await hits(ipOnly, 6, (i) => ({ 'true-client-ip': `198.18.1.${i}`, 'x-real-ip': `198.18.2.${i}` }));
+  check('True-Client-IP and X-Real-IP cannot pick a bucket', fakeHeaders.at(-1) === 429, fakeHeaders.join(','));
 
   const api = new Hono();
   api.use('*', rateLimit('api', 3, 60_000, callerKey, 10));
@@ -62,6 +78,22 @@ async function main() {
   check('signed-in people on that same wifi are not blocked by it', [...alice, ...bob].every((s) => s === 200));
   const aliceOver = (await api.request('/x', { headers: { ...sameWifi, authorization: 'Bearer alice-token' } })).status;
   check('each signed-in person still has their own cap', aliceOver === 429);
+  check('confirmed sessions are cached, not looked up on every request', lookups <= 2, `${lookups} lookups`);
+
+  __resetRateLimitsForTests();
+  const randomTokens = await hits(api, 12, (i) => ({ 'cf-connecting-ip': '203.0.113.30', authorization: `Bearer random-${i}-${Math.random()}` }));
+  check(
+    'random bearer tokens share the IP bucket instead of getting fresh ones',
+    randomTokens.slice(0, 10).every((s) => s === 200) && randomTokens.slice(10).every((s) => s === 429),
+    randomTokens.join(','),
+  );
+
+  __resetRateLimitsForTests();
+  setSessionResolver(async () => {
+    throw new Error('database down');
+  });
+  const dbDown = await hits(api, 11, () => ({ 'cf-connecting-ip': '203.0.113.31', authorization: 'Bearer alice-token' }));
+  check('a failed session lookup falls back to the IP bucket (still limited)', dbDown.at(-1) === 429, dbDown.join(','));
 
   console.log(`\n${passes} passed, ${failures} failed`);
   process.exit(failures ? 1 : 0);

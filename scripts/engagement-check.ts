@@ -107,7 +107,7 @@ async function main() {
       priceCents: 2500,
       saleType: 'fixed',
       isSellToday: false,
-      photoUrls: ['/uploads/demo.jpg'],
+      photoUrls: ['/api/uploads/demo.jpg'],
       spotIds: [SPOT_ID],
       windows: [{ startsAt: new Date(Date.now() + HOUR), endsAt: new Date(Date.now() + 3 * HOUR) }],
     });

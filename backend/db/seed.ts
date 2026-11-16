@@ -93,6 +93,9 @@ async function writeDemoPhotos(): Promise<Record<string, string>> {
       `${art.slug}.svg`,
       Buffer.from(demoSvg(art), 'utf8'),
       'image/svg+xml',
+      // Demo art keeps its fixed name so re-seeding overwrites instead of
+      // piling up copies. Only the seed may do this; user uploads never can.
+      { keepName: true },
     );
     urls[art.slug] = url;
   }

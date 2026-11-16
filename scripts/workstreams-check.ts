@@ -592,13 +592,11 @@ async function main() {
     await db.update(schema.users).set({ phone: null, phoneVerifiedAt: null }).where(d.eq(schema.users.id, JORDAN));
     const tmp = await as(done.user.id);
     await tmp.auth.requestEmailLinkCode({ email: 'jordan@demo.campus.test' });
-    const [codeRow] = await db
-      .select()
-      .from(schema.emailCodes)
-      .where(d.eq(schema.emailCodes.email, 'jordan@demo.campus.test'))
-      .orderBy(d.desc(schema.emailCodes.expiresAt))
-      .limit(1);
-    const out = await tmp.auth.confirmEmailLink({ email: 'jordan@demo.campus.test', code: codeRow!.code });
+    // Codes are stored only as hashes: read it from the (default, simulated) mailbox.
+    const { emailProvider } = await import('../backend/email/provider');
+    const sentMail = (emailProvider() as unknown as { sent: { to: string; subject: string }[] }).sent;
+    const linkMsg = [...sentMail].reverse().find((m) => m.to === 'jordan@demo.campus.test');
+    const out = await tmp.auth.confirmEmailLink({ email: 'jordan@demo.campus.test', code: /(\d{6})/.exec(linkMsg!.subject)![1]! });
     eq(out.switchedAccount, true, 'switched to the existing account');
     eq(out.user.id, JORDAN, 'kept the account with history');
     eq(out.user.phone, phone, 'phone moved onto it');

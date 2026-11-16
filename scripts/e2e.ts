@@ -93,6 +93,20 @@ function clientFor(url: string, token?: string) {
 
 type Client = ReturnType<typeof clientFor>;
 
+/**
+ * Email codes are stored only as hashes, so the in-process harness reads the
+ * newest code sent to `email` from the simulated mailbox instead of the DB.
+ */
+async function simulatedCodeFor(email: string): Promise<string> {
+  const { emailProvider, SimulatedEmailProvider } = await import('../backend/email/provider');
+  const p = emailProvider();
+  if (!(p instanceof SimulatedEmailProvider)) throw new Error('e2e needs the simulated email provider');
+  const msg = [...p.sent].reverse().find((m) => m.to === email);
+  const code = msg ? /(\d{6})/.exec(msg.subject)?.[1] : undefined;
+  if (!code) throw new Error(`no simulated code email for ${email}`);
+  return code;
+}
+
 async function main(): Promise<number> {
   let stop: (() => void) | null = null;
   let url: string;
@@ -1054,7 +1068,7 @@ async function main(): Promise<number> {
 
       const verified = await guest.auth.verifyCode.mutate({
         email: throwawayEmail,
-        code: codeRow!.code,
+        code: await simulatedCodeFor(throwawayEmail),
         displayName: 'Throwaway E2E',
       });
       const throwaway: Client = clientFor(url, verified.token);
@@ -1315,8 +1329,7 @@ async function main(): Promise<number> {
     // A fresh student (no open meetups, so the account can be closed at the end).
     const email = 'contact-e2e@demo.campus.test';
     await guest.auth.requestCode.mutate({ email });
-    const [codeRow] = await db.select().from(schema.emailCodes).where(eqOp(schema.emailCodes.email, email)).limit(1);
-    const verified = await guest.auth.verifyCode.mutate({ email, code: codeRow!.code, displayName: 'Contact E2E' });
+    const verified = await guest.auth.verifyCode.mutate({ email, code: await simulatedCodeFor(email), displayName: 'Contact E2E' });
     const sam: Client = clientFor(url, verified.token);
     const SAM_ID = verified.user.id;
 
@@ -1522,8 +1535,7 @@ async function main(): Promise<number> {
 
     const email = 'closing-e2e@demo.campus.test';
     await guest.auth.requestCode.mutate({ email });
-    const [codeRow] = await db.select().from(schema.emailCodes).where(eqOp(schema.emailCodes.email, email)).limit(1);
-    const v = await guest.auth.verifyCode.mutate({ email, code: codeRow!.code, displayName: 'Closing E2E' });
+    const v = await guest.auth.verifyCode.mutate({ email, code: await simulatedCodeFor(email), displayName: 'Closing E2E' });
     const closer = clientFor(url, v.token);
     const CLOSER_ID = v.user.id;
 

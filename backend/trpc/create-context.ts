@@ -56,9 +56,21 @@ export async function userFromAuthHeader(header: string | null | undefined): Pro
 export type Context = {
   db: typeof db;
   user: User | null;
+  /**
+   * The caller's network address as the server derives it (see `clientIp` in
+   * backend/ratelimit.ts). Used only for abuse limits that must survive a
+   * restart, such as the daily cap on sign-in emails. Null when the caller is
+   * not an HTTP request (tests and scripts that call procedures directly),
+   * which is why it is optional.
+   */
+  ip?: string | null;
 };
 
 /** Used by the Hono @hono/trpc-server adapter (fetch-style options). */
-export async function createContext(opts: { req: Request }): Promise<Context> {
-  return { db, user: await userFromAuthHeader(opts.req.headers.get('authorization')) };
+export async function createContext(opts: { req: Request; ip?: string | null }): Promise<Context> {
+  return {
+    db,
+    user: await userFromAuthHeader(opts.req.headers.get('authorization')),
+    ip: opts.ip ?? null,
+  };
 }

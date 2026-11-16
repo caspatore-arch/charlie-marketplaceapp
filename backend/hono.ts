@@ -1,5 +1,6 @@
 import { trpcServer } from '@hono/trpc-server';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 
 import { and, eq, gte, sql } from 'drizzle-orm';
@@ -14,11 +15,12 @@ import {
   newPrivateKey,
   putPrivate,
   signedMediaPath,
+  sniffMatches,
   validatePrivateMedia,
   verifySignedMedia,
 } from './dibbs/media';
 import { env } from './env';
-import { callerKey, rateLimit } from './ratelimit';
+import { callerKey, clientIp, rateLimit, setSessionResolver } from './ratelimit';
 import { paymentsMode } from './stripe/client';
 import { handleSmsOptOut } from './sms/webhook';
 import { resolveSmsMode } from './sms/provider';
@@ -33,8 +35,8 @@ import {
   MAX_UPLOAD_BYTES,
   UploadError,
   USER_CONTENT_TYPES,
-  sanitizeFileName,
   storage,
+  storageMode,
 } from './storage';
 import { adminApp } from './admin/routes';
 import { parsePlatform, recordVisit } from './admin/visits';
@@ -42,6 +44,23 @@ import { appRouter } from './trpc/app-router';
 import { createContext, userFromAuthHeader } from './trpc/create-context';
 
 export const app = new Hono();
+
+// The limiter gives a bearer token its own bucket only when it is a live
+// session (backend/ratelimit.ts). The lookup lives here so ratelimit.ts needs
+// no database import.
+setSessionResolver(async (header) => (await userFromAuthHeader(header))?.id ?? null);
+
+/**
+ * Body size caps, enforced while the body streams in — before formData() or
+ * tRPC buffers it — so a chunked upload with no Content-Length is cut off at
+ * the cap too (hono/body-limit counts the bytes when Transfer-Encoding is set
+ * or Content-Length is missing). Each cap is the per-file rule plus room for
+ * the multipart envelope.
+ */
+const MULTIPART_OVERHEAD = 1024 * 1024;
+function capBody(maxSize: number, message: string) {
+  return bodyLimit({ maxSize, onError: (c: Context) => c.json({ error: message }, 413) });
+}
 
 /**
  * CORS. Local dev keeps today's fully permissive behaviour (origin: '*') so
@@ -101,6 +120,9 @@ app.get('/api/health', (c) => {
     },
     sms: { mode: resolveSmsMode().mode, simulated: resolveSmsMode().mode === 'simulated' },
     email: { mode: resolveEmailMode().mode, simulated: resolveEmailMode().mode === 'simulated' },
+    // 'disk' in production means photos sit on Render's disposable disk and
+    // vanish on the next deploy. Mode only: no bucket, host or key.
+    storage: { mode: storageMode },
   });
 });
 
@@ -109,7 +131,19 @@ app.get('/api/health', (c) => {
  * must read `c.req.text()` and never a parsed/re-serialized object. It is the
  * only thing in this codebase allowed to move a payment to a terminal state.
  */
+/**
+ * In production with simulated payments, the webhook and the test hook do not
+ * exist. The simulated gateway accepts one fixed, publicly known signature, so
+ * leaving the route open would let anyone forge "payment succeeded" events.
+ * Simulated flows never need the route: they call processWebhook in-process
+ * (backend/stripe/webhook.ts processSimulatedEvent).
+ */
+function simulatedPaymentsInProduction(): boolean {
+  return env.isProduction && paymentsMode().mode === 'simulated';
+}
+
 app.post('/api/stripe/webhook', async (c) => {
+  if (simulatedPaymentsInProduction()) return c.json({ error: 'Not found' }, 404);
   const rawBody = await c.req.text();
   const result = await processWebhook(db, rawBody, c.req.header('stripe-signature') ?? null);
   return c.json(result.body, result.status as 200);
@@ -123,7 +157,7 @@ app.post('/api/stripe/webhook', async (c) => {
  * Guarded by DEV_LOGIN=1 AND PAYMENTS_MODE resolving to `simulated`.
  */
 app.post('/api/stripe/simulated-test-event', async (c) => {
-  if (!simulateHookAllowed()) {
+  if (env.isProduction || !simulateHookAllowed()) {
     return c.json({ error: 'Not found' }, 404);
   }
   let body: {
@@ -170,39 +204,70 @@ app.use(
   rateLimit('api', env.rateLimitApiPerMinute, 60_000, callerKey, env.rateLimitApiAnonPerMinute),
 );
 
-app.use(
-  '/api/trpc/auth.requestCode',
-  rateLimit('auth.requestCode', env.rateLimitAuthRequestCodePerMinute, 60_000),
-);
-app.use(
-  '/api/trpc/auth.requestPhoneCode*',
-  rateLimit('auth.requestPhoneCode', env.rateLimitPhoneRequestPerMinute, 60_000),
-);
-app.use(
-  '/api/trpc/auth.requestPhoneLinkCode*',
-  rateLimit('auth.requestPhoneCode', env.rateLimitPhoneRequestPerMinute, 60_000),
-);
-app.use(
-  '/api/trpc/auth.verifyPhoneCode*',
-  rateLimit('auth.verifyPhoneCode', env.rateLimitPhoneVerifyPerMinute, 60_000),
-);
-app.use(
-  '/api/trpc/auth.confirmPhoneLink*',
-  rateLimit('auth.verifyPhoneCode', env.rateLimitPhoneVerifyPerMinute, 60_000),
-);
-app.use(
-  '/api/trpc/auth.verifyCode',
-  rateLimit('auth.verifyCode', env.rateLimitAuthVerifyCodePerMinute, 60_000),
-);
-app.use(
-  '/api/trpc/reservation.checkAddress',
-  rateLimit('reservation.checkAddress', env.rateLimitCheckAddressPerMinute, 60_000),
-);
+
+/**
+ * tRPC batching is off (allowBatching: false below). A batched call puts
+ * several procedures in one path (`/api/trpc/a,b?batch=1`), which no
+ * per-procedure limiter can see. This app's client uses httpLink, one call per
+ * request (lib/trpc.ts), so nothing legitimate batches. Refused here as well
+ * as in tRPC so a batched request never reaches a procedure or a limiter.
+ */
+const TRPC_ENDPOINT = '/api/trpc';
+
+/** The procedure a /api/trpc/* request names, read the way tRPC's fetch
+ *  adapter reads it (slashes trimmed, percent-decoding applied), lowercased.
+ *  Matching on this rather than Hono route strings means a trailing slash,
+ *  an encoded letter, a query string or a case change cannot slip past. */
+function trpcProcedureOf(c: Context): string {
+  let rest = new URL(c.req.url).pathname.slice(TRPC_ENDPOINT.length).replace(/^\/+|\/+$/g, '');
+  try {
+    rest = decodeURIComponent(rest);
+  } catch {
+    // Malformed escape: tRPC will refuse it; match on the raw text.
+  }
+  return rest.toLowerCase();
+}
+
+app.use('/api/trpc/*', async (c, next) => {
+  if (trpcProcedureOf(c).includes(',') || new URL(c.req.url).searchParams.has('batch')) {
+    return c.json({ error: 'Batched requests are not supported. Send one call per request.' }, 400);
+  }
+  return next();
+});
+
+// Both sign-in code requests share one bucket, and both code checks share one,
+// so switching between email and phone procedures does not reset a count.
+const requestCodeLimit = rateLimit('auth.requestCode', env.rateLimitAuthRequestCodePerMinute, 60_000);
+const verifyCodeLimit = rateLimit('auth.verifyCode', env.rateLimitAuthVerifyCodePerMinute, 60_000);
+const phoneRequestLimit = rateLimit('auth.requestPhoneCode', env.rateLimitPhoneRequestPerMinute, 60_000);
+const phoneVerifyLimit = rateLimit('auth.verifyPhoneCode', env.rateLimitPhoneVerifyPerMinute, 60_000);
+const PROCEDURE_LIMITS: Record<string, ReturnType<typeof rateLimit>> = {
+  'auth.requestcode': requestCodeLimit,
+  'auth.requestemaillinkcode': requestCodeLimit,
+  'auth.verifycode': verifyCodeLimit,
+  'auth.confirmemaillink': verifyCodeLimit,
+  'auth.requestphonecode': phoneRequestLimit,
+  'auth.requestphonelinkcode': phoneRequestLimit,
+  'auth.verifyphonecode': phoneVerifyLimit,
+  'auth.confirmphonelink': phoneVerifyLimit,
+  'reservation.checkaddress': rateLimit('reservation.checkAddress', env.rateLimitCheckAddressPerMinute, 60_000),
+};
+
+app.use('/api/trpc/*', capBody(1024 * 1024, 'That request is too large.'), async (c, next) => {
+  const limiter = PROCEDURE_LIMITS[trpcProcedureOf(c)];
+  return limiter ? limiter(c, next) : next();
+});
+
 // Uploading needs a sign-in, so each person gets their own bucket. Only POST
 // counts: every photo on screen is a GET here, and one shared per-IP bucket
 // used to break images for a whole campus wifi after a few dozen. (The old
 // '/api/uploads' + '/api/uploads/*' pair also counted each upload twice.)
 app.on('POST', '/api/uploads', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
+app.on(
+  'POST',
+  '/api/uploads',
+  capBody(MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD, 'That image is larger than 8 MB. Try a smaller one.'),
+);
 // Viewing photos: a high per-IP ceiling, only to stop a runaway scraper.
 app.on('GET', '/api/uploads/:name', rateLimit('uploads.view', env.rateLimitPhotoViewsPerMinute, 60_000));
 
@@ -237,7 +302,13 @@ app.post('/api/uploads', async (c) => {
 
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
-    const { url } = await storage.put(sanitizeFileName(file.name), bytes, contentType);
+    // The declared type is the client's word; the leading bytes must agree
+    // (same check private media uses, backend/dibbs/media.ts).
+    if (!sniffMatches(bytes, contentType)) {
+      return c.json({ error: 'That file is not a JPEG, PNG, WebP or HEIC photo.' }, 415);
+    }
+    // User uploads always get a generated name (backend/storage.ts).
+    const { url } = await storage.put(file.name, bytes, contentType);
     return c.json({ url });
   } catch (err) {
     if (err instanceof UploadError) return c.json({ error: err.message }, err.status as 400);
@@ -251,12 +322,21 @@ app.get('/api/uploads/:name', async (c) => {
   return c.body(found.bytes as unknown as ArrayBuffer, 200, {
     'Content-Type': found.contentType,
     'Cache-Control': 'public, max-age=86400',
+    // Never let a browser second-guess the type, and if an SVG is opened
+    // directly it runs no script and loads nothing.
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
   });
 });
 
 /* ------------------------------------------- private media (Dibbs offers) */
 
 app.on('POST', '/api/private-media', rateLimit('uploads', env.rateLimitUploadsPerMinute, 60_000, callerKey));
+app.on(
+  'POST',
+  '/api/private-media',
+  capBody(PRIVATE_VIDEO_MAX_BYTES + MULTIPART_OVERHEAD, 'That file is too large. Videos can be up to 50 MB and photos up to 8 MB.'),
+);
 app.on('GET', '/api/private-media/:id', rateLimit('uploads.view', env.rateLimitPhotoViewsPerMinute, 60_000));
 
 /**
@@ -342,7 +422,9 @@ app.use(
   trpcServer({
     endpoint: '/api/trpc',
     router: appRouter,
-    createContext: (opts) => createContext(opts),
+    // See the batching note above the per-procedure limiters.
+    allowBatching: false,
+    createContext: (opts, c) => createContext({ req: opts.req, ip: clientIp(c) }),
   }),
 );
 

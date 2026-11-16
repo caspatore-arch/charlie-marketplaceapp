@@ -75,7 +75,9 @@ export interface SimulatedEventInput {
 
 /** True only when the local test hook may be used at all. */
 export function simulateHookAllowed(): boolean {
-  return env.devLogin && paymentsMode().mode === 'simulated';
+  // env.devLogin is already false in production; the explicit check keeps this
+  // hook closed even if that getter changes.
+  return env.devLogin && !env.isProduction && paymentsMode().mode === 'simulated';
 }
 
 /**
@@ -92,7 +94,7 @@ export async function processSimulatedEvent(
       status: 403,
       body: {
         error:
-          'The simulated payment hook is only available with DEV_LOGIN=1 and PAYMENTS_MODE=simulated.',
+          'The simulated payment hook is only available outside production with DEV_LOGIN=1 and PAYMENTS_MODE=simulated.',
       },
     };
   }

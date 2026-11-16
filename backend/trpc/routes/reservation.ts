@@ -21,7 +21,7 @@
  */
 import { TRPCError } from '@trpc/server';
 import crypto from 'node:crypto';
-import { and, desc, eq, inArray, ne, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
@@ -279,6 +279,26 @@ async function loadParticipantReservation(db: Db, id: string, userId: string) {
   return res;
 }
 
+/**
+ * A raw reservation row as `viewerId` may see it. The handoff code belongs to
+ * the buyer, who reads it out; the seller proves the handoff by typing it, so
+ * the seller (or anyone else) must never receive it from any procedure. Every
+ * procedure that returns a raw row goes through this; details go through
+ * lib.ts toReservationDetails, which applies the same rule.
+ */
+export function rowForViewer<T extends Reservation>(row: T, viewerId: string): T {
+  return { ...row, handoffCode: viewerId === row.buyerId ? row.handoffCode : null };
+}
+
+/** Wrong handoff codes a seller may type before code confirmation locks. */
+export const HANDOFF_MAX_ATTEMPTS = 5;
+
+function handoffCodesMatch(given: string, expected: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 async function detailFor(db: Db, res: Reservation, viewerId: string) {
   const [detail] = await toReservationDetailsWithCustom(db, [res], viewerId);
   return detail!;
@@ -458,7 +478,7 @@ export const reservationRouter = router({
         kind: 'requested',
       });
 
-      return created!;
+      return rowForViewer(created!, ctx.user.id);
     }),
 
   /** Validates a custom address without creating anything — powers the "Check address" step in the UI. */
@@ -580,7 +600,7 @@ export const reservationRouter = router({
         kind: 'countered',
       });
 
-      return updated!;
+      return rowForViewer(updated!, ctx.user.id);
     }),
 
   accept: protectedProcedure
@@ -674,6 +694,7 @@ export const reservationRouter = router({
             .set({
               status: 'accepted',
               handoffCode,
+              handoffAttempts: 0,
               buyerConfirmedAt: null,
               sellerConfirmedAt: null,
               updatedAt: now,
@@ -727,7 +748,8 @@ export const reservationRouter = router({
         kind: 'accepted',
       });
 
-      return result;
+      // The acceptor is often the seller, who must not see the buyer's code.
+      return rowForViewer(result, ctx.user.id);
     }),
 
   decline: protectedProcedure
@@ -760,7 +782,7 @@ export const reservationRouter = router({
         kind: 'declined',
       });
 
-      return updated!;
+      return rowForViewer(updated!, ctx.user.id);
     }),
 
   cancel: protectedProcedure
@@ -797,7 +819,7 @@ export const reservationRouter = router({
         kind: 'cancelled',
       });
 
-      return updated!;
+      return rowForViewer(updated!, ctx.user.id);
     }),
 
   /**
@@ -1132,8 +1154,10 @@ export const reservationRouter = router({
         : [];
       const buyerById = new Map(buyers.map((b) => [b.id, b]));
 
+      // Seller-only view: the buyer's handoff code is never included.
       return rows.map((r) => ({
         ...r,
+        handoffCode: null,
         buyer: buyerById.get(r.buyerId) ?? { id: r.buyerId, displayName: 'Deleted account', avatarUrl: null },
       }));
     }),
@@ -1161,10 +1185,32 @@ export const reservationRouter = router({
       let method: 'code' | 'tap' = 'tap';
 
       if (isSeller) {
-        if (!input.code || input.code !== res.handoffCode) {
+        if (!input.code) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Enter the 4-digit code the buyer reads out.' });
+        }
+        // Count the try BEFORE comparing (one atomic increment), so parallel
+        // guesses can't get past the limit. A rescheduled meetup gets a new
+        // code and a fresh count on accept.
+        const [counted] = await ctx.db
+          .update(reservations)
+          .set({ handoffAttempts: sql`${reservations.handoffAttempts} + 1` })
+          .where(and(eq(reservations.id, res.id), lt(reservations.handoffAttempts, HANDOFF_MAX_ATTEMPTS)))
+          .returning({ attempts: reservations.handoffAttempts });
+        if (!counted) {
           throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: "That code doesn't match. Ask the buyer to read it out again.",
+            code: 'TOO_MANY_REQUESTS',
+            message:
+              'Too many wrong codes. Code confirmation is locked for this meetup. Ask the buyer to reschedule it to get a new code, or contact support.',
+          });
+        }
+        if (!res.handoffCode || !handoffCodesMatch(input.code, res.handoffCode)) {
+          const left = HANDOFF_MAX_ATTEMPTS - counted.attempts;
+          throw new TRPCError({
+            code: left > 0 ? 'BAD_REQUEST' : 'TOO_MANY_REQUESTS',
+            message:
+              left > 0
+                ? `That code doesn't match. Ask the buyer to read it out again. ${left} ${left === 1 ? 'try' : 'tries'} left.`
+                : 'Too many wrong codes. Code confirmation is locked for this meetup. Ask the buyer to reschedule it to get a new code, or contact support.',
           });
         }
         method = 'code';
