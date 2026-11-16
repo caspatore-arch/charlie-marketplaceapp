@@ -196,6 +196,22 @@ async function main() {
   await rejects('a live listing still needs a time the seller offered', () => buyer.reservation.request({ listingId: fresh.id, spotId: SPOT_LISTED, startsAt: slotAt(4 * HOUR) }), 'BAD_REQUEST');
   await rejects('a live listing still needs one of the seller’s spots', () => buyer.reservation.request({ listingId: fresh.id, spotId: SPOT_OTHER, startsAt: slotAt(4 * HOUR) }), 'BAD_REQUEST');
 
+  // --- a sold listing stays sold: no remove, so no relist back onto Browse
+  await rejects('the seller cannot remove a sold listing', () => seller.listing.remove({ id: sold.id }), 'CONFLICT');
+  check('a refused remove leaves the sale recorded', (await statusOf(sold.id)) === 'sold');
+  await rejects('a sold listing cannot be relisted', () => seller.listing.relist({ id: sold.id, isSellToday: false }), 'CONFLICT');
+  check('a sold listing never reaches the live feed', (await statusOf(sold.id)) === 'sold' && !(await live()).some((i) => i.id === sold.id));
+  const toRemove = await mk('Removable lamp');
+  const removedOnce = await seller.listing.remove({ id: toRemove.id });
+  const [afterFirst] = await db.select().from(listings).where(eq(listings.id, toRemove.id));
+  const removedTwice = await seller.listing.remove({ id: toRemove.id });
+  const [afterSecond] = await db.select().from(listings).where(eq(listings.id, toRemove.id));
+  check('removing a live listing still works', removedOnce.ok && afterFirst!.status === 'removed');
+  check('removing it again is a no-op', removedTwice.ok && afterSecond!.updatedAt.getTime() === afterFirst!.updatedAt.getTime());
+  const relisted = await seller.listing.relist({ id: toRemove.id, isSellToday: false });
+  check('a removed listing can still be relisted', relisted.status === 'active');
+  await rejects('a listing that is live again cannot be relisted twice', () => seller.listing.relist({ id: toRemove.id, isSellToday: false }), 'CONFLICT');
+
   // --- posts stay up indefinitely, with a per-day brake
   const oldPost = await buyer.community.create({ kind: 'buying', body: 'Looking for a mini fridge' });
   await db
