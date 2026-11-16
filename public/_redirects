@@ -1,30 +1,64 @@
-# SPA fallback for Netlify and Cloudflare Pages.
+# Netlify redirects for trydibbs.com. Netlify reads this file BEFORE netlify.toml,
+# top to bottom, first match wins. Design notes: docs/DEPLOY-WEB.md section 5.
 #
-# expo export --platform web with expo-router's default "single" output mode
-# produces one index.html and a JS bundle. All client-side routing (e.g.
-# /listing/:id) is handled by JavaScript. If a user opens a direct link or
-# hard-refreshes any sub-path, the static host must serve index.html rather
-# than returning a 404 — otherwise every shared listing link is broken.
-#
-# Asset paths are served before these rules ever run (the host always serves
-# a real file if it exists), but the explicit negative patterns below make
-# the intent clear and guard against any host-specific ordering edge cases.
-#
-# Rules are evaluated top-to-bottom; the first match wins.
+# The site is a single-page app: one app shell (index.html), and the router in
+# the browser draws each screen. The host must therefore hand the app shell to
+# every real route, but it must NOT do that for URLs that are not routes, or
+# every typo and every missing file (/manifest.json, /wp-login.php) reports
+# "200 OK" and Google files it as a soft 404. So: list the real routes, and
+# end with a 404.
 
-# One site, one address: https://trydibbs.com. The app used to live on
-# app.trydibbs.com, and old links still point there, so both it and www
-# forward permanently to the same path on the bare domain. These must stay
-# above the catch-all below or it answers first. They only fire once those
-# hostnames are attached to this Netlify site (docs/DEPLOY-WEB.md).
+# 1. One site, one address: https://trydibbs.com. Each old or alternate host
+# goes to the bare domain in a single hop. These stay at the top. They only
+# fire once those hostnames are attached to this Netlify site.
 https://app.trydibbs.com/*  https://trydibbs.com/:splat  301!
 https://www.trydibbs.com/*  https://trydibbs.com/:splat  301!
+http://app.trydibbs.com/*   https://trydibbs.com/:splat  301!
+http://www.trydibbs.com/*   https://trydibbs.com/:splat  301!
 
-# Pass real static asset directories straight through (200 = serve as-is).
-/_expo/*   /_expo/:splat  200
-/assets/*  /assets/:splat 200
+# 2. Real files are served by Netlify before any rule below (no "!" on the
+# rewrites), so /_expo/*, /assets/*, /favicon.ico, /robots.txt and so on never
+# reach this list. That includes dist/404.html (the shell with noindex).
 
-# Everything else — including /listing/abc, /conversation/xyz, hard-refreshed
-# tab paths, etc. — gets index.html with a 200 (not a 301 redirect, so the
-# browser URL stays correct and the JS router takes over).
-/*         /index.html    200
+# 3. Prerendered public pages (scripts/prerender-public.ts writes
+# dist/<page>/index.html with its own title, description and text). The "!"
+# serves the file at the clean URL with a 200 and stops Netlify from bouncing
+# /about to /about/. The canonical tag in each file names the slash-less URL.
+/about          /about/index.html          200!
+/why-dibbs      /why-dibbs/index.html      200!
+/faq            /faq/index.html            200!
+/legal/terms    /legal/terms/index.html    200!
+/legal/privacy  /legal/privacy/index.html  200!
+
+# 4. Every other real route in app/ is the app shell with a 200. Keep this list
+# in step with the app/ directory: when a screen is added, add its URL here
+# (docs/SEO.md, "Adding a public page"). Dynamic routes use a splat.
+/                          /index.html  200
+/sell                      /index.html  200
+/community                 /index.html  200
+/profile                   /index.html  200
+/welcome                   /index.html  200
+/rules                     /index.html  200
+/inbox                     /index.html  200
+/saved                     /index.html  200
+/settings                  /index.html  200
+/moderation                /index.html  200
+/create-profile            /index.html  200
+/concepts/*                /index.html  200
+/auth/*                    /index.html  200
+/listing/*                 /index.html  200
+/user/*                    /index.html  200
+/conversation/*            /index.html  200
+/reservation/*             /index.html  200
+/payments/*                /index.html  200
+/dibbs-offer               /index.html  200
+/dibbs-offer/*             /index.html  200
+/staff/*                   /index.html  200
+
+# 5. Anything else is a real 404. Netlify serves /404.html with that status.
+# 404.html is the same app shell plus <meta name="robots" content="noindex">,
+# so a person who lands on a route missing from section 4 still gets a working
+# app (the router shows its own not-found or the right screen); only the HTTP
+# status code differs. A missed route therefore costs a status code, not a
+# broken page.
+/*  /404.html  404

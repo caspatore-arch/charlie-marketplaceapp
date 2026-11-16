@@ -16,8 +16,8 @@ from the domain, and the app no longer lives on its own subdomain.
 |---|---|
 | Host | **Netlify**, project `dibbs-app-web` |
 | Source | Auto-builds from GitHub `main` (`caspatore-arch/charlie-marketplaceapp`). Pull requests get **deploy previews**. |
-| Build | `npm run web:build` (`expo export --platform web`) into `dist/`, set in `netlify.toml` |
-| Domains | `trydibbs.com` is primary. `www.trydibbs.com` and `app.trydibbs.com` redirect to the same path on the root (301, from `public/_redirects`). |
+| Build | `npm run web:build` (`expo export --platform web`, then `scripts/prerender-public.ts`) into `dist/`, set in `netlify.toml` |
+| Domains | `trydibbs.com` is primary. `www.trydibbs.com` and `app.trydibbs.com` redirect to the same path on the root (301, one hop, from `public/_redirects`). |
 | DNS | Cloudflare (registrar and DNS). Netlify web records are **DNS only** (not proxied). |
 | API it talks to | `https://api.trydibbs.com` (Render, see `docs/DEPLOY.md`) |
 
@@ -75,14 +75,39 @@ only if you need to test against production from a preview. Check
 
 ## 5. Hosting config files in the repo
 
-- `netlify.toml`: build command, publish directory, `EXPO_PUBLIC_WEB_BASE_URL`, and
-  the SPA rewrites.
-- `public/_redirects`: host redirects (`app` and `www` to the root) and the SPA
-  fallback. Netlify runs it before `netlify.toml`, so the host redirects must stay
-  above the catch-all.
+- `netlify.toml`: build command, publish directory, `EXPO_PUBLIC_WEB_BASE_URL`,
+  caching and security headers. It holds no redirects.
+- `public/_redirects`: all redirects. Netlify runs it first.
+- `scripts/prerender-public.ts` (run by `npm run web:build`): writes real HTML for
+  `/about`, `/why-dibbs`, `/faq`, `/legal/terms`, `/legal/privacy` and `dist/404.html`.
 
-The single-page-app fallback matters: a shared link such as `/listing/abc` must
-return the app, not a 404.
+**Redirect design.** The app is one app shell, so the host must serve it for every
+real route, but not for URLs that are not routes (otherwise typos and missing files
+answer 200 and look like soft 404s to Google). `_redirects` therefore has, in order:
+host redirects (app. and www., http and https, one hop to `https://trydibbs.com`);
+`200!` rewrites for the five prerendered pages; one 200 rewrite per real route in
+`app/` (dynamic routes use a splat such as `/listing/*`); and a last rule
+`/*  /404.html  404`. `404.html` is the app shell with `noindex`, so someone who
+opens a route missing from the list still gets a working app; only the status code
+is 404. When you add a screen in `app/`, add its URL to the list. Real files
+(`/_expo/*`, `/assets/*`, `/favicon.ico`, `/robots.txt`) are served first and need
+no rule.
+
+Headers in `netlify.toml`: one-year immutable caching for `/_expo/*` and `/assets/*`
+(hashed names); `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`,
+`Permissions-Policy` and an enforced `Content-Security-Policy: frame-ancestors 'none'`
+on everything. The full CSP is `Content-Security-Policy-Report-Only`: it blocks
+nothing and only logs to the browser console. HSTS is unchanged.
+
+**Confirm on a deploy preview before production.** None of this was run on Netlify
+when written (local checks serve `dist/` with a plain static server and cannot
+exercise redirect rules). On the preview, check:
+`curl -sI` shows 404 for `/nope` and `/manifest.json` and 200 for `/about`, `/faq`,
+`/listing/abc`, `/sell`, `/dibbs-offer/new`, `/staff/dibbs-offers`; `/about/` does
+not redirect in a loop and `/about` does not redirect to `/about/`; each page's
+`<title>` and canonical differ; `/_expo/...js` has `immutable`; the headers appear on
+`/`; the console shows no errors on the home page, a listing, Sell and sign-in; and
+CSP Report-Only messages are noted (expect some, that is its purpose).
 
 ## 6. Verify
 
@@ -91,6 +116,7 @@ return the app, not a 404.
   arrives, then you land on the feed.
 - [ ] **Open a listing URL directly** in a new tab (and hard-refresh it). It must show
   the listing, not a 404. This proves the SPA rewrite is working.
+- [ ] A made-up URL such as `/nope` returns a real 404 (`curl -sI`) but the page still loads the app.
 - [ ] `https://app.trydibbs.com/listing/anything` and `https://www.trydibbs.com/...`
   change the address bar to `trydibbs.com/...`.
 - [ ] Tap Share on a listing: the native share sheet appears on iPhone Safari, and

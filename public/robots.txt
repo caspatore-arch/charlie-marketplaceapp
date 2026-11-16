@@ -1,23 +1,10 @@
 # Dibbs (https://trydibbs.com). Search engines and AI assistants are welcome.
 # Private, signed-in screens are listed below; they have nothing useful to index.
 
+# One group: all crawlers share the same rules. The named AI crawlers (ChatGPT,
+# Claude, Perplexity, Google Gemini, Apple, Common Crawl) are listed so it is
+# clear they are allowed; they get exactly the same rules as everyone else.
 User-agent: *
-Allow: /
-Disallow: /auth
-Disallow: /conversation
-Disallow: /inbox
-Disallow: /settings
-Disallow: /saved
-Disallow: /reservation
-Disallow: /payments
-Disallow: /moderation
-Disallow: /staff
-Disallow: /dibbs-offer
-Disallow: /concepts
-Disallow: /create-profile
-
-# AI crawlers, named so it's clear they are allowed (ChatGPT, Claude,
-# Perplexity, Google Gemini, Apple, Common Crawl).
 User-agent: GPTBot
 User-agent: OAI-SearchBot
 User-agent: ChatGPT-User
