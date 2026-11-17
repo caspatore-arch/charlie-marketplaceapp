@@ -312,3 +312,61 @@ Checks run on November 1, 2026, on throwaway local databases with simulated emai
   - `/admin` card visually (typechecked only).
   - Final-offer, handoff and payout screens in the browser (covered by the API tests).
 
+## November 17 — messaging: a double tap on "Message seller" could throw instead of opening the thread (daily automated build)
+
+Checked all open PRs first to avoid duplicating one. `conversation.open`
+(`backend/trpc/routes/conversation.ts`) is select-then-insert: it looks for an
+existing conversation for (listingId, buyerId) and only inserts one if it
+finds none. There's a real unique index on exactly that pair
+(`conversations_listing_buyer_uq`), so two calls that both miss the select
+(two taps on "Message seller" close together, or the same account signed in
+on a phone and a browser) can both reach the insert; the loser got an
+unhandled Postgres unique-violation error instead of the thread it asked for.
+Unlike the moderation/reservation races fixed in #20/#21/#23, this one is
+**not** inside a `for('update')`-locked transaction, so it reproduces
+reliably even in this repo's in-process PGlite test backend (confirmed by a
+throwaway script before writing the fix, run with and without the fix, not
+committed).
+
+Fix: catch the unique-violation (same `isUniqueViolation` helper already used
+in `offer.ts`, `reservation.ts` and `dibbsOffer.ts`), re-read the row the
+other call created, and return it — the caller gets the conversation either
+way, same as if it had lost the race by an honest millisecond and seen it on
+the first select. No schema, dependency or behavior change for the ordinary
+(non-racing) case.
+
+Verified on a throwaway sandbox database (`PGLITE_DIR`, never the shared dev
+DB or production), November 17, 2026:
+- `npm run typecheck`: same 5 pre-existing `.unref()` errors already on
+  `main` (notify.ts, bookings.ts, retention.ts ×2, outbox.ts) — fixed and
+  waiting in open PR #17, not reintroduced or worsened by this branch.
+- New case in `npm run test:workstreams` (45/45, 1 new): two concurrent
+  `conversation.open` calls for the same listing resolve to the same
+  conversation id, and exactly one row exists afterward. This one **did**
+  reproduce the failure first (confirmed the bug before fixing it), unlike
+  the harder-to-reproduce transaction races documented in prior entries here.
+- `npm run test:e2e`: 17/17. `npm run test:geo`: 6/6. `npx tsx
+  scripts/payments-check.ts`: 39 passed, 0 failed. Targeted `npx eslint` on
+  the two changed files: clean (one pre-existing unused-import warning in
+  `conversation.ts`, confirmed present on `main` before this change too, not
+  touched). Full `npm run lint`: same 17 pre-existing errors as the November 7
+  entry above, none in files this change touches.
+
+Not verified: native/device (no Xcode on this machine, as with every other
+entry here); real concurrent taps from two physical devices (this is a
+single-process in-order test proving the DB-level race, not a UI test).
+
+**Open-PR backlog, now 12 and three weeks older.** Still none merged:
+#1 (Oct 21, this project's own #1 priority item for three and a half weeks),
+#3, #5, #7, #9, #10, #14, #17 (the typecheck fix — green, current against
+`main`, ready to merge with zero conflicts), #18, #20, #21, #23, plus this
+run's new PR. Prior entries (Nov 7, 8, 11) already asked for the same thing
+and nothing has changed. Repeating it because it's still true and getting
+more expensive: each run now spends time re-checking a longer list before it
+can pick work that doesn't overlap. Recommend, in order: (1) merge #17 to
+stop the typecheck churn, (2) work through #1 since it's the oldest and was
+already flagged as top-priority in this file's own work queue above, (3)
+either merge the small correctness fixes (#18, #20, #21, #23, this one) on
+their own evidence or tell the daily build it may merge its own green,
+test-passing, non-SMS/non-payments PRs so this stops recurring.
+

@@ -512,6 +512,18 @@ async function main() {
     eq(msgs.items.length, 2, 'history still readable after the listing expired');
   });
 
+  await check('messaging: opening the same thread twice at once (a double tap) never errors or duplicates it', async () => {
+    const listing = await makeListing(MAYA);
+    const jordan = await as(JORDAN);
+    const [a, b] = await Promise.all([
+      jordan.conversation.open({ listingId: listing.id }),
+      jordan.conversation.open({ listingId: listing.id }),
+    ]);
+    eq(a.id, b.id, 'both calls land on the same conversation');
+    const rows = await db.select().from(schema.conversations).where(d.eq(schema.conversations.listingId, listing.id));
+    eq(rows.length, 1, 'only one conversation row exists for this listing+buyer');
+  });
+
   /* ======================================================= phone auth */
 
   const lastCode = (phone: string) => {
