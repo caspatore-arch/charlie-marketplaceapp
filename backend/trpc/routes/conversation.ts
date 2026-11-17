@@ -6,7 +6,7 @@ import type { Db } from '../../db/client';
 import { conversationReads, conversations, listings, messages, reservations, users } from '../../db/schema';
 import { notifyNewMessage } from '../../notifications/events';
 import { applyExpiry,
-  applyExpiryForRead, isBlockedBetween, toListingCards, toPublicUser } from '../lib';
+  applyExpiryForRead, isBlockedBetween, isUniqueViolation, toListingCards, toPublicUser } from '../lib';
 import { protectedProcedure, publicProcedure, router } from '../trpc';
 
 /** Loads a conversation the caller takes part in, or throws. */
@@ -229,11 +229,25 @@ export const conversationRouter = router({
         .limit(1);
       if (existing[0]) return existing[0];
 
-      const [created] = await ctx.db
-        .insert(conversations)
-        .values({ listingId: listing.id, buyerId, sellerId: listing.sellerId })
-        .returning();
-      return created!;
+      try {
+        const [created] = await ctx.db
+          .insert(conversations)
+          .values({ listingId: listing.id, buyerId, sellerId: listing.sellerId })
+          .returning();
+        return created!;
+      } catch (err) {
+        if (!isUniqueViolation(err)) throw err;
+        // Another call for the same listing+buyer won the race (a double tap,
+        // or the same account open on two devices); return the conversation it
+        // created instead of surfacing a database error.
+        const [winner] = await ctx.db
+          .select()
+          .from(conversations)
+          .where(and(eq(conversations.listingId, listing.id), eq(conversations.buyerId, buyerId)))
+          .limit(1);
+        if (winner) return winner;
+        throw err;
+      }
     }),
 
   messages: protectedProcedure

@@ -123,7 +123,8 @@ listing.saved         P    –                        → ListingCard[]
 conversation.list     P    –                        → { id, listing: ListingCard, otherUser, lastMessage?, unreadCount }[]
       unreadCount = messages from the other participant newer than the caller's conversation_reads.lastReadAt
       (all of them if the caller has never read this thread).
-conversation.open     P    { listingId, buyerId? }  → Conversation  (buyer: creates if none for this listing; seller: buyerId required, opens/creates the thread with that buyer)
+conversation.open     P    { listingId, buyerId? }  → Conversation  (buyer: creates if none for this listing; seller: buyerId required, opens/creates the thread with that buyer.
+      Concurrent calls for the same listing+buyer (a double tap, or the same account on two devices) both resolve to the one conversation the unique index allows; neither throws.)
 conversation.messages P    { conversationId, cursor? } → { items: Message[], nextCursor? }
 conversation.send     P    { conversationId, body (1–2000) } → Message
 conversation.markRead P    { conversationId }       → { ok: true }   (participants only, FORBIDDEN otherwise; sets the caller's lastReadAt to now)
