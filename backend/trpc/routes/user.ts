@@ -21,6 +21,7 @@ import {
   users,
 } from '../../db/schema';
 import { OPEN_STATUSES } from '../../dibbs/rules';
+import { alertModeratorsOfReport } from '../../moderation/notify';
 import { postingStatus } from '../../auth/posting-access';
 import { cancelUserSms } from '../../sms/outbox';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
@@ -537,6 +538,10 @@ export const userRouter = router({
         targetListingId: input.targetListingId ?? null,
         reason: input.reason,
         details: input.details ?? null,
+      });
+      void alertModeratorsOfReport(ctx.db, {
+        target: input.targetListingId ? 'listing' : 'user',
+        reason: input.reason,
       });
       return { ok: true as const };
     }),

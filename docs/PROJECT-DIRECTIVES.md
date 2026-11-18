@@ -257,6 +257,43 @@ Open items for the owner:
 - `docs/OVERHAUL.md` was not touched: the coordinator should record this decision there.
 - Native (iPhone) not run: no Xcode on this machine.
 
+## November 18 moderator report alerts (branch, not yet merged)
+
+Closes a known gap in `docs/HANDOFF.md` ("Moderation"): filing a report (on a
+user, a listing, or a community post) now emails each configured moderator
+(`MODERATOR_USER_IDS`, by their own account email) and, if set, the extra
+`MODERATION_ALERT_EMAIL` address, through the existing simulated-or-Resend
+email adapter (`backend/email/provider.ts`). The email is best-effort: it
+never blocks or fails the report mutation (`backend/moderation/notify.ts`).
+With neither env var set, nobody is emailed and the report is still saved —
+unchanged from before.
+
+Verified locally on a throwaway sandbox database (never the shared dev DB or
+production), November 18, 2026:
+- New `npm run test:moderation`: 17/17 (no moderator configured sends no mail
+  and still saves the report; a single moderator is alerted exactly once with
+  the right reason and target wording; two moderators both get it; a
+  duplicate `MODERATION_ALERT_EMAIL` doesn't double-send and a distinct one is
+  additive; the report mutation still succeeds if the email provider throws;
+  non-moderator access to the queue is still `FORBIDDEN`).
+- `npm run typecheck`: clean for every file touched. Five pre-existing
+  `.unref()` errors remain in `backend/dibbs/notify.ts`, `backend/email/bookings.ts`,
+  `backend/retention.ts`, `backend/sms/outbox.ts` — present on `main` before
+  this change (last touched in commit `f540178`, Nov 1), not introduced here.
+- `npm run test:e2e` 17/17, `test:geo` 6/6, `npx tsx scripts/payments-check.ts`
+  39/39, `test:workstreams` 44/44, `test:comments` 24/24, `test:engagement`
+  62/62, `test:save` 9/9, `test:archive` 43/43, `test:dibbs-offers` 226/226,
+  `test:retention` 19/19, `test:ratelimit` 7/7, `test:price-guide` 22/22 — all
+  unaffected. `npx eslint` on the changed/added files: no errors.
+- Not verified: real Resend delivery to a real inbox (only the simulated
+  provider was exercised); no native/device testing involved.
+
+Open for the owner: `MODERATOR_USER_IDS` and `MODERATION_ALERT_EMAIL` are
+still unset in production, so no alert goes out there yet — set them on
+Render when ready. The email text is intentionally generic (reason + target
+kind only, no reporter or target identity) to avoid putting more into an
+email than the moderator needs to decide whether to open the queue.
+
 ## November 1 "Get a Dibbs offer" (on main; API live, website pending)
 
 Owner request: Dibbs buys items directly from students. Staff review each request by hand and send offers; no automatic or AI pricing. Behavior is specified in `docs/CONTRACT.md` ("Dibbs offer requests").

@@ -78,6 +78,7 @@
     "test:save": "tsx scripts/save-check.ts",
     "test:retention": "tsx scripts/retention-check.ts",
     "test:ratelimit": "tsx scripts/ratelimit-check.ts",
+    "test:moderation": "tsx scripts/moderation-check.ts",
     "test:price-guide": "tsx scripts/price-guide-check.ts",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",

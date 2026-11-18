@@ -84,6 +84,11 @@ export const env = {
       .map((id) => id.trim())
       .filter(Boolean);
   },
+  /** Extra address alerted when a report is filed, in addition to each moderator's own email. Unset = moderators' emails only. */
+  get moderationAlertEmail(): string | undefined {
+    const v = process.env.MODERATION_ALERT_EMAIL?.trim();
+    return v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : undefined;
+  },
   /* --------------------------------------------- Dibbs offer requests */
 
   /**

@@ -36,6 +36,7 @@ import { engagementFor, listingHotExpr, listingHotParts } from '../engagement';
 import { HOT_COMMENT_VOTE_WEIGHT, HOT_COMMENT_WEIGHT, decayedSum } from '../hot';
 import { listingCaption } from '../listing-post';
 import { blockedUserIds, toListingCards, toPublicUser } from '../lib';
+import { alertModeratorsOfReport } from '../../moderation/notify';
 import { campusVerifiedProcedure, moderatorProcedure, protectedProcedure, router } from '../trpc';
 
 export const COMMUNITY_POST_MAX = 280;
@@ -684,6 +685,7 @@ export const communityRouter = router({
         reason: input.reason,
         details: input.details || null,
       });
+      void alertModeratorsOfReport(ctx.db, { target: post.listingId ? 'listing' : 'post', reason: input.reason });
       return { ok: true as const };
     }),
 
