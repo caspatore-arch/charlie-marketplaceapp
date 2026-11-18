@@ -1,0 +1,77 @@
+# Checks before anything reaches production. Render and Netlify both deploy
+# `main` automatically, so a pull request should pass these first.
+#
+# Every test is a tsx script that boots the server in-process against a
+# throwaway local database with simulated email, SMS and payments. Nothing
+# here talks to the live API, the hosted database or any paid service, and no
+# secrets are needed.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Typecheck and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+
+  tests:
+    name: Test scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # Runs every `test:*` script in package.json, one at a time, so a new
+      # script is covered without editing this file. Each prints its own
+      # PASS/FAIL lines and exits non-zero on failure.
+      - name: Run every test:* script
+        run: |
+          failed=""
+          for s in $(node -e 'for (const k of Object.keys(require("./package.json").scripts)) if (k.startsWith("test:")) console.log(k)'); do
+            echo "::group::$s"
+            if npm run --silent "$s"; then echo "$s passed"; else failed="$failed $s"; fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then echo "::error::Failed:$failed"; exit 1; fi
+
+  web-build:
+    name: Web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # Same command Netlify runs. Catches a broken export or prerender step
+      # before it becomes a failed production deploy.
+      - run: npm run web:build
+        env:
+          EXPO_PUBLIC_WEB_BASE_URL: https://trydibbs.com
+          EXPO_PUBLIC_RORK_API_BASE_URL: https://api.trydibbs.com

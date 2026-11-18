@@ -174,7 +174,11 @@ async function main() {
   await rejects('a stranger cannot accept', () => other.reservation.accept({ id: req.id }), 'FORBIDDEN');
 
   const accepted = await seller.reservation.accept({ id: req.id });
-  check('the seller accepts: the meetup is confirmed', accepted.status === 'accepted' && !!accepted.handoffCode);
+  // The handoff code is the buyer's: the seller's accept response must not carry it.
+  check(
+    'the seller accepts: the meetup is confirmed',
+    accepted.status === 'accepted' && accepted.handoffCode === null && !!(await buyer.reservation.byId({ id: req.id })).handoffCode,
+  );
   check('a confirmed meetup holds the listing', (await statusOf(lapsed.id)) === 'reserved');
   check('a held listing leaves the Archive', !(await archive()).some((i) => i.id === lapsed.id));
   await rejects('nobody else can request a held listing', () => other.reservation.request({ listingId: lapsed.id, spotId: SPOT_OTHER, startsAt: slotAt(2 * DAY) }), 'CONFLICT');

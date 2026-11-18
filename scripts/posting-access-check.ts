@@ -59,18 +59,15 @@ async function main() {
   const { SimulatedEmailProvider, setEmailProviderForTests } = await import('../backend/email/provider');
   const { app } = await import('../backend/hono');
 
-  setEmailProviderForTests(new SimulatedEmailProvider());
+  const mail = new SimulatedEmailProvider();
+  setEmailProviderForTests(mail);
   const anon = appRouter.createCaller({ db, user: null });
   const callerFor = async (token: string) =>
     appRouter.createCaller({ db, user: await userFromAuthHeader(`Bearer ${token}`) });
+  // Codes are stored only as hashes; read the newest one from the simulated mailbox.
   const latestCode = async (email: string) => {
-    const [row] = await db
-      .select()
-      .from(schema.emailCodes)
-      .where(and(eq(schema.emailCodes.email, email), isNull(schema.emailCodes.consumedAt)))
-      .orderBy(desc(schema.emailCodes.expiresAt))
-      .limit(1);
-    return row?.code ?? '';
+    const msg = [...mail.sent].reverse().find((m) => m.to === email);
+    return msg ? /(\d{6})/.exec(msg.subject)?.[1] ?? '' : '';
   };
   const signIn = async (email: string, displayName: string) => {
     await anon.auth.requestCode({ email });

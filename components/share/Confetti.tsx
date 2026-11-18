@@ -4,7 +4,6 @@
  * finishes the component unmounts itself, so nothing animates afterwards.
  * Skipped entirely under Reduce Motion. Never intercepts touches.
  */
-/* eslint-disable react-hooks/immutability */
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
@@ -79,7 +78,7 @@ type SharedValue = ReturnType<typeof useSharedValue<number>>;
 export function Confetti() {
   const reduceMotion = useReduceMotion();
   const { width, height } = useWindowDimensions();
-  const specs = useMemo(makeSpecs, []);
+  const specs = useMemo(() => makeSpecs(), []);
   const progress = useSharedValue(0);
   const [done, setDone] = useState(false);
 

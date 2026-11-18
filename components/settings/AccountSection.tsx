@@ -38,12 +38,12 @@ export function AccountSection() {
 
   // Seed local edit state from the server once, and whenever a fresh save
   // response comes back (so the fields reflect what actually persisted).
-  useEffect(() => {
-    if (meQuery.data && !dirty) {
-      setDisplayName(meQuery.data.displayName);
-      setBio(meQuery.data.bio ?? '');
-    }
-  }, [meQuery.data, dirty]);
+  const [seededFrom, setSeededFrom] = useState<typeof meQuery.data>(undefined);
+  if (meQuery.data && !dirty && seededFrom !== meQuery.data) {
+    setSeededFrom(meQuery.data);
+    setDisplayName(meQuery.data.displayName);
+    setBio(meQuery.data.bio ?? '');
+  }
 
   const updateMutation = trpc.user.updateMe.useMutation({
     onSuccess: async (updated) => {

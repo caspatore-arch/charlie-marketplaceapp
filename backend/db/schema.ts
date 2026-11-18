@@ -200,16 +200,45 @@ export const sessions = pgTable('sessions', {
   createdAt: ts('created_at').notNull().defaultNow(),
 });
 
+/**
+ * One-time email codes. Only a hash is stored (`codeHash`), never the code.
+ * `purpose` is what the code was issued for ('sign_in' | 'verify_campus') and
+ * it is only accepted for that purpose. `attempts` counts wrong guesses for the
+ * ADDRESS: a wrong guess increments every live code for the email, and the 5th
+ * burns them all (backend/trpc/routes/auth.ts).
+ */
 export const emailCodes = pgTable(
   'email_codes',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     email: text('email').notNull(),
-    code: text('code').notNull(),
+    /** Deprecated plaintext column, no longer written or read. Drop in a later migration. */
+    code: text('code'),
+    codeHash: text('code_hash').notNull(),
+    purpose: text('purpose').notNull(),
+    /** For purpose 'verify_campus': the signed-in account that asked. Nobody else can redeem it. */
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    attempts: integer('attempts').notNull().default(0),
     expiresAt: ts('expires_at').notNull(),
     consumedAt: ts('consumed_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [index('email_codes_email_idx').on(t.email)],
+);
+
+/**
+ * Durable daily counters for code emails (per hashed caller IP, and one
+ * 'global' row). Survive restarts, unlike backend/ratelimit.ts. `day` is the
+ * UTC date (YYYY-MM-DD). Old days are pruned opportunistically.
+ */
+export const authSendCounts = pgTable(
+  'auth_send_counts',
+  {
+    bucket: text('bucket').notNull(),
+    day: text('day').notNull(),
+    count: integer('count').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.bucket, t.day] }), index('auth_send_counts_day_idx').on(t.day)],
 );
 
 export const meetupSpots = pgTable('meetup_spots', {
@@ -437,6 +466,8 @@ export const reservations = pgTable(
     offerId: uuid('offer_id'),
     /** 4 digits, generated on accept; only the buyer may read it. */
     handoffCode: text('handoff_code'),
+    /** Wrong codes typed by the seller since the code was issued; 5 locks code confirmation. */
+    handoffAttempts: integer('handoff_attempts').notNull().default(0),
     buyerConfirmedAt: ts('buyer_confirmed_at'),
     sellerConfirmedAt: ts('seller_confirmed_at'),
     cancelledById: uuid('cancelled_by_id').references(() => users.id),

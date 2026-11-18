@@ -1,20 +1,42 @@
 # Getting found on Google and ChatGPT
 
-The 9-item "get-found" checklist, applied to trydibbs.com (2026-11-01).
+The 9-item "get-found" checklist, applied to trydibbs.com (2026-11-01), plus the
+per-page prerender, FAQ and header work (2026-11-16).
 
-## Done in code (all in `public/`)
+## Done in code
 
-| # | Item | Where |
-|---|------|-------|
-| 2 | Sitemap | `public/sitemap.xml`. Add any new public page here. |
-| 3 | Real title and description | `public/index.html` `<head>`. Expo uses this file instead of its blank template. |
-| 4 | Preview image for shares | `public/og-image.png` (1200x630) plus the `og:` and `twitter:` tags. |
-| 5 | Readable without JavaScript | The text inside `<div id="root">` in `public/index.html`. The app replaces it on load; crawlers that don't run JS read it. Keep it accurate. |
-| 6 | AI bots allowed | `public/robots.txt` names GPTBot, ClaudeBot, PerplexityBot and others; `public/llms.txt` is a plain summary for AI tools. |
+| Item | Where |
+|------|-------|
+| Sitemap (real public pages only, with lastmod) | `public/sitemap.xml` |
+| Homepage title, description, share tags, structured data | `public/index.html` `<head>` |
+| Own title, description, canonical, share tags and readable text for `/about`, `/why-dibbs`, `/faq`, `/legal/terms`, `/legal/privacy` | `scripts/prerender-public.ts` writes `dist/<page>/index.html` after `expo export` |
+| FAQ (12 questions, plain answers) and `FAQPage` structured data | `scripts/content/faq.ts`, shared by `app/faq.tsx` and the script, so the screen and the structured data cannot differ |
+| Legal text readable without JavaScript | the script imports `constants/legal.ts`, the same module the app screens render |
+| Real 404 for unknown URLs (no soft 404s) | `public/_redirects` lists every real route and ends with `/*  /404.html  404`; the script writes `dist/404.html` (app shell plus `noindex`) |
+| Preview image for shares | `public/og-image.png` (1200x630) plus `og:` and `twitter:` tags |
+| AI bots allowed, plain summary for AI tools | `public/robots.txt` (one group), `public/llms.txt` |
+| Web manifest and home-screen icon | `public/manifest.json`, `public/apple-touch-icon.png` |
+| Long caching for hashed files, security headers | `netlify.toml` `[[headers]]` |
 
-Every route serves the same `index.html` (single-page app), so `/about` shares the
-homepage title in search results. If that ever matters, switch `web.output` to
-`"static"` in `app.json`, which needs testing on every screen.
+The site is still a single-page app (`web.output` stays `single`). The prerender
+step only adds files; the app replaces the readable text inside `<div id="root">`
+when it boots, the same way the homepage already worked.
+
+## Adding a public page
+
+1. Build the screen in `app/` and add it to `public/_redirects` (the prerendered
+   pages section, with the `200!` rule).
+2. Add its copy to `scripts/content/` (or import an existing shared module) and add
+   a `PageSpec` to `pages` in `scripts/prerender-public.ts`. Exactly one `<h1>`.
+3. Add it to `public/sitemap.xml` with a real `lastmod`, to `public/llms.txt`, and
+   to the link row in `public/index.html` and `NAV` in the script.
+4. Run `npm run web:build` and check `dist/<page>/index.html` (title, canonical, one h1).
+5. If the page is private or signed-in only, do none of the above; add it to
+   the `_redirects` app-route list and to the `Disallow` list in `public/robots.txt`.
+
+The about and why-dibbs text is kept twice on purpose: on screen in
+`app/about.tsx` and `app/why-dibbs.tsx`, and as crawlable text in
+`scripts/content/pages.ts`. Change both together.
 
 ## Needs the owner
 
@@ -35,3 +57,18 @@ homepage title in search results. If that ever matters, switch `web.output` to
 4. **One blog post a week** (item 9). Not built. A post such as "What to sell at
    UArizona move-out" needs a blog section that renders as plain HTML; ask for it
    when you're ready.
+
+## Still open
+
+- **Per-listing titles and share previews.** Each listing URL shares the app
+  shell. Fixing it needs a Netlify edge function (or a prerender against the API),
+  and listings only live 24 hours in Browse, so the payoff is mainly link previews
+  when someone shares a listing. Recommended: an edge function for `/listing/*`
+  that reads the public listing and fills title, description and `og:image`.
+- **Bing and Search Console verification** (owner, see above).
+- **Home-screen icon.** `public/apple-touch-icon.png` is the 1024px app icon and
+  has a transparent background, which iOS draws on black. Export a 180px and a
+  512px opaque version when convenient.
+- **Enforcing the Content-Security-Policy.** Only `frame-ancestors` is enforced.
+  The full policy is Report-Only in `netlify.toml`; watch the browser console on a
+  deploy preview before changing that.

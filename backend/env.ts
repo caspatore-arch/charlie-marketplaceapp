@@ -51,8 +51,13 @@ export const env = {
   get port(): number {
     return Number(process.env.PORT ?? 3000);
   },
+  /**
+   * The "switch test user" shortcut (auth.devSignIn) and the simulated payment
+   * hook. Never on in production, even if DEV_LOGIN=1 slips through: the
+   * server also refuses to start in that case (validateDevLoginEnv).
+   */
   get devLogin(): boolean {
-    return process.env.DEV_LOGIN === '1';
+    return process.env.DEV_LOGIN === '1' && !this.isProduction;
   },
   /**
    * Platform fee. 0 while payments are off: Dibbs takes nothing and sellers
@@ -317,6 +322,24 @@ export const env = {
   get rateLimitAuthVerifyCodePerMinute(): number {
     return Number(process.env.RATE_LIMIT_AUTH_VERIFY_CODE_PER_MIN ?? 60);
   },
+  /**
+   * Durable daily cap on code emails per caller IP (stored in the database, so
+   * it survives restarts). Generous by default: a campus wifi NAT puts hundreds
+   * of students behind a few addresses. 0 turns it off.
+   */
+  get emailCodesPerIpPerDay(): number {
+    const n = Number(process.env.EMAIL_CODES_PER_IP_PER_DAY ?? 300);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 300;
+  },
+  /**
+   * Optional durable daily cap on ALL code emails. Off (0) by default: a global
+   * cap lets one attacker lock every student out of sign-in, so only set it
+   * below the email provider's own daily quota if overspend matters more.
+   */
+  get emailCodesGlobalPerDay(): number {
+    const n = Number(process.env.EMAIL_CODES_GLOBAL_PER_DAY ?? 0);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  },
   get rateLimitPhoneRequestPerMinute(): number {
     return Number(process.env.RATE_LIMIT_PHONE_REQUEST_PER_MIN ?? 5);
   },
@@ -372,6 +395,22 @@ export const env = {
     return Number(process.env.DB_STATEMENT_TIMEOUT_MS ?? 10_000);
   },
 };
+
+/**
+ * DEV_LOGIN lets anyone sign in as any user id. It must never be set in
+ * production: refuse to start rather than quietly ignoring it, so a bad deploy
+ * config is noticed. Runs at module load below; exported for tests.
+ */
+export function validateDevLoginEnv(): void {
+  if (process.env.DEV_LOGIN === '1' && env.isProduction) {
+    throw new Error(
+      'DEV_LOGIN=1 is set while NODE_ENV=production. Dev sign-in lets anyone become any user, ' +
+        'so the server will not start. Unset DEV_LOGIN (or set it to 0) in the production environment.',
+    );
+  }
+}
+
+validateDevLoginEnv();
 
 /**
  * Validate the S3 env vars as a group. Call once at startup (backend/server.ts).

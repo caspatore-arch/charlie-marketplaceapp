@@ -17,12 +17,12 @@ export default function WhyDibbs() {
           body: 'Need cash for a trip or a night out? Sell the thing you have not touched in months today. Listings run for 24 hours, and if one does not sell, repost it lower.',
         },
         {
-          title: 'Free, and you keep 100%',
-          body: 'Dibbs has no fees or transaction costs. Sellers keep everything they ask for.',
+          title: 'Free to list, no fees',
+          body: 'Dibbs charges no fees. When you sell to another student, you keep the full price you both agreed on. If you sell to Dibbs instead, you get the offer you accepted.',
         },
         {
-          title: 'Safe and sure',
-          body: 'Meetups are at public spots on campus, with other students who verified a campus email, at a time you both agreed to and get a reminder for. You can report or block anyone. A campus email shows someone controls it, not who they are, so use your own judgment.',
+          title: 'On campus, in person',
+          body: 'Meetups are at spots on campus, at a time you both agreed to and get a reminder for. Members sign in with an email address they confirmed with a code. That shows they can receive mail there, not who they are, so use your own judgment. You can report or block anyone.',
         },
       ]}
     />

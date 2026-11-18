@@ -16,17 +16,22 @@
  * backend/sms/provider.ts (Twilio), email via backend/email/provider.ts
  * (Resend). Email codes share the phone rules for cooldown and hourly cap. Codes are 6 digits,
  * expire in 10 minutes, allow 5 guesses, have a 30-second resend cooldown and
- * at most 5 sends per number per hour. Phone codes are stored only as hashes.
+ * at most 5 sends per number (or address) per hour. Phone and email codes are
+ * stored only as hashes. An email code is accepted only for the purpose it was
+ * issued for ('sign_in' or 'verify_campus'), and wrong guesses are counted per
+ * ADDRESS across all its live codes: the 5th wrong guess burns every live code
+ * for that address. Code emails also have durable per-IP (and optional global)
+ * daily caps stored in `auth_send_counts`.
  * Sessions are bearer tokens stored as sha256 hashes.
  */
 import { TRPCError } from '@trpc/server';
 import crypto from 'node:crypto';
-import { and, asc, desc, eq, gt, gte, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, isNull, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { env } from '../../env';
 import type { Db } from '../../db/client';
-import { campuses, emailCodes, phoneCodes, sessions, users, type User } from '../../db/schema';
+import { authSendCounts, campuses, emailCodes, phoneCodes, sessions, users, type User } from '../../db/schema';
 import { postingFields } from '../../auth/posting-access';
 import { codesMatch, hasActivity, hashPhoneCode, newPhoneCode, retireEmptyAccount } from '../../auth/accounts';
 import { normalizePhone, PhoneFormatError } from '../../sms/phone';
@@ -184,13 +189,86 @@ async function issueSession(db: typeof import('../../db/client').db, userId: str
 
 export const EMAIL_RESEND_COOLDOWN_MS = 30 * 1000;
 export const EMAIL_MAX_CODES_PER_HOUR = 5;
+export const EMAIL_MAX_ATTEMPTS = 5;
+
+type EmailCodePurpose = 'sign_in' | 'verify_campus';
+
+/** Only this hash is stored. The purpose is part of it, so a code only works for what it was issued for. */
+export function hashEmailCode(email: string, purpose: EmailCodePurpose, code: string): string {
+  return crypto.createHash('sha256').update(`email:${email}:${purpose}:${code}`).digest('hex');
+}
+
+/**
+ * The caller's IP. backend/hono.ts sets it on the request context from
+ * `clientIp`. Direct callers (tests, scripts) have none, and the per-IP daily
+ * cap is skipped for them.
+ */
+function callerIp(ctx: unknown): string | null {
+  const ip = (ctx as { ip?: unknown }).ip;
+  return typeof ip === 'string' && ip.trim() && ip.trim() !== 'unknown' ? ip.trim() : null;
+}
+
+function utcDay(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+/** Atomically adds one to a durable daily counter and returns the new value. */
+async function bumpDailyCount(db: Db, bucket: string, now: number): Promise<number> {
+  const [row] = await db
+    .insert(authSendCounts)
+    .values({ bucket, day: utcDay(now), count: 1 })
+    .onConflictDoUpdate({
+      target: [authSendCounts.bucket, authSendCounts.day],
+      set: { count: sql`${authSendCounts.count} + 1` },
+    })
+    .returning({ count: authSendCounts.count });
+  // Keep the table to about two days of rows without a timer.
+  if (Math.random() < 0.02) {
+    await db.delete(authSendCounts).where(lt(authSendCounts.day, utcDay(now - 2 * 24 * 60 * 60 * 1000)));
+  }
+  return row!.count;
+}
+
+/**
+ * Durable daily caps on code emails, checked after the per-address cooldown so
+ * refused resends don't count. Per IP (hashed, never stored raw) and an
+ * optional global cap that is off by default.
+ */
+async function enforceDailyEmailCaps(db: Db, ip: string | null, now: number) {
+  const perIp = env.emailCodesPerIpPerDay;
+  if (ip && perIp > 0) {
+    const bucket = `ip:${crypto.createHash('sha256').update(ip).digest('base64url').slice(0, 22)}`;
+    if ((await bumpDailyCount(db, bucket, now)) > perIp) {
+      throw new TRPCError({
+        code: 'TOO_MANY_REQUESTS',
+        message: 'Too many sign-in codes from this network today. Try again tomorrow or sign in with your phone.',
+      });
+    }
+  }
+  const global = env.emailCodesGlobalPerDay;
+  if (global > 0 && (await bumpDailyCount(db, 'global', now)) > global) {
+    throw new TRPCError({
+      code: 'TOO_MANY_REQUESTS',
+      message: 'Sign-in emails are paused for today. Try again tomorrow or sign in with your phone.',
+    });
+  }
+}
 
 /**
  * Issues an email code and sends it, with the same cooldown and hourly cap as
- * phone codes. `email_codes` has no created_at, so issue time is derived from
- * expires_at - CODE_TTL_MS. A failed send burns the code.
+ * phone codes plus the durable daily caps. The hourly cap derives issue time
+ * from expires_at - CODE_TTL_MS (tests age codes that way). A new code inherits
+ * the address's current wrong-guess count, so requesting another code does not
+ * reset it; only the 5th wrong guess (which burns every live code) does.
+ * A failed send burns the code.
  */
-async function sendEmailCode(db: Db, email: string, purpose: 'sign_in' | 'verify_campus') {
+async function sendEmailCode(
+  db: Db,
+  email: string,
+  purpose: EmailCodePurpose,
+  userId: string | null,
+  ip: string | null,
+) {
   const now = Date.now();
   const recent = await db
     .select({ expiresAt: emailCodes.expiresAt })
@@ -205,11 +283,24 @@ async function sendEmailCode(db: Db, email: string, purpose: 'sign_in' | 'verify
   if (recent.length >= EMAIL_MAX_CODES_PER_HOUR) {
     throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'Too many codes for this email. Try again in an hour.' });
   }
+  await enforceDailyEmailCaps(db, ip, now);
+
+  const [carried] = await db
+    .select({ attempts: sql<number>`coalesce(max(${emailCodes.attempts}), 0)` })
+    .from(emailCodes)
+    .where(and(eq(emailCodes.email, email), isNull(emailCodes.consumedAt), gt(emailCodes.expiresAt, new Date(now))));
 
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   const [row] = await db
     .insert(emailCodes)
-    .values({ email, code, expiresAt: new Date(now + CODE_TTL_MS) })
+    .values({
+      email,
+      codeHash: hashEmailCode(email, purpose, code),
+      purpose,
+      userId,
+      attempts: Number(carried?.attempts ?? 0),
+      expiresAt: new Date(now + CODE_TTL_MS),
+    })
     .returning({ id: emailCodes.id });
   try {
     await emailProvider().send(codeEmail(email, code, purpose));
@@ -225,13 +316,77 @@ async function sendEmailCode(db: Db, email: string, purpose: 'sign_in' | 'verify
   };
 }
 
+const EMAIL_CODE_GONE = 'That code is wrong or has expired. Request a new one.';
+const EMAIL_CODE_LOCKED = 'Too many wrong tries. Request a new code.';
+
+async function burnLiveEmailCodes(db: Db, email: string, now: Date) {
+  await db
+    .update(emailCodes)
+    .set({ consumedAt: now })
+    .where(and(eq(emailCodes.email, email), isNull(emailCodes.consumedAt)));
+}
+
+/**
+ * Checks and CONSUMES an email code. Every try is counted against the address
+ * before the comparison (an atomic increment on all its live codes), so
+ * parallel guesses can't slip past the limit. Only the newest live code issued
+ * for `purpose` (and, for 'verify_campus', for this `userId`) is compared. The
+ * 5th wrong try burns every live code for the address. Messages never depend on
+ * whether the address has an account.
+ */
+async function useEmailCode(db: Db, email: string, code: string, purpose: EmailCodePurpose, userId: string | null) {
+  const now = new Date();
+  const live = await db
+    .update(emailCodes)
+    .set({ attempts: sql`${emailCodes.attempts} + 1` })
+    .where(and(eq(emailCodes.email, email), isNull(emailCodes.consumedAt), gt(emailCodes.expiresAt, now)))
+    .returning();
+  if (live.length === 0) throw new TRPCError({ code: 'BAD_REQUEST', message: EMAIL_CODE_GONE });
+
+  const tries = Math.max(...live.map((r) => r.attempts));
+  if (tries > EMAIL_MAX_ATTEMPTS) {
+    await burnLiveEmailCodes(db, email, now);
+    throw new TRPCError({ code: 'BAD_REQUEST', message: EMAIL_CODE_LOCKED });
+  }
+
+  const candidate = live
+    .filter((r) => r.purpose === purpose && (purpose !== 'verify_campus' || r.userId === userId))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.expiresAt.getTime() - a.expiresAt.getTime())[0];
+  const ok = !!candidate && codesMatch(candidate.codeHash, hashEmailCode(email, purpose, code));
+  if (!ok) {
+    if (tries >= EMAIL_MAX_ATTEMPTS) {
+      await burnLiveEmailCodes(db, email, now);
+      throw new TRPCError({ code: 'BAD_REQUEST', message: EMAIL_CODE_LOCKED });
+    }
+    const left = EMAIL_MAX_ATTEMPTS - tries;
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `That code is wrong or has expired. ${left} ${left === 1 ? 'try' : 'tries'} left.`,
+    });
+  }
+
+  // Consume exactly once, even if the same right code arrives twice at once.
+  const [used] = await db
+    .update(emailCodes)
+    .set({ consumedAt: now })
+    .where(and(eq(emailCodes.id, candidate.id), isNull(emailCodes.consumedAt)))
+    .returning({ id: emailCodes.id });
+  if (!used) throw new TRPCError({ code: 'BAD_REQUEST', message: EMAIL_CODE_GONE });
+  // The right code was not a wrong guess: take back the try counted on the others.
+  await db
+    .update(emailCodes)
+    .set({ attempts: sql`greatest(${emailCodes.attempts} - 1, 0)` })
+    .where(and(eq(emailCodes.email, email), isNull(emailCodes.consumedAt), gt(emailCodes.expiresAt, now)));
+  return candidate;
+}
+
 export const authRouter = router({
   requestCode: publicProcedure
     .input(z.object({ email: z.email() }))
     .mutation(async ({ ctx, input }) => {
       // Any email can sign in; the cooldown and hourly cap apply to all of them.
       const email = input.email.trim().toLowerCase();
-      return sendEmailCode(ctx.db, email, 'sign_in');
+      return sendEmailCode(ctx.db, email, 'sign_in', null, callerIp(ctx));
     }),
 
   /**
@@ -260,31 +415,8 @@ export const authRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const email = input.email.trim().toLowerCase();
-
-      const [record] = await ctx.db
-        .select()
-        .from(emailCodes)
-        .where(
-          and(
-            eq(emailCodes.email, email),
-            eq(emailCodes.code, input.code),
-            isNull(emailCodes.consumedAt),
-            gt(emailCodes.expiresAt, new Date()),
-          ),
-        )
-        .orderBy(desc(emailCodes.expiresAt))
-        .limit(1);
-
-      if (!record) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'That code is wrong or has expired. Request a new one.',
-        });
-      }
-      await ctx.db
-        .update(emailCodes)
-        .set({ consumedAt: new Date() })
-        .where(eq(emailCodes.id, record.id));
+      // Checks, counts and consumes; only a code issued for sign-in works here.
+      await useEmailCode(ctx.db, email, input.code, 'sign_in', null);
 
       // A campus-domain email verifies campus membership; any other email
       // signs in but leaves the account NOT campus-verified (default campus).
@@ -319,11 +451,15 @@ export const authRouter = router({
       return { token, isNewAccount, user: await withCampus(ctx.db, user!) };
     }),
 
-  /** Dev-only identity switcher for the demo. Disabled unless DEV_LOGIN=1. */
+  /**
+   * Dev-only identity switcher for the demo. Needs DEV_LOGIN=1 AND a
+   * non-production NODE_ENV (env.devLogin checks both; the server also refuses
+   * to start with DEV_LOGIN=1 in production).
+   */
   devSignIn: publicProcedure
     .input(z.object({ userId: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
-      if (!env.devLogin) {
+      if (!env.devLogin || env.isProduction) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Dev sign-in is disabled.' });
       }
       const [user] = await ctx.db.select().from(users).where(eq(users.id, input.userId)).limit(1);
@@ -464,7 +600,7 @@ export const authRouter = router({
       if (!campus) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'That isn’t a campus email address. Use your school email to verify.' });
       }
-      return sendEmailCode(ctx.db, email, 'verify_campus');
+      return sendEmailCode(ctx.db, email, 'verify_campus', ctx.user.id, callerIp(ctx));
     }),
 
   /**
@@ -475,29 +611,22 @@ export const authRouter = router({
    *    (`switchedAccount: true`) — listings and bookings stay where they are.
    *  - email account is empty → it is retired and the email moves here.
    *  - both have history → CONFLICT, nothing changes.
+   *
+   * The code must have been issued for 'verify_campus' to THIS caller, and it
+   * shares the address's 5-wrong-guess limit with sign-in codes. Knowing it
+   * proves control of the inbox, which already lets anyone sign in to the
+   * email account with a sign-in code, so the switch grants nothing more. The
+   * code is consumed by the check, so a CONFLICT means requesting a new one.
    */
   confirmEmailLink: protectedProcedure
     .input(z.object({ email: z.email(), code: z.string().length(6) }))
     .mutation(async ({ ctx, input }) => {
       const email = input.email.trim().toLowerCase();
-      const [record] = await ctx.db
-        .select()
-        .from(emailCodes)
-        .where(
-          and(
-            eq(emailCodes.email, email),
-            eq(emailCodes.code, input.code),
-            isNull(emailCodes.consumedAt),
-            gt(emailCodes.expiresAt, new Date()),
-          ),
-        )
-        .orderBy(desc(emailCodes.expiresAt))
-        .limit(1);
-      if (!record) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That code is wrong or has expired. Request a new one.' });
-      }
       const campus = await resolveCampus(ctx.db, email);
       if (!campus) throw new TRPCError({ code: 'BAD_REQUEST', message: 'That isn’t a campus email address. Use your school email to verify.' });
+
+      // Checks, counts and consumes; only a campus code issued to this caller works.
+      await useEmailCode(ctx.db, email, input.code, 'verify_campus', ctx.user.id);
 
       const me = ctx.user;
       const [owner] = await ctx.db.select().from(users).where(eq(users.email, email)).limit(1);
@@ -507,7 +636,6 @@ export const authRouter = router({
         const [meBusy, ownerBusy] = await Promise.all([hasActivity(ctx.db, me.id), hasActivity(ctx.db, owner.id)]);
         if (!meBusy) {
           // Fold the empty phone account into the existing email account.
-          await ctx.db.update(emailCodes).set({ consumedAt: now }).where(eq(emailCodes.id, record.id));
           await retireEmptyAccount(ctx.db, me, owner.id);
           const [merged] = await ctx.db
             .update(users)
@@ -532,7 +660,6 @@ export const authRouter = router({
         await retireEmptyAccount(ctx.db, owner, me.id);
       }
 
-      await ctx.db.update(emailCodes).set({ consumedAt: now }).where(eq(emailCodes.id, record.id));
       const [user] = await ctx.db
         .update(users)
         .set({ email, campusEmailVerifiedAt: now, campusId: campus.id })

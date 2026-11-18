@@ -261,9 +261,10 @@ export default function BrowseScreen() {
     scrollOffset.current = 0;
   }, [deckResetKey, numColumns]);
 
+  const refetchFeed = feedQuery.refetch;
   const onRefresh = useCallback(() => {
-    feedQuery.refetch();
-  }, [feedQuery.refetch]);
+    refetchFeed();
+  }, [refetchFeed]);
   const renderItem = useCallback(
     ({ item }: { item: FeedListing }) => (
       <GridCell

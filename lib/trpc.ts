@@ -21,6 +21,9 @@ const AUTH_TOKEN_KEY = 'dibbs-auth-token';
 export const apiBaseUrl: string =
   process.env.EXPO_PUBLIC_RORK_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:3000';
 
+/** Give up on a request after this long (covers a cold-starting host). */
+const REQUEST_TIMEOUT_MS = 45_000;
+
 const trpcUrl = `${apiBaseUrl}/api/trpc`;
 
 /**
@@ -35,13 +38,35 @@ async function fetchWithFriendlyNetworkErrors(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  // Bound every request: the API host sleeps when idle, and without a limit a
+  // hung request would never settle. Honors a signal the caller already passed.
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+  const callerSignal = init?.signal;
+  const onCallerAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', onCallerAbort);
+  }
   try {
-    return await fetch(input, init);
+    return await fetch(input, { ...init, signal: controller.signal });
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    if (timedOut) {
+      throw new Error(
+        'The server is taking too long to respond. It may be waking up, so please try again in a moment.',
+      );
+    }
+    if ((err as { name?: string } | null)?.name === 'AbortError') throw err;
     throw new Error(
       "Can't reach the server — check the connection banner at the top of the screen.",
     );
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', onCallerAbort);
   }
 }
 

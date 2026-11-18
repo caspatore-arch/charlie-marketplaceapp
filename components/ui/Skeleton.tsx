@@ -3,7 +3,7 @@
  * Pulses via opacity unless the OS "Reduce Motion" setting is on, in which case
  * it renders as a static block.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AccessibilityInfo, Animated, StyleSheet } from 'react-native';
 import { colors, radius as themeRadius } from '@/constants/theme';
 
@@ -15,7 +15,8 @@ export interface SkeletonProps {
 }
 
 export function Skeleton({ width = '100%', height = 16, radius = themeRadius.sm, style }: SkeletonProps) {
-  const opacity = useRef(new Animated.Value(0.5)).current;
+  // Lazy state, not useAnimatedValue: react-native-web does not export that hook.
+  const [opacity] = useState(() => new Animated.Value(0.5));
   const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {

@@ -51,8 +51,18 @@ const TYPE_BY_EXTENSION: Record<string, string> = {
 
 export type StoredFile = { bytes: Buffer; contentType: string };
 
+export type PutOptions = {
+  /**
+   * Store under the given (sanitized) name instead of a generated one. Only
+   * the seed passes this, so its demo-*.svg art keeps stable names and
+   * re-seeding is idempotent. Never set it for user uploads: a fixed name lets
+   * one upload overwrite another.
+   */
+  keepName?: boolean;
+};
+
 export interface StorageAdapter {
-  put(name: string, bytes: Buffer, contentType: string): Promise<{ url: string }>;
+  put(name: string, bytes: Buffer, contentType: string, options?: PutOptions): Promise<{ url: string }>;
   get(name: string): Promise<StoredFile | null>;
 }
 
@@ -75,6 +85,17 @@ export function sanitizeFileName(name: string): string {
   return cleaned.slice(0, 80);
 }
 
+/** The stored name: a fresh UUID unless the caller explicitly keeps its own. */
+function storedNameFor(name: string, contentType: string, options?: PutOptions): string {
+  const ext = EXTENSION_BY_TYPE[contentType] ?? '';
+  const hinted = sanitizeFileName(name);
+  if (options?.keepName) {
+    if (!hinted) throw new UploadError('That file name is not allowed.');
+    return hinted;
+  }
+  return `${crypto.randomUUID()}${ext}`;
+}
+
 export function contentTypeForName(name: string): string {
   return TYPE_BY_EXTENSION[path.extname(name).toLowerCase()] ?? 'application/octet-stream';
 }
@@ -88,7 +109,7 @@ export class LocalDiskStorage implements StorageAdapter {
     return path.join(path.resolve(this.dir), safe);
   }
 
-  async put(name: string, bytes: Buffer, contentType: string): Promise<{ url: string }> {
+  async put(name: string, bytes: Buffer, contentType: string, options?: PutOptions): Promise<{ url: string }> {
     if (bytes.byteLength > MAX_UPLOAD_BYTES) {
       throw new UploadError('That image is larger than 8 MB. Try a smaller one.', 413);
     }
@@ -96,13 +117,7 @@ export class LocalDiskStorage implements StorageAdapter {
       throw new UploadError('That file type is not supported. Use a JPEG, PNG, WebP or HEIC.', 415);
     }
 
-    // Always store under a name we generate — keeps the original only as a hint.
-    const hinted = sanitizeFileName(name);
-    const ext = EXTENSION_BY_TYPE[contentType] ?? path.extname(hinted) ?? '';
-    const stored =
-      hinted && hinted.endsWith(ext) && hinted.startsWith('demo-')
-        ? hinted // seed writes stable demo-*.svg names so re-seeding is idempotent
-        : `${crypto.randomUUID()}${ext}`;
+    const stored = storedNameFor(name, contentType, options);
 
     const full = this.resolve(stored);
     await fs.mkdir(path.dirname(full), { recursive: true });
@@ -167,7 +182,7 @@ export class S3Storage implements StorageAdapter {
     });
   }
 
-  async put(name: string, bytes: Buffer, contentType: string): Promise<{ url: string }> {
+  async put(name: string, bytes: Buffer, contentType: string, options?: PutOptions): Promise<{ url: string }> {
     if (bytes.byteLength > MAX_UPLOAD_BYTES) {
       throw new UploadError('That image is larger than 8 MB. Try a smaller one.', 413);
     }
@@ -175,12 +190,7 @@ export class S3Storage implements StorageAdapter {
       throw new UploadError('That file type is not supported. Use a JPEG, PNG, WebP or HEIC.', 415);
     }
 
-    const hinted = sanitizeFileName(name);
-    const ext = EXTENSION_BY_TYPE[contentType] ?? path.extname(hinted) ?? '';
-    const key =
-      hinted && hinted.endsWith(ext) && hinted.startsWith('demo-')
-        ? hinted // seed writes stable demo-*.svg names so re-seeding is idempotent
-        : `${crypto.randomUUID()}${ext}`;
+    const key = storedNameFor(name, contentType, options);
 
     await this.client.send(
       new PutObjectCommand({
@@ -222,3 +232,6 @@ function pickStorage(): StorageAdapter {
 }
 
 export const storage: StorageAdapter = pickStorage();
+
+/** Which adapter is live, for /api/health. Mode only — no bucket or host. */
+export const storageMode: 's3' | 'disk' = storage instanceof S3Storage ? 's3' : 'disk';

@@ -36,6 +36,20 @@ export function LegalSection() {
         style={styles.button}
         accessibilityLabel="View Privacy Policy"
       />
+      <Button
+        title="Community rules"
+        variant="secondary"
+        onPress={() => router.push('/rules')}
+        style={styles.button}
+        accessibilityLabel="View Community rules"
+      />
+      <Button
+        title="Questions and answers"
+        variant="secondary"
+        onPress={() => router.push('/faq')}
+        style={styles.button}
+        accessibilityLabel="View questions and answers"
+      />
     </View>
   );
 }

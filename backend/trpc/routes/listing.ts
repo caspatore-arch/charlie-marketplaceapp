@@ -3,6 +3,7 @@ import { and, count, desc, eq, gt, gte, ilike, inArray, isNull, lt, lte, notInAr
 import { z } from 'zod';
 
 import type { Db } from '../../db/client';
+import { env } from '../../env';
 import {
   availabilityWindows,
   bids,
@@ -95,6 +96,32 @@ const windowSchema = z
   .object({ startsAt: z.coerce.date(), endsAt: z.coerce.date() })
   .refine((w) => w.endsAt > w.startsAt, 'A pickup window has to end after it starts.');
 
+/**
+ * A listing photo must be an image this server stored: a `/api/uploads/<name>`
+ * path (what POST /api/uploads returns in disk mode, or in S3 mode without a
+ * public base) or a URL under the configured S3_PUBLIC_BASE_URL. Anything else
+ * (a third-party tracking pixel, an unreviewed image host) is refused. Same
+ * intent as the avatar rule in user.ts, which today accepts any https URL;
+ * exported so that rule can switch to this one.
+ */
+const UPLOAD_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+export function isOwnUploadUrl(value: string): boolean {
+  const v = value.trim();
+  if (v !== value || v.includes('..')) return false;
+  const local = /^\/api\/uploads\/(.+)$/.exec(v);
+  if (local) return UPLOAD_NAME.test(local[1]!);
+  const base = env.s3PublicBaseUrl;
+  if (base && /^https:\/\//.test(base) && v.startsWith(`${base}/`)) {
+    return UPLOAD_NAME.test(v.slice(base.length + 1));
+  }
+  return false;
+}
+const photoUrlSchema = z
+  .string()
+  .min(1)
+  .max(500)
+  .refine(isOwnUploadUrl, { message: 'Use photos uploaded through Dibbs.' });
+
 const listingFields = z.object({
   title: z.string().min(2).max(120),
   description: z.string().max(2000).optional(),
@@ -108,7 +135,7 @@ const listingFields = z.object({
   size: z.string().max(40).optional(),
   brand: z.string().max(60).optional(),
   isSellToday: z.boolean(),
-  photoUrls: z.array(z.string().min(1).max(500)).min(1).max(8),
+  photoUrls: z.array(photoUrlSchema).min(1).max(8),
   spotIds: z.array(z.uuid()).min(1),
   windows: z.array(windowSchema),
 });
@@ -687,7 +714,7 @@ export const listingRouter = router({
    * Capped per user because each live call costs money.
    */
   draftFromPhotos: campusVerifiedProcedure
-    .input(z.object({ photoUrls: z.array(z.string().min(1).max(500)).min(1).max(4) }))
+    .input(z.object({ photoUrls: z.array(photoUrlSchema).min(1).max(4) }))
     .mutation(async ({ ctx, input }) => {
       if (!takeDraftAllowance(ctx.user.id)) {
         throw new TRPCError({

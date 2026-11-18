@@ -28,7 +28,8 @@ ModerationAction = 'dismiss' | 'remove_listing' | 'note'
 - **campuses**: id, name, slug (unique), emailDomains text[], timezone, isDemo bool
 - **users**: id, email (unique, private, **nullable** — phone-only accounts have none), phone? (E.164, unique, private), phoneVerifiedAt?, smsOptIn bool (default false), smsOptInAt?, smsOptOutAt?, displayName, avatarUrl?, campusId → campuses, campusEmailVerifiedAt?, bio?, isDemo, createdAt
 - **sessions**: id, userId, tokenHash (unique), expiresAt, createdAt
-- **email_codes**: id, email, code, expiresAt, consumedAt?
+- **email_codes**: id, email, codeHash (sha256; the code itself is never stored), purpose ('sign_in' | 'verify_campus'), userId? (verify_campus: who asked), attempts, expiresAt, consumedAt?, createdAt (legacy `code` column is null and unused)
+- **auth_send_counts**: bucket ('ip:<hash>' | 'global'), day (UTC YYYY-MM-DD), count: durable daily code-email caps
 - **phone_codes**: id, phone, codeHash (sha256, never the code), purpose ('sign_in' | 'link'), userId?, attempts, expiresAt, consumedAt?, createdAt; index `(phone, createdAt)`
 - **meetup_spots**: id, campusId, name, description (precise meeting description, e.g. "north entrance, by the bike racks"), lat, lng, hoursNote?, isDemo, isActive
 - **listings**: id, sellerId, campusId, title, description?, category, condition, priceCents, **saleType** ('fixed' | 'auction', default 'fixed'; **legacy** — new rows are always 'fixed'), **startPriceCents?** and **buyoutPriceCents?** (legacy auction columns, null on new rows), size?, brand?, status, isSellToday bool, expiresAt? (always createdAt + 24h for new listings; for a legacy auction also its end time), createdAt, updatedAt, soldAt?
@@ -88,7 +89,7 @@ auth.requestPhoneCode / verifyPhoneCode / requestPhoneLinkCode / confirmPhoneLin
 auth.requestCode      pub  { email }                → { ok: true, simulated, resendAfterSeconds: 30 }   (any email address, and a verified one of any domain may trade; one on ALLOWED_EMAIL_DOMAINS or a campus's emailDomains also counts as campus-verified. Delivery is real when email is configured (`EMAIL_MODE=live` + `RESEND_API_KEY` + `EMAIL_FROM`), otherwise `simulated: true` and the code is in the server log. See "Sign-in email" below.)
 auth.methods          pub  –                        → { primary: 'email' | 'phone', phone: { available, simulated }, email: { available, simulated } }   (which sign-in methods deliver codes now. `primary` is 'phone' only when SMS is live; otherwise 'email'. Clients lead with `primary` and offer the other as secondary.)
 auth.verifyCode       pub  { email, code, displayName? } → { token, user }   (user includes `campus`, same shape as auth.me)
-auth.devSignIn        pub  { userId }               → { token, user }   (only if DEV_LOGIN=1; user includes `campus`)
+auth.devSignIn        pub  { userId }               → { token, user }   (only if DEV_LOGIN=1 AND NODE_ENV is not production; the server refuses to start with both set; user includes `campus`)
 auth.me               P    –                        → User (with campus, canPost, postingStatus)
 auth.signOut          P    –                        → { ok }
 
@@ -103,7 +104,7 @@ listing.feed          pub  { campusId, q?, category?, minCents?, maxCents?, size
 listing.byId          pub  { id }                   → ListingDetail = listing + photos[] + seller + spots[] + availabilityWindows[] + activeReservationId? + viewerRole ('seller'|'buyer'|'guest') + isSaved
 listing.bySeller      pub  { sellerId, includeSold? } → ListingCard[]
 listing.mine          P    –                        → ListingCard[] (all statuses)
-listing.create        C    { title, description?, category, condition, priceCents, saleType?, startPriceCents?, buyoutPriceCents?, size?, brand?, isSellToday, photoUrls: string[] (1–8), spotIds: string[] (1+), windows: {startsAt,endsAt}[] (**1–8**, each inside now → now+24h and ≥ 15 min) } → ListingDetail
+listing.create        C    { title, description?, category, condition, priceCents, saleType?, startPriceCents?, buyoutPriceCents?, size?, brand?, isSellToday, photoUrls: string[] (1–8; each must be `/api/uploads/<name>` or under `S3_PUBLIC_BASE_URL`, else BAD_REQUEST "Use photos uploaded through Dibbs."; same for `update` and `draftFromPhotos`), spotIds: string[] (1+), windows: {startsAt,endsAt}[] (**1–8**, each inside now → now+24h and ≥ 15 min) } → ListingDetail
       priceCents >= 100. saleType 'auction' is REFUSED (BAD_REQUEST "Auctions have been replaced by an asking price plus offers…"); omit saleType. startPriceCents/buyoutPriceCents are ignored.
       expiresAt = now + 24h for every listing. Enqueues the seller's "listing posted" SMS (see "Transactional SMS").
 listing.update        P    { id, ...same fields optional }             → ListingDetail
@@ -144,8 +145,10 @@ reservation.decline   P    { id }                            → Reservation   (
 reservation.cancel    P    { id, reason? }                   → Reservation   (either party)
 reservation.byId      P    { id }                            → ReservationDetail = reservation + listing + spot + buyer + seller + handoffCode (buyer only sees it) + directionsUrl
 reservation.mine      P    { role?: 'buyer'|'seller' }       → ReservationDetail[]
-reservation.forListing P   { listingId }                     → Reservation[] (seller only)
-reservation.confirmHandoff P { id, code? }                   → ReservationDetail  (buyer: tap; seller: must pass code)
+reservation.forListing P   { listingId }                     → Reservation[] (seller only; `handoffCode` is always null)
+reservation.confirmHandoff P { id, code? }                   → ReservationDetail  (buyer: tap; seller: must pass code. Each seller try is counted on `reservations.handoffAttempts` before comparing; 5 wrong codes lock code confirmation: TOO_MANY_REQUESTS "Too many wrong codes…". A new code from accept (after a reschedule) resets the count.)
+
+**The handoff code belongs to the buyer.** The buyer reads it out; the seller types it. Every procedure that returns a reservation row (`request`, `counter`, `accept`, `decline`, `cancel`, `forListing`) or a ReservationDetail returns `handoffCode` only to the buyer and `null` to anyone else.
 
 user.byId             pub  { id }                   → PublicProfile { id, displayName, avatarUrl, campus, campusEmailVerified, approvedSeller, isDemo, bio, activeListingCount, memberSince }   (`approvedSeller` = founder-approved; `blocked` is never public)
 user.contactSettings P  –                        → { phone, phoneVerified, email, campusEmailVerified, postingStatus, smsOptIn, smsOptInAt, smsOptOutAt }   (private to the caller)
@@ -440,7 +443,10 @@ community.moderatorRemove M { id }                     → { ok }   takedown fro
 Email sign-in codes (`auth.requestCode`, `auth.verifyCode`, `auth.requestEmailLinkCode`, `auth.confirmEmailLink`) are sent through `backend/email/provider.ts`.
 
 - **Delivery.** Real email goes out through Resend only when `EMAIL_MODE=live` AND `RESEND_API_KEY` AND `EMAIL_FROM` are all set. Otherwise the provider is simulated: nothing is sent and the code is printed to the server log. Tests always simulate. In live mode codes are never written to the log, and a send error message never includes the code.
-- **Rules.** Same as phone codes: 6 digits, 10-minute expiry, 5 wrong guesses, 30-second resend cooldown (`resendAfterSeconds: 30`), and at most 5 codes per email per rolling hour (TOO_MANY_REQUESTS with how long to wait). If the send fails, the code is consumed immediately and the client gets INTERNAL_SERVER_ERROR "We couldn't send the code. Try again."
+- **Rules.** Same as phone codes: 6 digits, 10-minute expiry, 30-second resend cooldown (`resendAfterSeconds: 30`), and at most 5 codes per email per rolling hour (TOO_MANY_REQUESTS with how long to wait). If the send fails, the code is consumed immediately and the client gets INTERNAL_SERVER_ERROR "We couldn't send the code. Try again."
+- **Storage and purpose.** Only a hash is stored. A code works only for the purpose it was issued for: `requestCode` codes only in `verifyCode`, `requestEmailLinkCode` codes only in `confirmEmailLink` and only for the account that requested them. Only the newest live code for that purpose is compared. A successful use consumes the code.
+- **Wrong guesses are counted per address**, across all its live codes (both purposes), and the count is taken before comparing. Messages: "That code is wrong or has expired. N tries left."; the 5th wrong guess burns every live code for the address ("Too many wrong tries. Request a new code."). A newly requested code inherits the current count, so only the burn resets it. No message depends on whether the address has an account.
+- **Daily caps (durable, in `auth_send_counts`).** Per caller IP per UTC day `EMAIL_CODES_PER_IP_PER_DAY` (default 300; 0 = off; needs the IP in the tRPC context) and an optional global `EMAIL_CODES_GLOBAL_PER_DAY` (default 0 = off). Over a cap -> TOO_MANY_REQUESTS. Checked after the per-address cooldown and hourly cap.
 - **Return shape.** `requestCode` and `requestEmailLinkCode` return `{ ok: true, simulated: boolean, resendAfterSeconds: 30 }`. `simulated: true` means no email was sent, so the UI can show the honest development note.
 - **Sign-in order.** `auth.methods` decides the lead method. Email is primary until SMS is live; phone becomes primary automatically once `SMS_MODE=live` and the Twilio settings are in place. No client change is needed for that switch.
 - **Health.** `GET /api/health` includes `email: { mode: 'simulated' | 'live', simulated: boolean }`, next to `sms` and `payments`. Use it to confirm a deployment is live before testing sign-in.
@@ -484,6 +490,7 @@ A new phone account is created with `email = null`, `phoneVerifiedAt = now`, `ca
 - `confirmPhoneLink`: if the number already belongs to another (non-deleted) account **with activity** -> CONFLICT ("…Sign in with the phone to use that account, or contact support to combine them."); if that account is empty it is retired and the number moves here. `smsOptIn` omitted keeps the current consent; `true` opts in; `false` records an opt-out.
 - `confirmEmailLink` (verifies a campus email for the signed-in, usually phone-only, account):
   - the email has no account -> it is attached here; `campusEmailVerifiedAt = now`, `campusId` follows the email's campus; `switchedAccount: false`, `token: null`.
+  - the code must be a `verify_campus` code issued to the caller (see Sign-in email rules); a sign-in code is refused.
   - the email already belongs to another account and **the caller is empty** -> the caller's phone (and consent) moves onto the email account, the empty phone account is retired, and a session for the email account is returned: `switchedAccount: true` with a new `token` that the client must store.
   - the email account is empty but the caller has history -> the email account is retired and the email moves to the caller.
   - **both have history** -> CONFLICT, nothing changes.

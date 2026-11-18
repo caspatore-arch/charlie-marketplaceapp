@@ -1,0 +1,13 @@
+{
+  "name": "Dibbs",
+  "short_name": "Dibbs",
+  "description": "Campus marketplace for University of Arizona students to buy and sell used items and meet at campus spots.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fcf8f7",
+  "theme_color": "#0D305B",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }
+  ]
+}

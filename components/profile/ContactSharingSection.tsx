@@ -8,7 +8,7 @@
  * The phone number here is just a number the student typed. It is NOT their
  * sign-in number and is never verified.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Switch, View } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { Input } from '@/components/ui/Input';
@@ -59,14 +59,16 @@ export function ContactSharingSection() {
   const [sharePhone, setSharePhone] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  useEffect(() => {
-    if (meQuery.data && !dirty) {
-      setInstagram(meQuery.data.instagramHandle ?? '');
-      setPhone(meQuery.data.contactPhone ?? '');
-      setShareInstagram(meQuery.data.shareInstagram);
-      setSharePhone(meQuery.data.sharePhone);
-    }
-  }, [meQuery.data, dirty]);
+  // Seed local edit state from the server whenever fresh data arrives and the
+  // user has no unsaved edits (adjust state during render).
+  const [seededFrom, setSeededFrom] = useState<typeof meQuery.data>(undefined);
+  if (meQuery.data && !dirty && seededFrom !== meQuery.data) {
+    setSeededFrom(meQuery.data);
+    setInstagram(meQuery.data.instagramHandle ?? '');
+    setPhone(meQuery.data.contactPhone ?? '');
+    setShareInstagram(meQuery.data.shareInstagram);
+    setSharePhone(meQuery.data.sharePhone);
+  }
 
   const mutation = trpc.user.updateMe.useMutation({
     onSuccess: async (updated) => {

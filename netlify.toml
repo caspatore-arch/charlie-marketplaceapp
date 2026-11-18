@@ -1,16 +1,10 @@
-# Netlify configuration for Dibbs web.
+# Netlify configuration for Dibbs web (docs/DEPLOY-WEB.md).
 #
-# expo export --platform web produces a single-page application: one index.html
-# plus a JS bundle. expo-router handles all client-side navigation (e.g.
-# /listing/:id). If a user opens a shared link directly or hard-refreshes, the
-# static host must serve index.html rather than a 404 — otherwise every shared
-# listing URL is broken.
-#
-# The redirects below are evaluated in order. Asset directories are passed
-# through first so a JS or image file never gets HTML in response (that causes
-# a MIME-type console error and a blank white page).
-# status = 200 is a "rewrite" (URL stays the same); status = 301 would change
-# the URL and break the router.
+# expo export --platform web produces a single-page app: one app shell
+# (index.html) plus a JS bundle, and expo-router draws each screen in the
+# browser. scripts/prerender-public.ts then writes real HTML files for the
+# public pages (/about, /why-dibbs, /faq, /legal/*) and a 404.html (the same
+# app shell, marked noindex). That is what `npm run web:build` runs.
 
 [build]
   publish = "dist"
@@ -22,26 +16,56 @@
 [build.environment]
   EXPO_PUBLIC_WEB_BASE_URL = "https://trydibbs.com"
 
-# The host-level redirects (app.trydibbs.com and www -> trydibbs.com) live at
-# the TOP of public/_redirects, not here: Netlify runs _redirects before this
-# file, so the catch-all there would otherwise swallow them.
+# Redirects are NOT defined here. They live in public/_redirects, which Netlify
+# evaluates first, so keeping the same rules in this file would be dead weight
+# and a second place to get out of step. That file holds: the host redirects
+# (app. and www. to the bare domain, one hop), the prerendered public pages,
+# every real client route as a 200 rewrite to the app shell, and a final
+# `/*  /404.html  404` so unknown URLs return a real 404 instead of a soft 200.
 
-# Pass real static asset directories straight through (no redirect needed —
-# Netlify serves existing files before redirect rules, but being explicit is
-# safer and self-documenting).
-[[redirects]]
-  from   = "/_expo/*"
-  to     = "/_expo/:splat"
-  status = 200
+# ---- Caching ---------------------------------------------------------------
+# Files under /_expo and /assets have a content hash in their name, so a
+# changed file always has a new URL and the old one can be cached for a year.
+# HTML (and everything else) keeps Netlify's default of revalidating on every
+# load, so a new deploy shows up immediately. Do not add a Cache-Control rule
+# on /*; it would compete with these.
+[[headers]]
+  for = "/_expo/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
 
-[[redirects]]
-  from   = "/assets/*"
-  to     = "/assets/:splat"
-  status = 200
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
 
-# Catch-all: any path that is not a real file gets index.html.
-# The JS router then handles the route on the client.
-[[redirects]]
-  from   = "/*"
-  to     = "/index.html"
-  status = 200
+# ---- Security headers ------------------------------------------------------
+# HSTS is set by Netlify/Cloudflare and is deliberately not touched here.
+#
+# Permissions-Policy: the app uses the camera (taking a listing photo or short
+# video, components/dibbs/PrivateMediaPicker.tsx) and clipboard and Web Share
+# (utils/shareListing.ts) on its own origin, so those stay allowed for "self".
+# The microphone is allowed for "self" because a short video can carry sound.
+# Geolocation is denied: the app never asks for the device location (meetup
+# spots come from a fixed list). If a feature is added that needs another
+# permission, add it here or the browser will silently block it.
+#
+# Content-Security-Policy: only `frame-ancestors 'none'` is enforced. It stops
+# other sites from framing Dibbs and cannot break the app. The full policy is
+# sent as Report-Only: browsers log what it WOULD block in the console and block
+# nothing. Tune it from those console messages on a deploy preview (and on
+# production) until it is silent, and only then consider enforcing it. Do not
+# enforce a script or style policy untested: a wrong one blanks the site.
+# api.trydibbs.com is the API (and private photos); photos.trydibbs.com is the
+# optional public photo host (S3_PUBLIC_BASE_URL in docs/R2-SETUP.md). Drop it
+# if that host is never used. If payments are ever switched on, the payment
+# provider's script and frame hosts must be added.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "camera=(self), microphone=(self), geolocation=(), usb=(), serial=(), bluetooth=()"
+    Content-Security-Policy = "frame-ancestors 'none'"
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.trydibbs.com https://photos.trydibbs.com; media-src 'self' blob: https://api.trydibbs.com https://photos.trydibbs.com; font-src 'self' data:; connect-src 'self' https://api.trydibbs.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"

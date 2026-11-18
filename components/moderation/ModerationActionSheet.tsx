@@ -3,7 +3,7 @@
  * "Remove listing" (note optional, destructive — confirmed before submit)
  * and "Add note" (note is the whole point, submit is disabled until typed).
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Sheet } from '@/components/ui/Sheet';
 import { Text } from '@/components/ui/Text';
@@ -23,9 +23,12 @@ export interface ModerationActionSheetProps {
 export function ModerationActionSheet({ visible, mode, loading, onClose, onSubmit }: ModerationActionSheetProps) {
   const [note, setNote] = useState('');
 
-  useEffect(() => {
+  // Clear the note each time the sheet opens (adjust state during render).
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (wasVisible !== visible) {
+    setWasVisible(visible);
     if (visible) setNote('');
-  }, [visible]);
+  }
 
   const isRemove = mode === 'remove_listing';
 

@@ -118,9 +118,14 @@ export function OfferSheet({
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!visible) return;
-    setNow(Date.now());
+    // Refresh once right after opening (deferred so the set happens in a
+    // callback, not the effect body), then every minute.
+    const first = setTimeout(() => setNow(Date.now()), 0);
     const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
   }, [visible]);
 
   // Reset the form each time the sheet opens (adjust state during render,

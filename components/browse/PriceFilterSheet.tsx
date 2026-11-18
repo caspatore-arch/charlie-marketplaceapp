@@ -3,7 +3,7 @@
  * Usage: <PriceFilterSheet visible={open} onClose={close} minCents={min} maxCents={max}
  *          onApply={(min, max) => ...} />
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Sheet } from '@/components/ui/Sheet';
 import { Input } from '@/components/ui/Input';
@@ -28,13 +28,19 @@ export function PriceFilterSheet({ visible, onClose, minCents, maxCents, onApply
   const [maxText, setMaxText] = useState(centsToText(maxCents));
   const [error, setError] = useState<string | undefined>();
 
-  useEffect(() => {
-    if (visible) {
+  // Re-seed the inputs whenever the sheet opens or the applied range changes
+  // while it is open (adjust state during render). Closing clears the key so
+  // reopening always re-seeds.
+  const syncKey = visible ? `${minCents ?? ''}|${maxCents ?? ''}` : null;
+  const [lastSyncKey, setLastSyncKey] = useState<string | null>(syncKey);
+  if (lastSyncKey !== syncKey) {
+    setLastSyncKey(syncKey);
+    if (syncKey !== null) {
       setMinText(centsToText(minCents));
       setMaxText(centsToText(maxCents));
       setError(undefined);
     }
-  }, [visible, minCents, maxCents]);
+  }
 
   function apply() {
     const min = minText.trim() ? Math.round(Number(minText) * 100) : undefined;
@@ -59,22 +65,26 @@ export function PriceFilterSheet({ visible, onClose, minCents, maxCents, onApply
   return (
     <Sheet visible={visible} onClose={onClose} title="Price range">
       <View style={styles.row}>
-        <Input
-          label="Min"
-          value={minText}
-          onChangeText={setMinText}
-          keyboardType="number-pad"
-          placeholder="$0"
-          style={styles.input}
-        />
-        <Input
-          label="Max"
-          value={maxText}
-          onChangeText={setMaxText}
-          keyboardType="number-pad"
-          placeholder="Any"
-          style={styles.input}
-        />
+        {/* Input's own wrapper is width: 100%, so each one needs a flex
+            wrapper here or the second field is pushed off-screen. */}
+        <View style={styles.field}>
+          <Input
+            label="Min"
+            value={minText}
+            onChangeText={setMinText}
+            keyboardType="number-pad"
+            placeholder="$0"
+          />
+        </View>
+        <View style={styles.field}>
+          <Input
+            label="Max"
+            value={maxText}
+            onChangeText={setMaxText}
+            keyboardType="number-pad"
+            placeholder="Any"
+          />
+        </View>
       </View>
       {error ? (
         <Text variant="caption" color="danger" style={styles.error}>
@@ -91,7 +101,7 @@ export function PriceFilterSheet({ visible, onClose, minCents, maxCents, onApply
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: space.md },
-  input: { flex: 1 },
+  field: { flex: 1, minWidth: 0 },
   error: { marginTop: space.sm },
   actions: { flexDirection: 'row', gap: space.md, marginTop: space.lg },
   actionBtn: { flex: 1 },
